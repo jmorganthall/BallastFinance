@@ -9,11 +9,12 @@ layer — the part that lives in a spreadsheet today.
 
 ## Status
 
-Pre-build. The product abstract is written; the PRD is next, and its open questions are
-still open.
+Building Phase A of v1 — schema, auth, reserve accounts, the package builder, the accrual
+derivations, and the Home/This Week screen. See the PRD for the phase plan.
 
 ## Documents
 
 | Document | What it is |
 | --- | --- |
-| [Product abstract](docs/product-abstract.md) | The problem, v1 scope, core concepts, data-model principles, and the open questions the PRD has to close |
+| [PRD v1](docs/prd.md) | **Source of truth for the build.** Lives in Claude Docs, not in this repo — it changes over time, so read it live rather than trusting a copy |
+| [Product abstract](docs/product-abstract.md) | The problem, v1 scope, core concepts, and data-model principles. Its open-questions list is superseded by the PRD's decisions log |
