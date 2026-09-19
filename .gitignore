@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+.next/
+out/
+build/
+next-env.d.ts
+
+# Production
+dist/
+
+# Environment — never commit secrets (OIDC client secret, DB URL, n8n webhook)
+.env
+.env.*
+!.env.example
+
+# Testing
+coverage/
+
+# Drizzle
+drizzle/meta/_journal.json.bak
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Local Postgres data if run outside Docker volumes
+pgdata/
