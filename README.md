@@ -166,3 +166,12 @@ the owner silently undoes that.
 
 The container bootstrap sets this up on every start, so it is not something anyone has to
 remember.
+
+## License
+
+[GNU AGPL-3.0](LICENSE).
+
+You can run it, change it and share it. If you run a **modified** version as a
+network service, section 13 obliges you to offer your users its source — which is why
+Settings carries a link back here. Running it unmodified for your own household obliges
+you to nothing.

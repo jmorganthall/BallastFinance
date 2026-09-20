@@ -234,6 +234,33 @@ export default async function SettingsPage({
         </p>
       </Card>
 
+      {/*
+        * AGPL §13: a modified version offered over a network must make its
+        * source available to its users. Carrying the link here means anyone who
+        * forks and hosts Ballast complies by default rather than by remembering.
+        */}
+      <p className="mt-8 text-center text-xs text-[var(--color-ink-soft)]">
+        Ballast is free software under the{' '}
+        <a
+          href="https://github.com/jmorganthall/BallastFinance/blob/main/LICENSE"
+          className="underline"
+          target="_blank"
+          rel="noreferrer"
+        >
+          GNU AGPL-3.0
+        </a>
+        .{' '}
+        <a
+          href="https://github.com/jmorganthall/BallastFinance"
+          className="underline"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Source code
+        </a>
+        .
+      </p>
+
       <form action={signOutAction} className="mt-6">
         <button
           type="submit"
