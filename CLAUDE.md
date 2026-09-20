@@ -37,7 +37,8 @@ principles, and they are non-negotiable.
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs |
 | `src/app/` | Screens. They render; they do not calculate |
 | `drizzle/` | Migrations. `0001` is the append-only enforcement — read it before touching events |
-| `scripts/` | Seed, backup, and the Disney demo for checking against the spreadsheet |
+| `scripts/` | Bootstrap, seed, backup, quickstart, and the Disney demo for checking against the spreadsheet |
+| `docker/` | Container entrypoint. Bootstrap runs before the server, then `exec`s it as PID 1 |
 
 ## Things that will bite you
 
@@ -58,7 +59,12 @@ principles, and they are non-negotiable.
   record a correcting event instead.
 - **The app connects as a restricted role** (`ballast_app`); migrations run as
   the owner. Giving the app the owner's credentials silently undoes the
-  append-only guarantee.
+  append-only guarantee. The bootstrap sets that role's password from
+  `APP_DB_PASSWORD` on every start.
+- **The database client connects lazily.** Importing `src/db/client` must never
+  open a connection or throw — `next build` collects page data without any
+  credentials, and a placeholder URL in a Dockerfile is exactly the thing that
+  later gets copied into a deployment.
 - **Nothing is done until a human confirms it.** An issued instruction the user
   ignored must never change a weekly number or a balance.
 
@@ -68,8 +74,13 @@ principles, and they are non-negotiable.
 npm test            # 191 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
-npm run seed        # household, allowlist, reserve accounts
+npm run bootstrap   # migrate + set the app role's password + seed, as the container does
+npm run seed        # just the household, allowlist and reserve accounts
 ```
+
+`./scripts/quickstart.sh` brings the whole stack up in Docker from nothing. The
+container runs `scripts/bootstrap.ts` on every start, so there are no manual
+first-run steps and no `ALTER ROLE` buried in a runbook.
 
 Database tests need a live PostgreSQL 16 and run against it for real — the
 acceptance criteria are about what the app produces, not what a pure function

@@ -2,9 +2,11 @@
  * Seed the household (PRD §2: "This family is household #1").
  *
  * Creates the household, the signup allowlist, and the reserve accounts that
- * mirror the real Capital One 360 accounts. Idempotent: safe to re-run.
+ * mirror the real Capital One 360 accounts. Idempotent: safe to re-run, and
+ * safe to run on every container start.
  *
- *   npx tsx scripts/seed.ts
+ * Standalone:  npx tsx scripts/seed.ts
+ * On boot:     called by scripts/bootstrap.ts
  */
 
 import { drizzle } from 'drizzle-orm/postgres-js'
@@ -12,65 +14,107 @@ import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '../src/db/schema'
 
-const HOUSEHOLD = 'Morganthall'
-const ALLOWED = (process.env.SEED_ALLOWED_EMAILS ?? '').split(',').map((e) => e.trim()).filter(Boolean)
-const ACCOUNTS = [
+export const DEFAULT_HOUSEHOLD = 'Morganthall'
+export const DEFAULT_ACCOUNTS = [
   'Annual Expenses',
   'Gifts & Giving',
   'Long Term Savings',
   '911 Fund',
 ]
 
-async function main() {
-  const url = process.env.DATABASE_MIGRATION_URL ?? process.env.DATABASE_URL
-  if (!url) throw new Error('Set DATABASE_URL')
+type Db = ReturnType<typeof drizzle<typeof schema>>
 
-  const client = postgres(url, { max: 2, prepare: false })
-  const db = drizzle(client, { schema })
+export interface SeedResult {
+  householdId: string
+  createdHousehold: boolean
+  allowedEmails: string[]
+  accounts: string[]
+}
+
+export async function seedHousehold(
+  db: Db,
+  options: {
+    householdName?: string
+    allowedEmails?: string[]
+    accounts?: string[]
+    log?: (message: string) => void
+  } = {},
+): Promise<SeedResult> {
+  const householdName = options.householdName ?? DEFAULT_HOUSEHOLD
+  const accounts = options.accounts ?? DEFAULT_ACCOUNTS
+  const emails = (options.allowedEmails ?? [])
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean)
+  const log = options.log ?? (() => {})
 
   let [household] = await db
     .select()
     .from(schema.households)
-    .where(eq(schema.households.name, HOUSEHOLD))
+    .where(eq(schema.households.name, householdName))
 
+  let createdHousehold = false
   if (!household) {
     ;[household] = await db
       .insert(schema.households)
-      .values({ name: HOUSEHOLD, timezone: 'America/Chicago' })
+      .values({ name: householdName, timezone: 'America/Chicago' })
       .returning()
-    console.log(`created household ${HOUSEHOLD}`)
-  } else {
-    console.log(`household ${HOUSEHOLD} already exists`)
+    createdHousehold = true
+    log(`created household "${householdName}"`)
   }
+  if (!household) throw new Error('could not create the household')
 
-  if (ALLOWED.length === 0) {
-    console.log('no SEED_ALLOWED_EMAILS set — nobody can sign in yet')
-  }
-  for (const email of ALLOWED) {
+  for (const email of emails) {
     await db
       .insert(schema.allowedEmails)
-      .values({ email: email.toLowerCase(), householdId: household!.id })
+      .values({ email, householdId: household.id })
       .onConflictDoNothing()
-    console.log(`allowed ${email}`)
+    log(`allowed ${email}`)
   }
 
-  for (const name of ACCOUNTS) {
+  for (const name of accounts) {
     await db
       .insert(schema.reserveAccounts)
       .values({
-        householdId: household!.id,
+        householdId: household.id,
         name,
         institutionLabel: `Capital One 360 — ${name}`,
       })
       .onConflictDoNothing()
-    console.log(`reserve account ${name}`)
   }
+  log(`${accounts.length} reserve accounts present`)
 
+  return {
+    householdId: household.id,
+    createdHousehold,
+    allowedEmails: emails,
+    accounts,
+  }
+}
+
+/** Run directly: npx tsx scripts/seed.ts */
+async function main(): Promise<void> {
+  const url = process.env.DATABASE_MIGRATION_URL ?? process.env.DATABASE_URL
+  if (!url) throw new Error('Set DATABASE_URL (or DATABASE_MIGRATION_URL)')
+
+  const client = postgres(url, { max: 2, prepare: false })
+  const db = drizzle(client, { schema })
+
+  const result = await seedHousehold(db, {
+    allowedEmails: (process.env.SEED_ALLOWED_EMAILS ?? '').split(','),
+    log: (m) => console.log(m),
+  })
+
+  if (result.allowedEmails.length === 0) {
+    console.log('\nno SEED_ALLOWED_EMAILS set — nobody can sign in yet')
+  }
   await client.end()
   console.log('\nseed complete')
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exit(1)
-})
+// Only when executed as a script, not when imported by the bootstrap.
+if (process.argv[1] && /seed\.(ts|js|mjs)$/.test(process.argv[1])) {
+  main().catch((error) => {
+    console.error(error)
+    process.exit(1)
+  })
+}

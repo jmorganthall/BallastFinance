@@ -14,7 +14,9 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "demo": "tsx scripts/demo-disney.ts",
-    "seed": "tsx scripts/seed.ts"
+    "seed": "tsx scripts/seed.ts",
+    "build:bootstrap": "esbuild scripts/bootstrap.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/bootstrap.mjs --log-level=warning",
+    "bootstrap": "tsx scripts/bootstrap.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
