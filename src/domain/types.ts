@@ -94,6 +94,21 @@ export interface LineItemChange {
 }
 
 /**
+ * When a line item's current accrual cycle began, and what was already set
+ * aside for it at that moment (PRD §5). Three things start a cycle: the
+ * package commit (with the opening balance declared then, split across its
+ * parts by cost), a part added to a plan that is already live, and a
+ * recurring item being confirmed spent, which starts the next cycle at $0.
+ * Anything before the latest start is a settled cycle and does not touch the
+ * current one's math.
+ */
+export interface LineItemCycle {
+  lineItemId: Id
+  startDate: CivilDate
+  openingCents: Cents
+}
+
+/**
  * A catch-up accepted at a check-in (PRD §5: "Drift adjustments accepted at a
  * check-in also become catch-up components"). Account-level, because a check-in
  * confirms an account balance rather than a single item.

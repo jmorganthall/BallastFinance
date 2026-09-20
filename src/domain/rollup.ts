@@ -27,6 +27,7 @@ import {
   type Id,
   type LineItem,
   type LineItemChange,
+  type LineItemCycle,
   type Package,
   type ReserveAccount,
 } from './types'
@@ -38,6 +39,22 @@ export interface DerivationInput {
   lineItems: readonly LineItem[]
   changes?: readonly LineItemChange[]
   driftAdjustments?: readonly DriftAdjustment[]
+  /** Cycle starts and opening balances, per item. Absent means "since commit, from $0". */
+  cycleStarts?: readonly LineItemCycle[]
+}
+
+/**
+ * The cycle an item is in today: the latest start on or before today. An
+ * item with no recorded start is in its first cycle, from the commit, at $0.
+ */
+export function currentCycle(
+  lineItemId: Id,
+  cycles: readonly LineItemCycle[],
+  today: CivilDate,
+): LineItemCycle | null {
+  return cycles
+    .filter((c) => c.lineItemId === lineItemId && compareDates(c.startDate, today) <= 0)
+    .sort((a, b) => compareDates(b.startDate, a.startDate))[0] ?? null
 }
 
 export interface LineItemView {
@@ -84,12 +101,16 @@ function viewLineItem(args: {
   pkg: Package
   today: CivilDate
   changes: readonly LineItemChange[]
+  cycles: readonly LineItemCycle[]
 }): LineItemView {
   const { lineItem, pkg, today, changes } = args
+  const cycle = currentCycle(lineItem.id, args.cycles, today)
   const components = componentsForLineItem({
     lineItem,
     commitDate: effectiveCommitDate(pkg, today),
     changes,
+    cycleStartDate: cycle?.startDate,
+    openingCents: cycle?.openingCents,
   })
   const totalCents = lineItemTotalCents(lineItem)
   const shouldHaveSavedCents = shouldHaveSavedForItem(components, today, totalCents)
@@ -113,11 +134,12 @@ function isLive(pkg: Package, item: LineItem): boolean {
 export function packageViews(input: DerivationInput): PackageView[] {
   const { today, packages, lineItems } = input
   const changes = input.changes ?? []
+  const cycles = input.cycleStarts ?? []
 
   return packages.map((pkg) => {
     const items = lineItems
       .filter((li) => li.packageId === pkg.id)
-      .map((lineItem) => viewLineItem({ lineItem, pkg, today, changes }))
+      .map((lineItem) => viewLineItem({ lineItem, pkg, today, changes, cycles }))
 
     const live = items.filter((v) => v.lineItem.state !== 'retired')
     const components = live.flatMap((v) => v.components)
@@ -136,6 +158,7 @@ export function accountViews(input: DerivationInput): AccountView[] {
   const { today, accounts, packages, lineItems } = input
   const changes = input.changes ?? []
   const adjustments = input.driftAdjustments ?? []
+  const cycles = input.cycleStarts ?? []
   const packagesById = new Map(packages.map((p) => [p.id, p]))
 
   return accounts.map((account) => {
@@ -145,7 +168,7 @@ export function accountViews(input: DerivationInput): AccountView[] {
       if (lineItem.reserveAccountId !== account.id) continue
       const pkg = packagesById.get(lineItem.packageId)
       if (!pkg || !isLive(pkg, lineItem)) continue
-      items.push(viewLineItem({ lineItem, pkg, today, changes }))
+      items.push(viewLineItem({ lineItem, pkg, today, changes, cycles }))
     }
 
     const components = [
@@ -324,6 +347,58 @@ export function aheadOptions(args: {
     leftoverCents: extraCents - amountCents,
   })
   return options
+}
+
+/**
+ * The best thing to do with money an account holds beyond what its plans have
+ * accrued: count it toward those plans. Soonest due first, because the plan
+ * that needs its money first is the one a shortfall would hurt, and each part
+ * takes at most what it still lacks. What every part is then holding becomes
+ * its new opening balance, so the weekly number drops and "should hold"
+ * rises to match what is actually there. Anything left after every part is
+ * fully funded is a genuine surplus, which the caller decides about.
+ */
+export interface OpeningAssignment {
+  lineItemId: Id
+  label: string
+  dueDate: CivilDate
+  /** Money from the extra counted toward this part. */
+  addedCents: Cents
+  /** What the part holds after that: its new opening balance. */
+  openingCents: Cents
+  /** True when the part is now fully funded. */
+  fullyFunded: boolean
+}
+
+export function assignExtraToPlans(args: {
+  extraCents: Cents
+  items: readonly Pick<LineItemView, 'lineItem' | 'totalCents' | 'shouldHaveSavedCents'>[]
+}): { assignments: OpeningAssignment[]; leftoverCents: Cents } {
+  let remaining = Math.max(0, args.extraCents)
+  const assignments: OpeningAssignment[] = []
+
+  const ordered = [...args.items].sort(
+    (a, b) =>
+      compareDates(a.lineItem.dueDate, b.lineItem.dueDate) ||
+      a.lineItem.label.localeCompare(b.lineItem.label),
+  )
+  for (const item of ordered) {
+    const lacks = Math.max(0, item.totalCents - item.shouldHaveSavedCents)
+    const added = Math.min(lacks, remaining)
+    if (added <= 0) continue
+    remaining -= added
+    const openingCents = item.shouldHaveSavedCents + added
+    assignments.push({
+      lineItemId: item.lineItem.id,
+      label: item.lineItem.label,
+      dueDate: item.lineItem.dueDate,
+      addedCents: added,
+      openingCents,
+      fullyFunded: openingCents >= item.totalCents,
+    })
+  }
+
+  return { assignments, leftoverCents: remaining }
 }
 
 function addWeeks(d: CivilDate, weeks: number): CivilDate {

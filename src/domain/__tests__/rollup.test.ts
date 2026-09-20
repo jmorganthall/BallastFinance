@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   accountViews,
   aheadOptions,
+  assignExtraToPlans,
   catchUpOptions,
   computeDrift,
   packageViews,
@@ -244,6 +245,131 @@ describe('drift and catch-up', () => {
     const after = accountViews(withAdjustment)[0]!.weekly.totalPerWeekCents
     expect(after).toBeGreaterThan(before)
     expect(accountViews(withAdjustment)[0]!.weekly.catchUp).toHaveLength(1)
+  })
+})
+
+describe('cycles and opening balances', () => {
+  // $600 committed 2026-09-19, due 2027-01-16: 17 transfer weeks.
+  const input: DerivationInput = {
+    today: TODAY,
+    accounts: [annual],
+    packages: [pkg()],
+    lineItems: [li({ id: 'li-ins', unitAmountCents: 60000 })],
+  }
+
+  it('starts from the commit at $0 when no cycle is recorded', () => {
+    const [view] = packageViews(input)
+    expect(view!.items[0]!.shouldHaveSavedCents).toBe(0)
+    expect(view!.weekly.totalPerWeekCents).toBe(3530)
+  })
+
+  it('counts an opening balance as already delivered and spreads only the rest', () => {
+    const withOpening: DerivationInput = {
+      ...input,
+      cycleStarts: [{ lineItemId: 'li-ins', startDate: TODAY, openingCents: 26000 }],
+    }
+    const [view] = packageViews(withOpening)
+    // $260 already there, $340 over 17 weeks.
+    expect(view!.items[0]!.shouldHaveSavedCents).toBe(26000)
+    expect(view!.weekly.totalPerWeekCents).toBe(2000)
+    expect(view!.items[0]!.remainingCents).toBe(34000)
+  })
+
+  it('never lets an opening balance exceed what the item costs', () => {
+    const [view] = packageViews({
+      ...input,
+      cycleStarts: [{ lineItemId: 'li-ins', startDate: TODAY, openingCents: 99999999 }],
+    })
+    expect(view!.items[0]!.shouldHaveSavedCents).toBe(60000)
+    expect(view!.weekly.totalPerWeekCents).toBe(0)
+  })
+
+  it('uses the latest cycle start on or before today, ignoring one still ahead', () => {
+    const later: DerivationInput = {
+      ...input,
+      today: '2026-11-21',
+      lineItems: [li({ id: 'li-ins', unitAmountCents: 60000, dueDate: '2027-11-20', recurrence: 'annual' })],
+      cycleStarts: [
+        { lineItemId: 'li-ins', startDate: TODAY, openingCents: 26000 },
+        // Confirmed spent and rolled forward on 2026-11-20: a fresh cycle at $0.
+        { lineItemId: 'li-ins', startDate: '2026-11-20', openingCents: 0 },
+        { lineItemId: 'li-ins', startDate: '2027-01-01', openingCents: 50000 },
+      ],
+    }
+    const [view] = packageViews(later)
+    // One transfer (Saturday 2026-11-21) into a cycle from Friday 2026-11-20 to
+    // Saturday 2027-11-20, which holds 53 transfer days, at $0 saved.
+    expect(view!.items[0]!.components[0]!.startDate).toBe('2026-11-20')
+    expect(view!.items[0]!.components).toHaveLength(1)
+    expect(view!.items[0]!.shouldHaveSavedCents).toBe(1133) // ceil(60000 / 53)
+  })
+
+  it('keeps an edit made during a settled cycle out of the new one', () => {
+    const rolled: DerivationInput = {
+      ...input,
+      today: '2026-12-05',
+      lineItems: [li({ id: 'li-ins', unitAmountCents: 60000, dueDate: '2027-11-20', recurrence: 'annual' })],
+      changes: [
+        {
+          lineItemId: 'li-ins',
+          occurredAt: '2026-10-10',
+          before: { unitAmountCents: 50000, quantity: 1, dueDate: '2026-11-20', reserveAccountId: annual.id },
+          after: { unitAmountCents: 60000, quantity: 1, dueDate: '2026-11-20', reserveAccountId: annual.id },
+        },
+      ],
+      cycleStarts: [{ lineItemId: 'li-ins', startDate: '2026-11-20', openingCents: 0 }],
+    }
+    const [view] = packageViews(rolled)
+    expect(view!.items[0]!.components.map((c) => c.kind)).toEqual(['base'])
+  })
+})
+
+describe('counting an overage toward the plans', () => {
+  const item = (id: string, label: string, dueDate: string, totalCents: number, saved: number) => ({
+    lineItem: li({ id, label, dueDate, unitAmountCents: totalCents }),
+    totalCents,
+    shouldHaveSavedCents: saved,
+  })
+
+  it('funds the soonest-due part first, then the next, and stops when the extra runs out', () => {
+    const { assignments, leftoverCents } = assignExtraToPlans({
+      extraCents: 80000,
+      items: [
+        item('xmas', 'Christmas', '2026-12-19', 100000, 20000),
+        item('ins', 'Insurance', '2026-11-01', 60000, 10000),
+        item('trip', 'Trip', '2027-06-01', 300000, 0),
+      ],
+    })
+    expect(assignments.map((a) => a.label)).toEqual(['Insurance', 'Christmas'])
+    expect(assignments[0]).toMatchObject({ addedCents: 50000, openingCents: 60000, fullyFunded: true })
+    expect(assignments[1]).toMatchObject({ addedCents: 30000, openingCents: 50000, fullyFunded: false })
+    expect(leftoverCents).toBe(0)
+  })
+
+  it('reports what is left once every part is fully funded', () => {
+    const { assignments, leftoverCents } = assignExtraToPlans({
+      extraCents: 492510,
+      items: [item('ins', 'Insurance', '2026-11-01', 60000, 10000)],
+    })
+    expect(assignments).toHaveLength(1)
+    expect(assignments[0]!.openingCents).toBe(60000)
+    expect(leftoverCents).toBe(492510 - 50000)
+  })
+
+  it('skips a part that already holds everything it needs', () => {
+    const { assignments } = assignExtraToPlans({
+      extraCents: 1000,
+      items: [item('done', 'Done', '2026-11-01', 60000, 60000), item('open', 'Open', '2026-12-01', 5000, 0)],
+    })
+    expect(assignments.map((a) => a.label)).toEqual(['Open'])
+  })
+
+  it('has nothing to say with no extra or no plans', () => {
+    expect(assignExtraToPlans({ extraCents: 0, items: [item('a', 'A', '2026-11-01', 100, 0)] })).toEqual({
+      assignments: [],
+      leftoverCents: 0,
+    })
+    expect(assignExtraToPlans({ extraCents: 500, items: [] })).toEqual({ assignments: [], leftoverCents: 500 })
   })
 })
 
