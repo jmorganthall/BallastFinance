@@ -9,9 +9,9 @@
  * behaves: nothing is recorded until the confirm button is pressed.
  */
 
-import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Money, PageHeader } from '@/components/ui'
+import { DebtShare } from '@/components/debt-share'
 import { runAllocationAction } from '@/server/actions'
 import { formatCents, parseAmountToCents } from '@/domain'
 
@@ -144,56 +144,7 @@ export default async function AllocatePage({
                         </p>
                       ) : null}
 
-                      {share.destination === 'debt' ? (
-                        optimised && optimised.allocations.length > 0 ? (
-                          <div className="mt-2 rounded-lg bg-[var(--color-surface)] p-3 text-sm">
-                            <p>{optimised.why}</p>
-                            <ul className="mt-3 space-y-2">
-                              {optimised.allocations.map((allocation) => (
-                                <li
-                                  key={allocation.debtId}
-                                  className="flex items-start justify-between gap-3"
-                                >
-                                  <span>
-                                    <span className="font-medium">{allocation.debtName}</span>
-                                    {allocation.clearsIt ? (
-                                      <span className="ml-2 align-middle">
-                                        <Pill tone="ahead">Paid off</Pill>
-                                      </span>
-                                    ) : null}
-                                    <span className="mt-0.5 block text-xs text-[var(--color-ink-soft)]">
-                                      {allocation.reason}
-                                    </span>
-                                  </span>
-                                  <span className="shrink-0 font-medium tabular">
-                                    <Money cents={allocation.amountCents} />
-                                  </span>
-                                </li>
-                              ))}
-                            </ul>
-                            {optimised.unallocatedCents > 0 ? (
-                              <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
-                                <Money cents={optimised.unallocatedCents} /> is left over after
-                                clearing every debt — you will be asked where it goes.
-                              </p>
-                            ) : null}
-                            <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
-                              Same order as the Debts screen, at your normal setting.{' '}
-                              <Link href="/debts" className="underline">
-                                Change the order
-                              </Link>
-                            </p>
-                          </div>
-                        ) : (
-                          <p className="mt-2 rounded-lg bg-[var(--color-surface)] p-3 text-sm text-[var(--color-ink-soft)]">
-                            No debts recorded yet, so this has nowhere specific to go.{' '}
-                            <Link href="/debts" className="underline">
-                              Add your debts
-                            </Link>{' '}
-                            and Ballast will name which one to pay.
-                          </p>
-                        )
-                      ) : null}
+                      {share.destination === 'debt' ? <DebtShare optimised={optimised} /> : null}
                     </Card>
                   </li>
                 ))}

@@ -864,7 +864,6 @@ export class Engine {
     minPaymentRule: MinPaymentRule
     promoRules?: PromoRule[]
     creditLimitCents?: Cents | null
-    fixedPayment?: boolean
   }): Promise<Debt> {
     validateDebtInputs({
       balanceCents: input.balanceCents,
@@ -888,7 +887,6 @@ export class Engine {
         promoRules: input.promoRules ?? [],
         minPaymentRule: input.minPaymentRule,
         creditLimitCents: input.creditLimitCents ?? null,
-        fixedPayment: input.fixedPayment ?? false,
         state: 'open',
       })
       .returning()

@@ -18,6 +18,7 @@ import {
   updateDebtBalanceAction,
 } from '@/server/actions'
 import { balanceFreshness, formatCents, parseAmountToCents, projectPayoff } from '@/domain'
+import { PayoffImpact } from '@/components/payoff-impact'
 import { DebtForm } from './debt-form'
 
 const smallField =
@@ -316,40 +317,28 @@ export default async function DebtsPage({
             {optimisation ? (
               <div className="mt-4 border-t border-[var(--color-line)] pt-4">
                 <p className="text-sm">{optimisation.why}</p>
+                <div className="mt-3">
+                  <PayoffImpact result={optimisation} />
+                </div>
 
-                <ul className="mt-3 space-y-2">
+                <ul className="mt-3 divide-y divide-[var(--color-line)]">
                   {optimisation.allocations.map((allocation) => (
-                    <li
-                      key={allocation.debtId}
-                      className="rounded-lg bg-[var(--color-surface)] p-3 text-sm"
-                    >
-                      <div className="flex justify-between gap-3 font-medium">
-                        <span>{allocation.debtName}</span>
-                        <span className="tabular">
+                    <li key={allocation.debtId} className="py-3 text-sm last:pb-0">
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="font-medium">{allocation.debtName}</span>
+                          {allocation.clearsIt ? <Pill tone="ahead">Paid off</Pill> : null}
+                        </span>
+                        <span className="shrink-0 font-semibold tabular">
                           <Money cents={allocation.amountCents} />
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                      <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
                         {allocation.reason}
                       </p>
                     </li>
                   ))}
                 </ul>
-
-                <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <dt className="text-[var(--color-ink-soft)]">Freed each month</dt>
-                    <dd className="font-medium">
-                      <Money cents={optimisation.monthlyFreedCents} />
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[var(--color-ink-soft)]">Interest saved this year</dt>
-                    <dd className="font-medium">
-                      <Money cents={optimisation.interestAvoidedCents} />
-                    </dd>
-                  </div>
-                </dl>
               </div>
             ) : null}
           </Card>

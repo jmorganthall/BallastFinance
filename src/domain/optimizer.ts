@@ -24,6 +24,7 @@ import {
   effectiveAprBasisPoints,
   interestOverNextYearCents,
   minimumPaymentCents,
+  projectPayoff,
   type Debt,
 } from './debt'
 import type { Id } from './types'
@@ -37,6 +38,14 @@ export interface OptimizerAllocation {
   /** True when this payment clears the debt outright. */
   clearsIt: boolean
   monthlyFreedCents: Cents
+  /**
+   * Interest this payment stops from ever being charged, over the rest of the
+   * debt's life at its minimum. Null when the debt would never be paid off at
+   * its minimum, because then "the rest of its life" has no end.
+   */
+  lifetimeInterestAvoidedCents: Cents | null
+  /** How many months sooner the debt is gone. Null when it never would be. */
+  monthsSooner: number | null
   reason: string
 }
 
@@ -46,8 +55,14 @@ export interface OptimizerResult {
   unallocatedCents: Cents
   /** Headline one: monthly obligation removed. */
   monthlyFreedCents: Cents
-  /** Headline two: interest this avoids over the next twelve months. */
+  /** Headline two: interest this avoids over the next twelve months. Always known. */
   interestAvoidedCents: Cents
+  /**
+   * Headline two, the long view: interest never paid over the life of every
+   * debt touched. Null when any of them would never be paid off at its
+   * minimum, in which case the twelve-month figure is the honest one.
+   */
+  lifetimeInterestAvoidedCents: Cents | null
   why: string
 }
 
@@ -86,6 +101,7 @@ export function optimiseLumpSum(args: {
     unallocatedCents: args.amountCents,
     monthlyFreedCents: 0,
     interestAvoidedCents: 0,
+    lifetimeInterestAvoidedCents: 0,
     why: 'There is nothing to pay off.',
   }
   if (open.length === 0 || args.amountCents <= 0) return empty
@@ -110,6 +126,30 @@ export function optimiseLumpSum(args: {
   const allocations: OptimizerAllocation[] = []
   const used = new Set<Id>()
 
+  /**
+   * What paying `amountCents` at this debt does over the rest of its life:
+   * the interest that is never charged and the months knocked off, both
+   * against leaving it at its minimum. A debt that never clears at its
+   * minimum has no "rest of its life" to compare, so both come back null.
+   */
+  const lifetime = (debt: Debt, amountCents: Cents) => {
+    const before = projectPayoff({ debt, today: args.today, leadWeeks })
+    if (before.months === null) return { interest: null, months: null }
+    if (amountCents >= debt.balanceCents) {
+      return { interest: before.totalInterestCents, months: before.months }
+    }
+    const after = projectPayoff({
+      debt: { ...debt, balanceCents: debt.balanceCents - amountCents },
+      today: args.today,
+      leadWeeks,
+    })
+    if (after.months === null) return { interest: null, months: null }
+    return {
+      interest: before.totalInterestCents - after.totalInterestCents,
+      months: before.months - after.months,
+    }
+  }
+
   // 1. Promo cliffs this amount can actually clear, soonest deadline first.
   const urgentClearable = candidates
     .filter((c) => c.urgent && c.debt.balanceCents <= remaining)
@@ -119,12 +159,15 @@ export function optimiseLumpSum(args: {
     if (candidate.debt.balanceCents > remaining) continue
     remaining -= candidate.debt.balanceCents
     used.add(candidate.debt.id)
+    const life = lifetime(candidate.debt, candidate.debt.balanceCents)
     allocations.push({
       debtId: candidate.debt.id,
       debtName: candidate.debt.name,
       amountCents: candidate.debt.balanceCents,
       clearsIt: true,
       monthlyFreedCents: candidate.minimum,
+      lifetimeInterestAvoidedCents: life.interest,
+      monthsSooner: life.months,
       reason: 'Its promotional rate is about to end — clearing it now beats paying interest on it later.',
     })
   }
@@ -138,12 +181,15 @@ export function optimiseLumpSum(args: {
     if (candidate.debt.balanceCents > remaining) continue
     remaining -= candidate.debt.balanceCents
     used.add(candidate.debt.id)
+    const life = lifetime(candidate.debt, candidate.debt.balanceCents)
     allocations.push({
       debtId: candidate.debt.id,
       debtName: candidate.debt.name,
       amountCents: candidate.debt.balanceCents,
       clearsIt: true,
       monthlyFreedCents: candidate.minimum,
+      lifetimeInterestAvoidedCents: life.interest,
+      monthsSooner: life.months,
       reason: `Paying it off completely frees ${formatCents(candidate.minimum)} a month.`,
     })
   }
@@ -155,19 +201,33 @@ export function optimiseLumpSum(args: {
       .sort((a, b) => b.apr - a.apr || b.score - a.score)[0]
 
     if (target) {
+      const life = lifetime(target.debt, remaining)
+      const sooner =
+        life.months !== null && life.months > 0
+          ? ` Gone ${life.months === 1 ? 'a month' : `${life.months} months`} sooner.`
+          : ''
       allocations.push({
         debtId: target.debt.id,
         debtName: target.debt.name,
         amountCents: remaining,
         clearsIt: false,
         monthlyFreedCents: 0,
-        reason: `It is the most expensive debt left at ${(target.apr / 100).toFixed(2)}%, so every dollar here avoids the most interest.`,
+        lifetimeInterestAvoidedCents: life.interest,
+        monthsSooner: life.months,
+        reason: `It is the most expensive debt left at ${(target.apr / 100).toFixed(2)}%, so every dollar here avoids the most interest.${sooner}`,
       })
       remaining = 0
     }
   }
 
   const monthlyFreedCents = allocations.reduce((s, a) => s + a.monthlyFreedCents, 0)
+
+  // The long view is only honest when every debt touched has an end.
+  const lifetimeInterestAvoidedCents = allocations.every(
+    (a) => a.lifetimeInterestAvoidedCents !== null,
+  )
+    ? allocations.reduce((s, a) => s + (a.lifetimeInterestAvoidedCents ?? 0), 0)
+    : null
 
   // Interest avoided: the full next-twelve-months interest of anything cleared,
   // plus a proportional share for a partial payment.
@@ -185,16 +245,18 @@ export function optimiseLumpSum(args: {
     unallocatedCents: remaining,
     monthlyFreedCents,
     interestAvoidedCents,
-    why: buildWhy(allocations, monthlyFreedCents, interestAvoidedCents, remaining),
+    lifetimeInterestAvoidedCents,
+    why: buildWhy(allocations, remaining),
   }
 }
 
-function buildWhy(
-  allocations: readonly OptimizerAllocation[],
-  monthlyFreedCents: Cents,
-  interestAvoidedCents: Cents,
-  unallocatedCents: Cents,
-): string {
+/**
+ * The story, without the numbers: what gets cleared and where the rest goes.
+ * The headline figures (cash back each month, interest never paid) are shown
+ * as figures beside it, so repeating them here would be reading the same
+ * sentence twice.
+ */
+function buildWhy(allocations: readonly OptimizerAllocation[], unallocatedCents: Cents): string {
   if (allocations.length === 0) return 'There is nothing to pay off.'
 
   const cleared = allocations.filter((a) => a.clearsIt)
@@ -210,15 +272,13 @@ function buildWhy(
 
   const partial = allocations.find((a) => !a.clearsIt)
   if (partial) {
-    parts.push(`The rest goes at ${partial.debtName}, the most expensive one left.`)
+    parts.push(
+      cleared.length > 0
+        ? `The rest goes at ${partial.debtName}, the most expensive one left.`
+        : `It goes at ${partial.debtName}, the most expensive one.`,
+    )
   }
 
-  if (monthlyFreedCents > 0) {
-    parts.push(`You get ${formatCents(monthlyFreedCents)} a month back.`)
-  }
-  if (interestAvoidedCents > 0) {
-    parts.push(`It saves about ${formatCents(interestAvoidedCents)} of interest over the next year.`)
-  }
   if (unallocatedCents > 0) {
     // Everything is cleared and money remains. Saying nothing would leave the
     // household believing it was all spent.

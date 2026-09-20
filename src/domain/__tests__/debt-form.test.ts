@@ -38,7 +38,6 @@ describe('the add-a-debt form, parsed', () => {
       minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 3000 },
       promoRules: [],
       creditLimitCents: 1500000,
-      fixedPayment: false,
     })
   })
 
@@ -123,13 +122,11 @@ describe('the add-a-debt form, parsed', () => {
     data.set('apr', '6.5%')
     data.set('min_type', 'fixed')
     data.set('min_amount', '250')
-    data.set('fixed_payment', 'on')
     data.set('has_promo', 'on')
     data.set('promo_rate', '0')
     data.set('promo_until', '2027-01-15')
 
     const values = debtFormValuesFrom((name) => data.get(name))
-    expect(values.fixed_payment).toBe(true)
     expect(values.has_promo).toBe(true)
     expect(values.credit_limit).toBe('')
 
@@ -138,7 +135,7 @@ describe('the add-a-debt form, parsed', () => {
     if (!result.ok) return
     expect(result.input.category).toBe('auto')
     expect(result.input.aprBasisPoints).toBe(650)
-    expect(result.input.fixedPayment).toBe(true)
+    expect(result.input.minPaymentRule).toEqual({ type: 'fixed', amountCents: 25000 })
     expect(result.input.promoRules[0]!.untilDate).toBe('2027-01-15')
   })
 })

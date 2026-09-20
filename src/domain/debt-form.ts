@@ -28,7 +28,6 @@ export interface DebtFormValues {
   has_promo: boolean
   promo_rate: string
   promo_until: string
-  fixed_payment: boolean
 }
 
 export type DebtFormField = keyof DebtFormValues
@@ -46,7 +45,6 @@ export interface DebtInput {
   minPaymentRule: MinPaymentRule
   promoRules: PromoRule[]
   creditLimitCents: Cents | null
-  fixedPayment: boolean
 }
 
 export const EMPTY_DEBT_FORM: DebtFormValues = {
@@ -62,7 +60,6 @@ export const EMPTY_DEBT_FORM: DebtFormValues = {
   has_promo: false,
   promo_rate: '',
   promo_until: '',
-  fixed_payment: false,
 }
 
 const CATEGORIES: readonly DebtCategory[] = ['consumer', 'auto', 'mortgage']
@@ -168,7 +165,6 @@ export function parseDebtForm(values: DebtFormValues): DebtFormResult {
       minPaymentRule: minPaymentRule!,
       promoRules,
       creditLimitCents,
-      fixedPayment: values.fixed_payment,
     },
   }
 }
@@ -193,6 +189,5 @@ export function debtFormValuesFrom(get: (name: string) => unknown): DebtFormValu
     has_promo: flag('has_promo'),
     promo_rate: text('promo_rate'),
     promo_until: text('promo_until'),
-    fixed_payment: flag('fixed_payment'),
   }
 }
