@@ -52,7 +52,13 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
+            # Explicitly main, not {{is_default_branch}}. That helper reads the
+            # repository's configured default branch, so if the default is ever
+            # something other than main, `latest` silently stops being produced
+            # while everything else still succeeds -- and docker-compose.ghcr.yml
+            # pulls `latest` by default, so the first symptom is someone's pull
+            # failing rather than a red build.
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
           labels: |
             org.opencontainers.image.title=Ballast Finance
             org.opencontainers.image.description=Self-hosted family reservation engine. Never moves money, holds no bank credentials.
