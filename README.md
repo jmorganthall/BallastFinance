@@ -25,6 +25,15 @@ Set the authorised redirect URI to exactly:
 http://localhost:3000/api/auth/callback/google
 ```
 
+Plain `http` is fine here. Google requires HTTPS for redirect URIs but
+[exempts localhost](https://developers.google.com/identity/protocols/oauth2/web-server)
+specifically, so no certificate or tunnel is needed to try it out. The port must match
+what the app is actually served on.
+
+**Then add yourselves as test users.** On the OAuth consent screen, set the user type to
+**External** and add every email that will sign in under *Test users*. An app left in
+*Testing* with an empty test-user list rejects everyone, including you.
+
 Keep the **client ID** and **client secret**.
 
 **2. Run the quick start:**
@@ -63,6 +72,7 @@ and tells you which one.
 | What you see | What it means |
 | --- | --- |
 | `redirect_uri_mismatch` from Google | The redirect URI on the OAuth client must match `AUTH_URL` exactly, including the scheme and port, and end in `/api/auth/callback/google` |
+| `access_denied`, or "app is blocked" | Your Google account is not in the OAuth consent screen's *Test users* list |
 | Sign-in bounces straight back | Your email is not in `SEED_ALLOWED_EMAILS`. Add it and restart the app container — the allowlist is what gates signup |
 | `required variable ... is missing a value` | A secret is not set. Run `./scripts/quickstart.sh`, or fill in `.env` |
 | App container restarts on boot | Read `docker compose logs app`. A failed bootstrap stops the container deliberately rather than serving against a half-migrated database |
@@ -112,6 +122,18 @@ shape (PRD §10):
 3. **One write path.** Everything goes through `src/server/engine.ts`, which is bound to a
    single household at construction — so cross-household access is not something a caller
    has to remember to avoid, it is something they cannot express.
+
+### Why staying in Google's "Testing" mode is fine
+
+Google expires refresh tokens after 7 days for apps in *Testing* status, which breaks a
+lot of self-hosted projects and pushes people into app verification they do not need.
+
+It does not apply here. Ballast never asks Google for offline access, so Google never
+issues a refresh token: it is consulted once, at sign-in, to establish who you are. The
+session after that is Ballast's own cookie, signed with `AUTH_SECRET` and good for 30 days
+(PRD §2 — a check-in that demands a fresh sign-in is a check-in that does not happen).
+
+Two people on a 100-test-user cap will not run out either. Leave it in Testing.
 
 ### The two database roles
 

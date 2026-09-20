@@ -63,6 +63,10 @@ else
     say "and set its authorised redirect URI to:"
     say "  ${AUTH_URL:-http://localhost:3000}/api/auth/callback/google"
     say ""
+    say "Plain http is fine for localhost -- Google exempts it from the HTTPS rule."
+    say "On the consent screen, set the user type to External and add every email"
+    say "that will sign in under Test users, or Google will reject them."
+    say ""
     read -r -p "Google client ID: " AUTH_GOOGLE_ID
   fi
   [ -n "${AUTH_GOOGLE_ID:-}" ] || fail "a Google client ID is required."
