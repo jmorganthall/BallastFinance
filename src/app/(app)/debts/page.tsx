@@ -10,26 +10,17 @@
  */
 
 import { requireEngine } from '@/server/session'
-import { Card, Empty, Hint, humanDate, Money, PageHeader, Pill } from '@/components/ui'
-import {
-  confirmDebtPaymentAction,
-  createDebtAction,
-  setPriorityWeightAction,
-  updateDebtBalanceAction,
-} from '@/server/actions'
-import {
-  balanceFreshness,
-  debtFormValuesOf,
-  formatCents,
-  parseAmountToCents,
-  projectPayoff,
-} from '@/domain'
+import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
+import { setPriorityWeightAction } from '@/server/actions'
+import { balanceFreshness, debtFormValuesOf, parseAmountToCents, projectPayoff } from '@/domain'
 import { PayoffImpact } from '@/components/payoff-impact'
-import { DebtEditor } from './debt-editor'
-import { DebtForm } from './debt-form'
+import { DebtTable, type DebtRow } from './debt-table'
 
-const smallField =
-  'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-2 text-base text-[var(--color-ink)]'
+const KIND: Record<string, string> = {
+  consumer: 'Credit card or loan',
+  auto: 'Car',
+  mortgage: 'Mortgage',
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -68,6 +59,32 @@ export default async function DebtsPage({
   const stale = ladder
     .map((rung) => ({ rung, freshness: balanceFreshness(rung.debt, today) }))
     .filter((entry) => entry.freshness.stale)
+
+  // Everything the table shows, worked out here: the table only renders.
+  const rate = (basisPoints: number) => `${(basisPoints / 100).toFixed(2)}%`
+  const rows: DebtRow[] = ladder.map((rung) => {
+    const projection = projectPayoff({ debt: rung.debt, today })
+    const freshness = balanceFreshness(rung.debt, today)
+    return {
+      id: rung.debt.id,
+      rank: rung.rank,
+      name: rung.debt.name,
+      kind: KIND[rung.debt.category] ?? rung.debt.category,
+      balanceCents: rung.debt.balanceCents,
+      asOf: rung.debt.balanceAsOf,
+      ageDays: freshness.ageDays,
+      stale: freshness.stale,
+      effectiveRate: rate(rung.effectiveAprBasisPoints),
+      listedRate:
+        rung.effectiveAprBasisPoints !== rung.debt.aprBasisPoints ? rate(rung.debt.aprBasisPoints) : null,
+      minimumCents: rung.minimumPaymentCents,
+      payoffDate: projection.payoffDate,
+      cumulativeCostCents: rung.cumulativeCostCents,
+      cumulativeFreedCents: rung.cumulativeFreedPerMonthCents,
+      breakEvenMonths: rung.breakEvenMonths,
+      initial: debtFormValuesOf(rung.debt),
+    }
+  })
 
   return (
     <>
@@ -120,9 +137,14 @@ export default async function DebtsPage({
       ) : null}
 
       {ladder.length === 0 ? (
-        <Empty title="No debts recorded.">
-          <p>Add one below and Ballast will work out the payoff order.</p>
-        </Empty>
+        <>
+          <Empty title="No debts recorded.">
+            <p>Add one below and Ballast will work out the payoff order.</p>
+          </Empty>
+          <div className="mt-4">
+            <DebtTable rows={rows} />
+          </div>
+        </>
       ) : (
         <>
           <Card className="mb-4">
@@ -165,143 +187,7 @@ export default async function DebtsPage({
             ) : null}
           </Card>
 
-          <ol className="space-y-3">
-            {ladder.map((rung) => {
-              const projection = projectPayoff({ debt: rung.debt, today })
-              const freshness = balanceFreshness(rung.debt, today)
-              return (
-                <li key={rung.debt.id}>
-                  <Card>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h2 className="font-semibold">
-                          {rung.rank}. {rung.debt.name}
-                        </h2>
-                        <p className="mt-0.5 text-xs capitalize text-[var(--color-ink-soft)]">
-                          {rung.debt.category}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap justify-end gap-1">
-                        {freshness.stale ? <Pill tone="accent">Check the balance</Pill> : null}
-                        <Pill tone={rung.rank === 1 ? 'accent' : 'neutral'}>
-                          {rung.rank === 1 ? 'Next' : `#${rung.rank}`}
-                        </Pill>
-                      </div>
-                    </div>
-
-                    <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <dt className="text-[var(--color-ink-soft)]">Balance</dt>
-                        <dd className="font-medium">
-                          <Money cents={rung.debt.balanceCents} />
-                        </dd>
-                        <dd
-                          className={`mt-0.5 text-xs ${freshness.stale ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-soft)]'}`}
-                        >
-                          <Hint detail="The date this balance was last confirmed: when the debt was added, a payment was recorded, or a statement balance was typed in.">
-                            {freshness.ageDays === 0
-                              ? 'Checked today'
-                              : `As of ${humanDate(rung.debt.balanceAsOf)}, ${freshness.ageDays} days ago`}
-                          </Hint>
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[var(--color-ink-soft)]">
-                          <Hint detail="The rate it really costs right now, accounting for any promotional rate and how close that is to ending. A 0% deal you cannot clear in time is priced at the rate that comes after it.">
-                            What it really costs
-                          </Hint>
-                        </dt>
-                        <dd className="font-medium">
-                          {(rung.effectiveAprBasisPoints / 100).toFixed(2)}%
-                          {rung.effectiveAprBasisPoints !== rung.debt.aprBasisPoints ? (
-                            <span className="ml-1 text-xs text-[var(--color-ink-soft)]">
-                              (listed {(rung.debt.aprBasisPoints / 100).toFixed(2)}%)
-                            </span>
-                          ) : null}
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[var(--color-ink-soft)]">Minimum each month</dt>
-                        <dd className="font-medium">
-                          <Money cents={rung.minimumPaymentCents} />
-                        </dd>
-                      </div>
-                      <div>
-                        <dt className="text-[var(--color-ink-soft)]">Paid off by</dt>
-                        <dd className="font-medium">
-                          {projection.payoffDate ?? 'Never, at this rate'}
-                        </dd>
-                      </div>
-                    </dl>
-
-                    <p className="mt-3 border-t border-[var(--color-line)] pt-3 text-xs text-[var(--color-ink-soft)]">
-                      Clearing everything down to here costs{' '}
-                      <Money cents={rung.cumulativeCostCents} /> and frees{' '}
-                      <Money cents={rung.cumulativeFreedPerMonthCents} /> a month
-                      {rung.breakEvenMonths !== null
-                        ? ` — it pays for itself in ${rung.breakEvenMonths} months.`
-                        : '.'}
-                    </p>
-
-                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <form action={confirmDebtPaymentAction} className="flex items-end gap-2">
-                        <input type="hidden" name="debt_id" value={rung.debt.id} />
-                        <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
-                          I paid
-                          <input
-                            name="amount"
-                            inputMode="decimal"
-                            placeholder={formatCents(rung.minimumPaymentCents).replace('$', '')}
-                            className={smallField}
-                          />
-                        </label>
-                        <button
-                          type="submit"
-                          className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm"
-                        >
-                          Record
-                        </button>
-                      </form>
-
-                      {/*
-                        * A statement balance, as opposed to a payment: the way to
-                        * bring a stale balance up to date without pretending money
-                        * moved. Interest and new spending change a balance too.
-                        */}
-                      <form
-                        action={updateDebtBalanceAction}
-                        className={`flex items-end gap-2 ${freshness.stale ? 'rounded-lg bg-[var(--color-accent-soft)] p-2 sm:-m-2' : ''}`}
-                      >
-                        <input type="hidden" name="debt_id" value={rung.debt.id} />
-                        <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
-                          The statement says it is
-                          <input
-                            name="balance"
-                            inputMode="decimal"
-                            placeholder={formatCents(rung.debt.balanceCents).replace('$', '')}
-                            className={smallField}
-                          />
-                        </label>
-                        <button
-                          type="submit"
-                          className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm"
-                        >
-                          Update
-                        </button>
-                      </form>
-                    </div>
-
-                    <div className="mt-3 border-t border-[var(--color-line)] pt-3">
-                      <DebtEditor
-                        debt={{ id: rung.debt.id, name: rung.debt.name }}
-                        initial={debtFormValuesOf(rung.debt)}
-                      />
-                    </div>
-                  </Card>
-                </li>
-              )
-            })}
-          </ol>
+          <DebtTable rows={rows} />
 
           <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             Where should a lump sum go?
@@ -359,10 +245,6 @@ export default async function DebtsPage({
         </>
       )}
 
-      <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
-        Add a debt
-      </h2>
-      <DebtForm action={createDebtAction} />
     </>
   )
 }
