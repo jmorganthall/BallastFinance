@@ -120,11 +120,13 @@ describeDb('check-ins, drift and close-out', () => {
 
   it('eases off the weekly number once an accepted cut is confirmed', async () => {
     const before = (await engine.accountViews()).find((v) => v.account.id === accountId)!
+    // Over a different window from the bump above, so the cut ends on its own
+    // date. Two adjustments ending the same day fold into one line on purpose.
     const cut = aheadOptions({
       extraCents: 8000,
       weeklyCents: before.weekly.totalPerWeekCents,
       today,
-      overWeeks: 4,
+      overWeeks: 8,
     }).find((o) => o.kind === 'rate_cut')!
 
     const id = await engine.issueInstruction({
@@ -143,7 +145,11 @@ describeDb('check-ins, drift and close-out', () => {
     const after = (await engine.accountViews()).find((v) => v.account.id === accountId)!
     expect(after.weekly.totalPerWeekCents).toBe(before.weekly.totalPerWeekCents - cut.perWeekCents!)
     expect(after.weekly.totalPerWeekCents).toBeGreaterThanOrEqual(0)
-    expect(after.weekly.catchUp.some((g) => g.perWeekCents < 0)).toBe(true)
+    // It shows as its own "less until" line, and the earlier bump keeps its own.
+    expect(after.weekly.catchUp.find((g) => g.endDate === cut.endDate)?.perWeekCents).toBe(
+      -cut.perWeekCents!,
+    )
+    expect(after.weekly.catchUp).toHaveLength(before.weekly.catchUp.length + 1)
     // What the plan says should be there is untouched by easing off.
     expect(after.shouldHaveSavedCents).toBe(before.shouldHaveSavedCents)
   })
