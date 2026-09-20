@@ -296,6 +296,24 @@ describe('payoff projections', () => {
     expect(projection.payoffDate).toBeNull()
   })
 
+  it('keeps counting when a shrinking balance takes longer than a lifetime', () => {
+    // 2% of the balance against ~1.7%/mo interest shrinks, slowly: the
+    // minimum falls with the balance, so it takes centuries -- but it ends,
+    // and the interest over that life is a real figure, not "never".
+    const d = debt({
+      id: 'a',
+      name: 'Slow card',
+      balanceCents: 1000000,
+      aprBasisPoints: 2049,
+      minPaymentRule: { type: 'percent', basisPoints: 200 },
+    })
+    const projection = projectPayoff({ debt: d, today: TODAY })
+    expect(projection.months).not.toBeNull()
+    expect(projection.months!).toBeGreaterThan(600)
+    expect(projection.payoffDate).not.toBeNull()
+    expect(projection.totalInterestCents).toBeGreaterThan(1000000)
+  })
+
   it('is already done at a zero balance', () => {
     expect(projectPayoff({ debt: debt({ id: 'a', name: 'x', balanceCents: 0 }), today: TODAY }).months).toBe(0)
   })

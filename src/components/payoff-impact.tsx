@@ -1,8 +1,12 @@
 /**
  * What a payoff does, as two figures a person can feel: the cash that comes
- * back every month, and the interest that is never paid. A figure each, with
- * the plain sentence that qualifies it underneath -- not a paragraph of
- * numbers.
+ * back every month, and the interest that is never paid over the rest of the
+ * debts' lives. A figure each, with the plain sentence that qualifies it
+ * underneath -- not a paragraph of numbers.
+ *
+ * The one case with no lifetime figure is a debt whose minimum never covers
+ * its interest: it has no end to add up to, so the tile falls back to the
+ * next twelve months and says, naming the debt, why.
  *
  * Nothing here is computed; the optimizer produced every figure (PRD §10).
  */
@@ -43,6 +47,11 @@ export function PayoffImpact({ result }: { result: OptimizerResult }) {
     .filter((a) => !a.clearsIt && a.monthlyFreedCents > 0)
     .map((a) => a.debtName)
   const lifetime = result.lifetimeInterestAvoidedCents
+  // Debts whose minimum never covers the interest: no end, so no lifetime figure.
+  const endless = result.allocations
+    .filter((a) => a.lifetimeInterestAvoidedCents === null)
+    .map((a) => a.debtName)
+  const touched = result.allocations.map((a) => a.debtName)
 
   return (
     <dl className="grid grid-cols-2 gap-3">
@@ -63,8 +72,8 @@ export function PayoffImpact({ result }: { result: OptimizerResult }) {
         </dd>
         <dd className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
           {lifetime !== null
-            ? 'over the life of these debts, at their minimum payments'
-            : 'in the next year alone: at its minimum, one of these would never be paid off'}
+            ? `over the remaining life of ${joinNames(touched)}, paying only ${touched.length === 1 ? 'its minimum' : 'their minimums'}`
+            : `in the next year alone: at ${endless.length === 1 ? 'its' : 'their'} minimum payment ${joinNames(endless)} never ${endless.length === 1 ? 'gets' : 'get'} smaller, so the interest never stops`}
         </dd>
       </div>
     </dl>
