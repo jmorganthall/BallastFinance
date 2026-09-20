@@ -25,6 +25,7 @@ export async function createPackageAction(
   const quantities = formData.getAll('quantity').map(String)
   const dueDates = formData.getAll('due_date').map(String)
   const accounts = formData.getAll('reserve_account').map(String)
+  const recurrences = formData.getAll('recurrence').map(String)
 
   const lineItems = labels
     .map((label, i) => ({
@@ -33,6 +34,7 @@ export async function createPackageAction(
       quantity: Number(quantities[i] ?? '1') || 1,
       due_date: dueDates[i] ?? '',
       reserve_account: accounts[i] ?? '',
+      recurrence: recurrences[i] || 'none',
     }))
     // An untouched blank row is not an error, it is just not a line item.
     .filter((item) => item.label.trim() !== '' || item.unit_amount.trim() !== '')
@@ -50,41 +52,167 @@ export async function createPackageAction(
   redirect(`/packages/${result.packageId}`)
 }
 
+/** Commit, with the one optional number: how much is already set aside (PRD §5). */
 export async function commitPackageAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
+  const { parseAmountOrNull } = await import('@/domain')
   const packageId = String(formData.get('package_id'))
-  await engine.commitPackage(packageId)
+  const raw = String(formData.get('opening') ?? '').trim()
+  const openingCents = raw === '' ? 0 : parseAmountOrNull(raw)
+  if (openingCents === null || openingCents < 0) {
+    redirect(
+      `/packages/${packageId}?error=${encodeURIComponent('Enter what is already set aside as an amount, like 250, or leave it blank.')}`,
+    )
+  }
+  await engine.commitPackage(packageId, { openingCents: openingCents! })
   revalidatePath('/')
   revalidatePath('/packages')
   revalidatePath(`/packages/${packageId}`)
 }
 
-export async function updateQuantityAction(formData: FormData): Promise<void> {
+const RECURRENCE_VALUES = new Set(['none', 'monthly', 'quarterly', 'semiannual', 'annual'])
+
+function readRecurrence(value: unknown): 'none' | 'monthly' | 'quarterly' | 'semiannual' | 'annual' {
+  const text = String(value ?? 'none')
+  return (RECURRENCE_VALUES.has(text) ? text : 'none') as ReturnType<typeof readRecurrence>
+}
+
+/** Every field of a part, in one save. */
+export async function updateLineItemAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
+  const { parseAmountOrNull } = await import('@/domain')
+  const { EngineError } = await import('@/server/engine')
   const lineItemId = String(formData.get('line_item_id'))
   const packageId = String(formData.get('package_id'))
-  const quantity = Number(formData.get('quantity'))
+  const fail = (message: string): never =>
+    redirect(`/packages/${packageId}?error=${encodeURIComponent(message)}`)
 
-  if (Number.isInteger(quantity) && quantity >= 0) {
-    await engine.updateLineItem(lineItemId, { quantity })
+  const label = String(formData.get('label') ?? '').trim()
+  if (!label) fail('Every part needs a name.')
+  const unitAmountCents = parseAmountOrNull(formData.get('unit_amount') as string)
+  if (unitAmountCents === null || unitAmountCents <= 0) fail('Enter the cost of one as an amount, like 600.')
+  const quantity = Number(formData.get('quantity'))
+  if (!Number.isInteger(quantity) || quantity < 1) fail('How many must be a whole number, at least one.')
+  const dueDate = String(formData.get('due_date') ?? '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) fail('Pick the date it is needed by.')
+  const reserveAccountId = String(formData.get('reserve_account') ?? '')
+  if (!reserveAccountId) fail('Pick the account it is saved in.')
+
+  try {
+    await engine.updateLineItem(lineItemId, {
+      label,
+      unitAmountCents: unitAmountCents!,
+      quantity,
+      dueDate,
+      reserveAccountId,
+      recurrence: readRecurrence(formData.get('recurrence')),
+    })
+  } catch (error) {
+    if (error instanceof EngineError) fail(error.message)
+    throw error
   }
 
   revalidatePath('/')
+  revalidatePath('/packages')
+  revalidatePath(`/packages/${packageId}`)
+  redirect(`/packages/${packageId}?saved=1`)
+}
+
+export async function addLineItemAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull } = await import('@/domain')
+  const { EngineError } = await import('@/server/engine')
+  const packageId = String(formData.get('package_id'))
+  const fail = (message: string): never =>
+    redirect(`/packages/${packageId}?error=${encodeURIComponent(message)}`)
+
+  const label = String(formData.get('label') ?? '').trim()
+  if (!label) fail('Every part needs a name.')
+  const unitAmountCents = parseAmountOrNull(formData.get('unit_amount') as string)
+  if (unitAmountCents === null || unitAmountCents <= 0) fail('Enter the cost of one as an amount, like 600.')
+  const quantity = Number(formData.get('quantity') || '1')
+  if (!Number.isInteger(quantity) || quantity < 1) fail('How many must be a whole number, at least one.')
+  const dueDate = String(formData.get('due_date') ?? '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) fail('Pick the date it is needed by.')
+  const reserveAccountId = String(formData.get('reserve_account') ?? '')
+  if (!reserveAccountId) fail('Pick the account it is saved in.')
+
+  try {
+    await engine.addLineItem(packageId, {
+      label,
+      unitAmountCents: unitAmountCents!,
+      quantity,
+      dueDate,
+      reserveAccountId,
+      recurrence: readRecurrence(formData.get('recurrence')),
+    })
+  } catch (error) {
+    if (error instanceof EngineError) fail(error.message)
+    throw error
+  }
+
+  revalidatePath('/')
+  revalidatePath('/packages')
+  revalidatePath(`/packages/${packageId}`)
+  redirect(`/packages/${packageId}?saved=1`)
+}
+
+export async function retireLineItemAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const lineItemId = String(formData.get('line_item_id'))
+  const packageId = String(formData.get('package_id'))
+  await engine.retireLineItem(lineItemId)
+  revalidatePath('/')
+  revalidatePath('/packages')
   revalidatePath(`/packages/${packageId}`)
 }
 
-export async function updateDueDateAction(formData: FormData): Promise<void> {
+export async function renamePackageAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const lineItemId = String(formData.get('line_item_id'))
+  const { EngineError } = await import('@/server/engine')
   const packageId = String(formData.get('package_id'))
-  const dueDate = String(formData.get('due_date'))
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
-    await engine.updateLineItem(lineItemId, { dueDate })
+  try {
+    await engine.renamePackage(packageId, String(formData.get('name') ?? ''))
+  } catch (error) {
+    if (error instanceof EngineError) {
+      redirect(`/packages/${packageId}?error=${encodeURIComponent(error.message)}`)
+    }
+    throw error
   }
-
-  revalidatePath('/')
+  revalidatePath('/packages')
   revalidatePath(`/packages/${packageId}`)
+  redirect(`/packages/${packageId}?saved=1`)
+}
+
+export async function retirePackageAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const packageId = String(formData.get('package_id'))
+  await engine.retirePackage(packageId)
+  revalidatePath('/')
+  revalidatePath('/packages')
+  revalidatePath(`/packages/${packageId}`)
+  redirect('/packages')
+}
+
+/**
+ * A check-in found more in an account than its plans had accrued, and the
+ * person chose to count it toward those plans. The amounts arrive as one
+ * hidden field per part, exactly as previewed.
+ */
+export async function acceptOpeningsAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const items: { lineItemId: string; openingCents: number }[] = []
+  for (const [key, value] of formData.entries()) {
+    if (!key.startsWith('opening_')) continue
+    const openingCents = Number(value)
+    if (!Number.isInteger(openingCents) || openingCents < 0) continue
+    items.push({ lineItemId: key.slice('opening_'.length), openingCents })
+  }
+  if (items.length > 0) await engine.recordOpeningBalances(items)
+  revalidatePath('/')
+  revalidatePath('/check-in')
+  revalidatePath('/packages')
+  redirect('/check-in?counted=1')
 }
 
 export async function createReserveAccountAction(formData: FormData): Promise<void> {
@@ -225,9 +353,13 @@ export async function runAllocationAction(formData: FormData): Promise<void> {
     redirect('/allocate?error=amount')
   }
 
-  await engine.runAllocation({ floorCents })
+  // When this is the extra a check-in found in a reserve account, the run
+  // also asks for it to be moved out of there.
+  const from = String(formData.get('from') ?? '').trim()
+  await engine.runAllocation({ floorCents, ...(from ? { sourceAccountId: from } : {}) })
   revalidatePath('/')
   revalidatePath('/allocate')
+  revalidatePath('/check-in')
   redirect('/')
 }
 
@@ -270,6 +402,52 @@ export async function createDebtAction(
   revalidatePath('/debts')
   revalidatePath('/allocate')
   return { problems: [], saved: previous.saved + 1 }
+}
+
+/**
+ * Correct a debt from the same form that added it. The terms go through
+ * updateDebt; a changed balance is a statement balance, recorded on its own
+ * dated path, so the two never get mixed up in the log.
+ */
+export async function updateDebtAction(
+  previous: DebtFormState,
+  formData: FormData,
+): Promise<DebtFormState> {
+  const { engine } = await requireEngine()
+  const { debtFormValuesFrom, parseDebtForm, DebtDataError } = await import('@/domain')
+  const { EngineError } = await import('@/server/engine')
+  const debtId = String(formData.get('debt_id') ?? '')
+
+  const parsed = parseDebtForm(debtFormValuesFrom((name) => formData.get(name)))
+  if (!parsed.ok) return { problems: parsed.problems, saved: previous.saved }
+
+  try {
+    const current = (await engine.listDebts()).find((d) => d.id === debtId)
+    if (!current) return { problems: [{ field: 'form', message: 'That debt is no longer here.' }], saved: previous.saved }
+    const { balanceCents, ...terms } = parsed.input
+    await engine.updateDebt(debtId, terms)
+    if (balanceCents !== current.balanceCents) {
+      await engine.updateDebtBalance({ debtId, balanceCents })
+    }
+  } catch (error) {
+    if (error instanceof DebtDataError || error instanceof EngineError) {
+      return { problems: [{ field: 'form', message: error.message }], saved: previous.saved }
+    }
+    throw error
+  }
+
+  revalidatePath('/debts')
+  revalidatePath('/allocate')
+  revalidatePath('/')
+  return { problems: [], saved: previous.saved + 1 }
+}
+
+export async function removeDebtAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  await engine.removeDebt(String(formData.get('debt_id')))
+  revalidatePath('/debts')
+  revalidatePath('/allocate')
+  revalidatePath('/')
 }
 
 export async function confirmDebtPaymentAction(formData: FormData): Promise<void> {
@@ -347,6 +525,100 @@ export async function saveAllocationRulesAction(formData: FormData): Promise<voi
   revalidatePath('/settings')
   revalidatePath('/allocate')
   redirect('/settings?saved=1')
+}
+
+// ---------------------------------------------------------------- spreadsheet import (temporary)
+
+export type SheetImportState =
+  | { phase: 'idle'; error?: string }
+  | {
+      phase: 'preview'
+      text: string
+      expenses: {
+        row: number
+        label: string
+        account: string
+        amountCents: number
+        dueDate: string
+        recurrence: string
+        openingCents: number
+        notes: string[]
+      }[]
+      debts: {
+        row: number
+        name: string
+        category: string
+        balanceCents: number
+        balanceAsOf: string | null
+        aprBasisPoints: number
+        minimum: string
+        creditLimitCents: number | null
+        notes: string[]
+      }[]
+      problems: { row: number; message: string }[]
+      ignoredColumns: string[]
+      accountsToCreate: string[]
+    }
+  | {
+      phase: 'done'
+      accountsCreated: string[]
+      plansCreated: string[]
+      debtsCreated: string[]
+      problems: { row: number; message: string }[]
+    }
+
+/**
+ * Two steps, one action: "check it" parses the paste and shows what would be
+ * made and what is thrown away; "import" makes it. The text rides along in
+ * the form between the two, so what is imported is exactly what was shown.
+ */
+export async function sheetImportAction(
+  _previous: SheetImportState,
+  formData: FormData,
+): Promise<SheetImportState> {
+  const { engine } = await requireEngine()
+  const { parseSheet, formatCents } = await import('@/domain')
+  const text = String(formData.get('sheet') ?? '')
+  if (text.trim() === '') return { phase: 'idle', error: 'Paste the rows first, header line included.' }
+
+  const existingAccounts = (await engine.listReserveAccounts()).map((a) => a.name)
+  const parsed = parseSheet(text, { today: engine.today(), existingAccounts })
+
+  if (formData.get('mode') !== 'import') {
+    const minimumOf = (rule: (typeof parsed.debts)[number]['minPaymentRule']) =>
+      rule.type === 'fixed'
+        ? `${formatCents(rule.amountCents)} a month`
+        : rule.type === 'percent'
+          ? `${(rule.basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')}% of the balance`
+          : `${(rule.basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')}% of the balance, never below ${formatCents(rule.floorCents)}`
+    return {
+      phase: 'preview',
+      text,
+      expenses: parsed.expenses,
+      debts: parsed.debts.map((d) => ({
+        row: d.row,
+        name: d.name,
+        category: d.category,
+        balanceCents: d.balanceCents,
+        balanceAsOf: d.balanceAsOf,
+        aprBasisPoints: d.aprBasisPoints,
+        minimum: minimumOf(d.minPaymentRule),
+        creditLimitCents: d.creditLimitCents,
+        notes: d.notes,
+      })),
+      problems: parsed.problems,
+      ignoredColumns: parsed.ignoredColumns,
+      accountsToCreate: parsed.accountsToCreate,
+    }
+  }
+
+  const result = await engine.importSheet(parsed)
+  revalidatePath('/')
+  revalidatePath('/packages')
+  revalidatePath('/debts')
+  revalidatePath('/check-in')
+  revalidatePath('/settings')
+  return { phase: 'done', ...result }
 }
 
 export async function signOutAction(): Promise<void> {

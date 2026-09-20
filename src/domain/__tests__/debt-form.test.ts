@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   debtFormValuesFrom,
+  debtFormValuesOf,
   EMPTY_DEBT_FORM,
   parseDebtForm,
   type DebtFormValues,
@@ -112,6 +113,34 @@ describe('the add-a-debt form, parsed', () => {
       const result = parseDebtForm(filled({ has_promo: false, promo_rate: 'junk', promo_until: 'junk' }))
       expect(result.ok && result.input.promoRules).toEqual([])
     })
+  })
+
+  it('shows a stored debt in the boxes exactly as it would be re-parsed', () => {
+    const stored = {
+      name: 'US Bank Altitude Reserve',
+      category: 'consumer' as const,
+      balanceCents: 719966,
+      aprBasisPoints: 2049,
+      minPaymentRule: { type: 'percent_with_floor' as const, basisPoints: 100, floorCents: 3000 },
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full' as const, untilDate: '2027-03-01' }],
+      creditLimitCents: 1500000,
+    }
+    const values = debtFormValuesOf(stored)
+    expect(values).toMatchObject({
+      balance: '7199.66',
+      apr: '20.49',
+      credit_limit: '15000.00',
+      min_type: 'percent_with_floor',
+      min_percent: '1',
+      min_floor: '30.00',
+      has_promo: true,
+      promo_rate: '0',
+      promo_until: '2027-03-01',
+    })
+    const back = parseDebtForm(values)
+    expect(back.ok).toBe(true)
+    if (!back.ok) return
+    expect(back.input).toEqual({ ...stored, promoRules: stored.promoRules })
   })
 
   it('round-trips through FormData the way the server sees it', () => {

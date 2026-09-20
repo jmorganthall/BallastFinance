@@ -33,27 +33,41 @@ const badBorder = 'border-[var(--color-behind)]'
 
 export function DebtForm({
   action,
+  initial,
+  debtId,
+  submitLabel = 'Add this debt',
+  onSaved,
 }: {
   action: (previous: DebtFormState, formData: FormData) => Promise<DebtFormState>
+  /** Editing an existing debt: the boxes start from what is stored. */
+  initial?: DebtFormValues
+  debtId?: string
+  submitLabel?: string
+  onSaved?: () => void
 }) {
   const [state, formAction, pending] = useActionState(action, INITIAL)
-  const [values, setValues] = useState<DebtFormValues>(EMPTY_DEBT_FORM)
+  const [values, setValues] = useState<DebtFormValues>(initial ?? EMPTY_DEBT_FORM)
   const [problems, setProblems] = useState<Problem[]>([])
   const [justSaved, setJustSaved] = useState(false)
+  const editing = debtId !== undefined
 
   // Whatever the server found goes next to the box it belongs to.
   useEffect(() => {
     setProblems(state.problems)
   }, [state.problems])
 
-  // The one and only time the form clears: a successful add.
+  // A successful add clears the form for the next one; a successful edit
+  // keeps what was typed and tells its owner it is done.
   useEffect(() => {
     if (state.saved > 0) {
-      setValues(EMPTY_DEBT_FORM)
+      if (!editing) setValues(EMPTY_DEBT_FORM)
       setProblems([])
       setJustSaved(true)
+      onSaved?.()
     }
-  }, [state.saved])
+    // onSaved is a callback prop; re-running on its identity would re-fire the effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.saved, editing])
 
   function set<K extends DebtFormField>(field: K, value: DebtFormValues[K]) {
     setValues((current) => ({ ...current, [field]: value }))
@@ -98,9 +112,10 @@ export function DebtForm({
       ) : null}
       {justSaved ? (
         <p role="status" className="rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">
-          Added. It is in the payoff order above.
+          {editing ? 'Saved.' : 'Added. It is in the payoff order above.'}
         </p>
       ) : null}
+      {editing ? <input type="hidden" name="debt_id" value={debtId} /> : null}
 
       <Field label="Name" problem={problemFor('name')}>
         {(a) => (
@@ -285,7 +300,7 @@ export function DebtForm({
         disabled={pending}
         className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white disabled:opacity-60"
       >
-        {pending ? 'Adding…' : 'Add this debt'}
+        {pending ? (editing ? 'Saving…' : 'Adding…') : submitLabel}
       </button>
     </form>
   )

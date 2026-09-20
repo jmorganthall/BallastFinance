@@ -6,10 +6,17 @@
  * and what to do about it.
  */
 
+import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Money, PageHeader, Pill } from '@/components/ui'
-import { acceptCatchUpAction, confirmBalancesAction } from '@/server/actions'
-import { aheadOptions, catchUpOptions, computeDrift, formatCents } from '@/domain'
+import { Card, humanDate, Money, PageHeader, Pill } from '@/components/ui'
+import { acceptCatchUpAction, acceptOpeningsAction, confirmBalancesAction } from '@/server/actions'
+import {
+  aheadOptions,
+  assignExtraToPlans,
+  catchUpOptions,
+  computeDrift,
+  formatCents,
+} from '@/domain'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,9 +25,9 @@ const CATCH_UP_WEEKS = 8
 export default async function CheckInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ done?: string }>
+  searchParams: Promise<{ done?: string; counted?: string }>
 }) {
-  const { done } = await searchParams
+  const { done, counted } = await searchParams
   const { engine } = await requireEngine()
   const [accounts, confirmed] = await Promise.all([
     engine.accountViews(),
@@ -40,6 +47,13 @@ export default async function CheckInPage({
       {done ? (
         <Card className="mb-4 bg-[var(--color-ahead-soft)]">
           <p className="text-sm font-medium text-[var(--color-ahead)]">Balances recorded.</p>
+        </Card>
+      ) : null}
+      {counted ? (
+        <Card className="mb-4 bg-[var(--color-ahead-soft)]">
+          <p className="text-sm font-medium text-[var(--color-ahead)]">
+            Counted toward your plans. The weekly amounts have been worked out again.
+          </p>
         </Card>
       ) : null}
 
@@ -114,13 +128,19 @@ export default async function CheckInPage({
               const options = behind
                 ? catchUpOptions({ shortfallCents: shortfall, today, overWeeks: CATCH_UP_WEEKS })
                 : []
+              // Ahead: first count the extra toward this account's plans, soonest
+              // due first. What those cannot absorb is a real surplus, which can be
+              // shared out, or the weekly set-aside can ease off.
+              const counted = ahead
+                ? assignExtraToPlans({ extraCents: shortfall, items: view.items })
+                : { assignments: [], leftoverCents: 0 }
               const easeOff = ahead
                 ? aheadOptions({
                     extraCents: shortfall,
                     weeklyCents: view.weekly.totalPerWeekCents,
                     today,
                     overWeeks: CATCH_UP_WEEKS,
-                  })
+                  }).filter((o) => o.kind === 'rate_cut')
                 : []
 
               return (
@@ -181,11 +201,83 @@ export default async function CheckInPage({
                       </div>
                     ) : ahead ? (
                       <div className="mt-4 space-y-2">
-                        <p className="text-sm text-[var(--color-ink-soft)]">
-                          {easeOff.length > 1
-                            ? 'Two ways to get back on track, or leave it and the extra stays as a cushion:'
-                            : 'Nothing is being set aside here yet, so there is one way to get back on track, or leave it and the extra stays as a cushion:'}
-                        </p>
+                        {counted.assignments.length > 0 ? (
+                          <form
+                            action={acceptOpeningsAction}
+                            className="rounded-xl border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3"
+                          >
+                            {counted.assignments.map((a) => (
+                              <input key={a.lineItemId} type="hidden" name={`opening_${a.lineItemId}`} value={a.openingCents} />
+                            ))}
+                            <p className="text-sm font-medium">
+                              Count{' '}
+                              {counted.leftoverCents > 0
+                                ? formatCents(shortfall - counted.leftoverCents)
+                                : 'it'}{' '}
+                              toward your plans here, soonest first
+                            </p>
+                            <ul className="mt-2 space-y-1 text-sm">
+                              {counted.assignments.map((a) => (
+                                <li key={a.lineItemId} className="flex justify-between gap-3">
+                                  <span>
+                                    {a.label}
+                                    <span className="text-[var(--color-ink-soft)]">
+                                      {' '}· {humanDate(a.dueDate)}
+                                      {a.fullyFunded ? ' · fully funded' : ''}
+                                    </span>
+                                  </span>
+                                  <span className="shrink-0 tabular">
+                                    +<Money cents={a.addedCents} />
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                            <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                              The weekly amounts drop to match, and nothing has to move.
+                              {counted.leftoverCents > 0
+                                ? ` The other ${formatCents(counted.leftoverCents)} is more than every plan here needs.`
+                                : ''}
+                            </p>
+                            <button
+                              type="submit"
+                              className="mt-3 w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+                            >
+                              Count it toward these plans
+                            </button>
+                          </form>
+                        ) : (
+                          <p className="text-sm text-[var(--color-ink-soft)]">
+                            {view.items.length === 0
+                              ? 'Nothing is planned against this account, so the extra is spare.'
+                              : 'Every plan here is already fully funded, so the extra is spare.'}
+                          </p>
+                        )}
+
+                        <Link
+                          href={`/allocate?from=${view.account.id}&floor=${encodeURIComponent(
+                            formatCents(
+                              counted.assignments.length > 0 ? counted.leftoverCents : shortfall,
+                            ).replace('$', '').replace(/,/g, ''),
+                          )}`}
+                          className={`flex items-center justify-between gap-3 rounded-xl bg-[var(--color-surface)] p-3 text-sm ${
+                            counted.assignments.length > 0 && counted.leftoverCents === 0
+                              ? 'text-[var(--color-ink-soft)]'
+                              : ''
+                          }`}
+                        >
+                          <span>
+                            Share{' '}
+                            {formatCents(counted.assignments.length > 0 ? counted.leftoverCents : shortfall)}{' '}
+                            out instead
+                            <span className="block text-xs text-[var(--color-ink-soft)]">
+                              Runs it through Share out: debts, fun money, savings, by your rules.
+                            </span>
+                          </span>
+                          <span className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 font-medium">
+                            Go
+                          </span>
+                        </Link>
+
                         {easeOff.map((option) => (
                           <form
                             key={option.kind}
@@ -199,19 +291,13 @@ export default async function CheckInPage({
                             {option.endDate ? (
                               <input type="hidden" name="ends_on" value={option.endDate} />
                             ) : null}
-
                             <span className="text-sm">
-                              {option.kind === 'one_time_out'
-                                ? `Move ${formatCents(option.amountCents)} back out now`
-                                : option.pauses
-                                  ? `Pause the weekly set-aside until ${option.endDate}`
-                                  : `Set aside ${formatCents(option.perWeekCents ?? 0)}/week less until ${option.endDate}`}
-                              {option.leftoverCents ? (
-                                <span className="block text-xs text-[var(--color-ink-soft)]">
-                                  Uses up {formatCents(option.amountCents)}; the other{' '}
-                                  {formatCents(option.leftoverCents)} stays as a cushion.
-                                </span>
-                              ) : null}
+                              {option.pauses
+                                ? `Or pause the weekly set-aside until ${humanDate(option.endDate!)}`
+                                : `Or set aside ${formatCents(option.perWeekCents ?? 0)}/week less until ${humanDate(option.endDate!)}`}
+                              <span className="block text-xs text-[var(--color-ink-soft)]">
+                                Leaves the extra where it is and uses it up over time.
+                              </span>
                             </span>
                             <button
                               type="submit"
@@ -221,6 +307,9 @@ export default async function CheckInPage({
                             </button>
                           </form>
                         ))}
+                        <p className="text-xs text-[var(--color-ink-soft)]">
+                          Or do nothing, and the extra stays as a cushion.
+                        </p>
                       </div>
                     ) : null}
                   </Card>

@@ -16,6 +16,7 @@ import {
   signOutAction,
 } from '@/server/actions'
 import { formatCents } from '@/domain'
+import { SheetImport } from './sheet-import'
 
 export const dynamic = 'force-dynamic'
 
@@ -237,6 +238,17 @@ export default async function SettingsPage({
             Add it
           </button>
         </form>
+      </Card>
+
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+        Bring in your spreadsheet
+      </h2>
+      <Card className="mb-6">
+        <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
+          A one-off way in from the old sheet, until everything lives here. The Expense and Loan
+          tabs are both understood.
+        </p>
+        <SheetImport />
       </Card>
 
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">

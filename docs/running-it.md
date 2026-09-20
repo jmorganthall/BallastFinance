@@ -107,6 +107,27 @@ phones, or Cloudflare Tunnel with Access in front. The app is transport-agnostic
 either way; whichever you pick, `AUTH_URL` must be the URL the PWA is actually
 opened at, or the OAuth redirect will not come back.
 
+## Bringing in the old spreadsheet
+
+Settings has a one-off importer for the sheet's two tabs, kept until everything
+lives in Ballast. Copy the rows out of the sheet with their header line (both
+tabs at once is fine) and paste them in. "Check it first" shows what would be
+made, which lines would be skipped and why, and which columns are thrown away
+on purpose; "Bring in" makes it.
+
+What it keeps, and what it drops:
+
+| Tab | Kept (the raw inputs) | Dropped (the sheet worked these out) |
+| --- | --- | --- |
+| Expenses | Account, Expense, Due Every, Next Due, Reserved Now, Amount | In Simplifi, Bracket, Monthly, Weekly |
+| Loans | Loan, Category, APR, %, $, Balance, Limit, As of (Monthly only when % and $ are blank) | Freed Up, Principal/Month, Int/Month, Interest at Min Pmt, Months @ Min, Util, Fixed Pmt., Long Term, Short Term, Priority |
+
+Each expense row becomes a live plan of its own, saving from today, with "Reserved
+Now" counted as already set aside so the weekly amount is right from the first
+week. A recurring row whose Next Due has passed rolls to its next occurrence. Each
+loan row becomes a debt with its balance dated "As of". Anything wrong afterwards
+is changed on the plan's or the debt's own screen.
+
 ## Backups
 
 Nightly `pg_dump` to the array, retained 30 days (PRD §11). **Test a restore

@@ -20,11 +20,17 @@ export const dynamic = 'force-dynamic'
 export default async function AllocatePage({
   searchParams,
 }: {
-  searchParams: Promise<{ floor?: string; error?: string }>
+  searchParams: Promise<{ floor?: string; error?: string; from?: string }>
 }) {
-  const { floor, error } = await searchParams
+  const { floor, error, from } = await searchParams
   const { engine } = await requireEngine()
   const bufferCents = await engine.bufferCents()
+
+  // The check-in sends an account's extra here to be shared out; the run
+  // then also asks for that money to be moved out of the account.
+  const source = from
+    ? ((await engine.listReserveAccounts()).find((a) => a.id === from) ?? null)
+    : null
 
   let floorCents: number | null = null
   if (floor) {
@@ -53,10 +59,22 @@ export default async function AllocatePage({
         subtitle="When you have checked Simplifi and know what is genuinely spare, put the number in here."
       />
 
+      {source ? (
+        <Card className="mb-4 bg-[var(--color-accent-soft)]">
+          <p className="text-sm">
+            This is the extra sitting in <strong>{source.name}</strong>. Whatever is shared out
+            below will also go on your to-do list as a move out of that account.
+          </p>
+        </Card>
+      ) : null}
+
       <Card className="mb-4">
         <form method="GET" className="space-y-3">
+          {source ? <input type="hidden" name="from" value={source.id} /> : null}
           <label className="block text-sm font-medium">
-            What is left over after everything that is already spoken for?
+            {source
+              ? `How much of the extra in ${source.name} to share out?`
+              : 'What is left over after everything that is already spoken for?'}
             <input
               name="floor"
               inputMode="decimal"
@@ -67,7 +85,9 @@ export default async function AllocatePage({
             />
           </label>
           <p className="text-xs text-[var(--color-ink-soft)]">
-            The lowest your unclaimed cash gets over the coming weeks — not today&apos;s balance.
+            {source
+              ? 'The cushion you keep back stays in the account.'
+              : 'The lowest your unclaimed cash gets over the coming weeks — not today’s balance.'}
           </p>
           <button
             type="submit"
@@ -152,6 +172,7 @@ export default async function AllocatePage({
 
             <form action={runAllocationAction} className="mt-5">
               <input type="hidden" name="floor" value={floor ?? ''} />
+              {source ? <input type="hidden" name="from" value={source.id} /> : null}
               <button
                 type="submit"
                 className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"

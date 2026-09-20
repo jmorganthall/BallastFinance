@@ -169,6 +169,36 @@ export function parseDebtForm(values: DebtFormValues): DebtFormResult {
   }
 }
 
+/** A stored debt, as the boxes would show it: the inverse of parseDebtForm. */
+export function debtFormValuesOf(debt: {
+  name: string
+  category: DebtCategory
+  balanceCents: Cents
+  aprBasisPoints: number
+  minPaymentRule: MinPaymentRule
+  promoRules: readonly PromoRule[]
+  creditLimitCents?: Cents | null
+}): DebtFormValues {
+  const dollars = (cents: Cents) => (cents / 100).toFixed(2)
+  const percent = (basisPoints: number) => (basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
+  const rule = debt.minPaymentRule
+  const promo = debt.promoRules[0]
+  return {
+    name: debt.name,
+    category: debt.category,
+    balance: dollars(debt.balanceCents),
+    apr: percent(debt.aprBasisPoints),
+    credit_limit: debt.creditLimitCents ? dollars(debt.creditLimitCents) : '',
+    min_type: rule.type,
+    min_amount: rule.type === 'fixed' ? dollars(rule.amountCents) : '',
+    min_percent: rule.type === 'fixed' ? '' : percent(rule.basisPoints),
+    min_floor: rule.type === 'percent_with_floor' ? dollars(rule.floorCents) : '',
+    has_promo: promo !== undefined,
+    promo_rate: promo ? percent(promo.rateBasisPoints) : '',
+    promo_until: promo?.untilDate ?? '',
+  }
+}
+
 /** Lift a submitted FormData into the same shape the browser validated. */
 export function debtFormValuesFrom(get: (name: string) => unknown): DebtFormValues {
   const text = (name: keyof DebtFormValues) => {
