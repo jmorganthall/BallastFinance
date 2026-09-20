@@ -249,6 +249,23 @@ export function DebtForm({
         </div>
       )}
 
+      <Field label="What you actually pay each month (optional)" problem={problemFor('monthly_payment')}>
+        {(a) => (
+          <input
+            {...a}
+            name="monthly_payment"
+            inputMode="decimal"
+            value={values.monthly_payment}
+            onChange={(e) => set('monthly_payment', e.target.value)}
+            placeholder="Leave blank if it is just the minimum"
+          />
+        )}
+      </Field>
+      <p className="-mt-2 text-xs text-[var(--color-ink-soft)]">
+        If you pay more than the minimum, this is what decides whether a deal-rate balance is on
+        track to be cleared before the rate ends, and when it is paid off.
+      </p>
+
       <label className="flex min-h-11 items-center gap-3 text-sm font-medium">
         <input
           type="checkbox"

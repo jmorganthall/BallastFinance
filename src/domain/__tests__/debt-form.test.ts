@@ -39,6 +39,7 @@ describe('the add-a-debt form, parsed', () => {
       minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 3000 },
       promoRules: [],
       creditLimitCents: 1500000,
+      plannedPaymentCents: null,
     })
   })
 
@@ -124,6 +125,7 @@ describe('the add-a-debt form, parsed', () => {
       minPaymentRule: { type: 'percent_with_floor' as const, basisPoints: 100, floorCents: 3000 },
       promoRules: [{ rateBasisPoints: 0, appliesTo: 'full' as const, untilDate: '2027-03-01' }],
       creditLimitCents: 1500000,
+      plannedPaymentCents: null,
     }
     const values = debtFormValuesOf(stored)
     expect(values).toMatchObject({

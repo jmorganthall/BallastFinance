@@ -81,6 +81,34 @@ describeDb('debts, the ladder and the optimizer', () => {
     )
   })
 
+  it('keeps what the household actually pays each month, and can change it', async () => {
+    const created = await engine.createDebt({
+      name: 'Balance transfer',
+      category: 'consumer',
+      balanceCents: 500000,
+      aprBasisPoints: 3049,
+      minPaymentRule: { type: 'fixed', amountCents: 5000 },
+      plannedPaymentCents: 50000,
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-09-19' }],
+    })
+    expect((await engine.listDebts()).find((d) => d.id === created.id)!.plannedPaymentCents).toBe(50000)
+    // On track at $500 a month, so it really is a 0% debt, and spare money
+    // goes at the card that costs something instead.
+    const ladder = await engine.debtLadder()
+    expect(ladder.find((r) => r.debt.id === created.id)!.effectiveAprBasisPoints).toBe(0)
+    const onTrack = await engine.optimiseLumpSum(107500)
+    expect(onTrack.allocations.map((a) => a.debtName)).toEqual(['Store card', 'Big card'])
+
+    await engine.updateDebt(created.id, { plannedPaymentCents: null })
+    expect((await engine.listDebts()).find((d) => d.id === created.id)!.plannedPaymentCents).toBeNull()
+    // At the $50 minimum it cannot clear in time: now it is the cliff it
+    // looks like, priced at the full 30.49%, and the remainder goes there.
+    const cliff = await engine.optimiseLumpSum(107500)
+    expect(cliff.allocations.map((a) => a.debtName)).toEqual(['Store card', 'Balance transfer'])
+    expect(cliff.allocations[1]!.reason).toContain('30.49%')
+    await engine.removeDebt(created.id)
+  })
+
   it('answers where a lump sum should go', async () => {
     const result = await engine.optimiseLumpSum(107500)
     expect(result.allocations[0]!.debtName).toBe('Store card')

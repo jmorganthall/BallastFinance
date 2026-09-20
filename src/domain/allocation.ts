@@ -14,6 +14,7 @@
 
 import { addDays, type CivilDate } from './dates'
 import type { Cents } from './money'
+import { takeTopUps, type Shortfall, type TopUp } from './shortfall'
 
 export type AllocationDestination = 'debt' | 'lifestyle' | 'long_term_savings' | 'emergency'
 
@@ -46,7 +47,16 @@ export interface AllocationShare {
 export interface AllocationPlan {
   floorCents: Cents
   bufferCents: Cents
+  /** Spare less the cushion: everything that leaves, top-ups and split alike. */
   netCents: Cents
+  /**
+   * The optional first step: shortfalls the person chose to cover, each with
+   * what this run puts toward it. Taken off the top before the split.
+   */
+  topUps: TopUp[]
+  topUpCents: Cents
+  /** What the standing rules split: net less the top-ups. */
+  splitCents: Cents
   shares: AllocationShare[]
   /** Lifestyle is released in two halves so it is not spent all at once. */
   lifestyleReleases: { amountCents: Cents; releaseOn: CivilDate }[]
@@ -97,6 +107,8 @@ export function planAllocation(args: {
   today: CivilDate
   /** Days until the second half of the fun money is released (~one pay period). */
   secondHalfAfterDays?: number
+  /** Shortfalls the person ticked to cover first, in the order to cover them. */
+  cover?: readonly Shortfall[]
 }): AllocationPlan {
   const rules = args.rules ?? DEFAULT_ALLOCATION_RULES
   validateRules(rules)
@@ -109,13 +121,21 @@ export function planAllocation(args: {
       floorCents: args.floorCents,
       bufferCents,
       netCents: 0,
+      topUps: [],
+      topUpCents: 0,
+      splitCents: 0,
       shares: rules.map((rule) => ({ ...rule, amountCents: 0 })),
       lifestyleReleases: [],
     }
   }
 
+  // The optional first step comes off the top: cover what is short, split
+  // the rest. With nothing ticked, the split is the whole net, as before.
+  const { topUps, remainingCents: splitCents } = takeTopUps(args.cover ?? [], netCents)
+  const topUpCents = netCents - splitCents
+
   const amounts = apportion(
-    netCents,
+    splitCents,
     rules.map((r) => r.percent),
   )
   const shares: AllocationShare[] = rules.map((rule, index) => ({
@@ -132,6 +152,9 @@ export function planAllocation(args: {
     floorCents: args.floorCents,
     bufferCents,
     netCents,
+    topUps,
+    topUpCents,
+    splitCents,
     shares,
     lifestyleReleases:
       lifestyle > 0

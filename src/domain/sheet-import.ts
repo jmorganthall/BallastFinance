@@ -42,6 +42,8 @@ export interface ImportedDebt {
   aprBasisPoints: number
   minPaymentRule: MinPaymentRule
   creditLimitCents: Cents | null
+  /** "Monthly": what the household actually pays, when the sheet says so. */
+  plannedPaymentCents: Cents | null
   notes: string[]
 }
 
@@ -419,6 +421,15 @@ export function parseSheet(
           aprBasisPoints,
           minPaymentRule,
           creditLimitCents: limit !== null && limit > 0 ? limit : null,
+          // The sheet's Monthly is what the family pays, which is the number
+          // that says whether a deal-rate balance is on track. Kept whenever
+          // it beats the minimum; a Monthly that IS the minimum adds nothing.
+          plannedPaymentCents:
+            monthly !== null && monthly > 0 && minPaymentRule.type !== 'fixed'
+              ? monthly
+              : monthly !== null && minPaymentRule.type === 'fixed' && monthly > minPaymentRule.amountCents
+                ? monthly
+                : null,
           notes,
         })
       }

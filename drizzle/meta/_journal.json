@@ -50,6 +50,13 @@
       "when": 1789938099329,
       "tag": "0006_retire_recurrence_enum",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789939598104,
+      "tag": "0007_debt_planned_payment",
+      "breakpoints": true
     }
   ]
 }

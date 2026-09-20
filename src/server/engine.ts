@@ -27,6 +27,8 @@ import {
   apportion,
   canWriteAccount,
   closeOutPrompts,
+  findShortfalls,
+  formatCents,
   lineItemTotalCents,
   openingSinceLastOccurrence,
   recurrenceOf,
@@ -72,6 +74,7 @@ import {
   type OutstandingInstruction,
   type AllocationPlan,
   type AllocationRule,
+  type Shortfall,
   type Debt,
   type DebtCategory,
   type LadderRung,
@@ -1051,12 +1054,49 @@ export class Engine {
   }
 
   /** Preview only: shows the split without recording anything (PRD §6). */
-  async previewAllocation(floorCents: Cents, rules?: AllocationRule[]): Promise<AllocationPlan> {
+  /**
+   * What is short right now: reserve accounts behind their plans, and
+   * deal-rate balances the minimums will not clear in time. The optional
+   * first step of a share-out (PRD §6) covers these before the split.
+   */
+  async shortfalls(): Promise<Shortfall[]> {
+    const [views, balances, debts] = await Promise.all([
+      this.accountViews(),
+      this.latestConfirmedBalances(),
+      this.listDebts(),
+    ])
+    return findShortfalls({
+      accounts: views.map((view) => ({
+        view,
+        confirmedCents: balances.get(view.account.id)?.amountCents ?? null,
+      })),
+      debts,
+      today: this.today(),
+    })
+  }
+
+  /**
+   * The shortfalls a person ticked, by "kind:id", resolved against what is
+   * actually short now. A form only ever says WHICH to cover; the amounts
+   * come from here, so nothing posted back can inflate a top-up.
+   */
+  async chosenShortfalls(keys: readonly string[]): Promise<Shortfall[]> {
+    if (keys.length === 0) return []
+    const wanted = new Set(keys)
+    return (await this.shortfalls()).filter((s) => wanted.has(`${s.kind}:${s.targetId}`))
+  }
+
+  async previewAllocation(
+    floorCents: Cents,
+    rules?: AllocationRule[],
+    cover?: readonly Shortfall[],
+  ): Promise<AllocationPlan> {
     return planAllocation({
       floorCents,
       bufferCents: await this.bufferCents(),
       rules: rules ?? (await this.allocationRules()),
       today: this.today(),
+      cover,
     })
   }
 
@@ -1077,9 +1117,11 @@ export class Engine {
      * where it goes.
      */
     sourceAccountId?: Id
+    /** Shortfalls to cover first, off the top, before the split. */
+    cover?: readonly Shortfall[]
   }): Promise<{ plan: AllocationPlan; instructionIds: Id[] }> {
     const today = this.today()
-    const plan = await this.previewAllocation(input.floorCents, input.rules)
+    const plan = await this.previewAllocation(input.floorCents, input.rules, input.cover)
 
     if (plan.netCents <= 0) return { plan, instructionIds: [] }
 
@@ -1097,6 +1139,35 @@ export class Engine {
           targetLabel: source.name,
           note: 'The extra a check-in found here, shared out below.',
         }),
+      )
+    }
+
+    // The first step: what was short gets covered before anything is split.
+    for (const topUp of plan.topUps) {
+      instructionIds.push(
+        await this.issueInstruction(
+          topUp.kind === 'plan'
+            ? {
+                type: 'one_time_move',
+                amountCents: topUp.amountCents,
+                targetId: topUp.targetId,
+                targetLabel: topUp.label,
+                note:
+                  topUp.amountCents < topUp.shortCents
+                    ? `Covers part of the ${formatCents(topUp.shortCents)} it is behind.`
+                    : 'Covers what it is behind, before the rest is shared out.',
+              }
+            : {
+                type: 'debt_payment',
+                amountCents: topUp.amountCents,
+                targetId: topUp.targetId,
+                targetLabel: topUp.label,
+                note:
+                  topUp.amountCents < topUp.shortCents
+                    ? `Part of the ${formatCents(topUp.shortCents)} its minimums will not clear before the deal ends.`
+                    : 'Clears what its minimums will not before the deal ends.',
+              },
+        ),
       )
     }
 
@@ -1196,6 +1267,13 @@ export class Engine {
         floor_cents: plan.floorCents,
         buffer_cents: plan.bufferCents,
         net_cents: plan.netCents,
+        top_ups: plan.topUps.map((t) => ({
+          kind: t.kind,
+          target_id: t.targetId,
+          short_cents: t.shortCents,
+          amount_cents: t.amountCents,
+        })),
+        split_cents: plan.splitCents,
         splits: plan.shares.map((s) => ({
           destination: s.destination,
           percent: s.percent,
@@ -1280,6 +1358,7 @@ export class Engine {
           aprBasisPoints: debt.aprBasisPoints,
           minPaymentRule: debt.minPaymentRule,
           creditLimitCents: debt.creditLimitCents,
+          plannedPaymentCents: debt.plannedPaymentCents,
           ...(debt.balanceAsOf ? { balanceAsOf: debt.balanceAsOf } : {}),
         })
         debtsCreated.push(debt.name)
@@ -1309,6 +1388,8 @@ export class Engine {
     minPaymentRule: MinPaymentRule
     promoRules?: PromoRule[]
     creditLimitCents?: Cents | null
+    /** What the household pays each month when that beats the minimum. */
+    plannedPaymentCents?: Cents | null
     /** When the balance was last known to be right. Defaults to today. */
     balanceAsOf?: CivilDate
   }): Promise<Debt> {
@@ -1316,6 +1397,7 @@ export class Engine {
       balanceCents: input.balanceCents,
       aprBasisPoints: input.aprBasisPoints,
       minPaymentRule: input.minPaymentRule,
+      plannedPaymentCents: input.plannedPaymentCents,
     })
     validateDebtRates({
       aprBasisPoints: input.aprBasisPoints,
@@ -1334,6 +1416,7 @@ export class Engine {
         promoRules: input.promoRules ?? [],
         minPaymentRule: input.minPaymentRule,
         creditLimitCents: input.creditLimitCents ?? null,
+        plannedPaymentCents: input.plannedPaymentCents ?? null,
         state: 'open',
       })
       .returning()
@@ -1351,7 +1434,10 @@ export class Engine {
   async updateDebt(
     debtId: Id,
     patch: Partial<
-      Pick<Debt, 'name' | 'category' | 'aprBasisPoints' | 'minPaymentRule' | 'promoRules' | 'creditLimitCents'>
+      Pick<
+        Debt,
+        'name' | 'category' | 'aprBasisPoints' | 'minPaymentRule' | 'promoRules' | 'creditLimitCents' | 'plannedPaymentCents'
+      >
     >,
   ): Promise<void> {
     const today = this.today()
@@ -1368,6 +1454,8 @@ export class Engine {
         name: (patch.name ?? before.name).trim(),
         promoRules: patch.promoRules ?? before.promoRules,
         creditLimitCents: patch.creditLimitCents === undefined ? before.creditLimitCents : patch.creditLimitCents,
+        plannedPaymentCents:
+          patch.plannedPaymentCents === undefined ? before.plannedPaymentCents : patch.plannedPaymentCents,
       }
       if (!after.name) throw new EngineError('A debt needs a name')
 
@@ -1375,6 +1463,7 @@ export class Engine {
         balanceCents: after.balanceCents,
         aprBasisPoints: after.aprBasisPoints,
         minPaymentRule: after.minPaymentRule,
+        plannedPaymentCents: after.plannedPaymentCents,
       })
       validateDebtRates({ aprBasisPoints: after.aprBasisPoints, promoRules: after.promoRules })
 
@@ -1387,6 +1476,7 @@ export class Engine {
           minPaymentRule: after.minPaymentRule,
           promoRules: after.promoRules,
           creditLimitCents: after.creditLimitCents ?? null,
+          plannedPaymentCents: after.plannedPaymentCents ?? null,
         })
         .where(eq(debtsTable.id, debtId))
 
@@ -1624,6 +1714,7 @@ function toDebt(r: typeof debtsTable.$inferSelect): Debt {
     promoRules: (r.promoRules as PromoRule[]) ?? [],
     minPaymentRule: r.minPaymentRule as MinPaymentRule,
     creditLimitCents: r.creditLimitCents,
+    plannedPaymentCents: r.plannedPaymentCents,
     fixedPayment: r.fixedPayment,
     state: r.state,
   }

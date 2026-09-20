@@ -20,11 +20,28 @@ export const dynamic = 'force-dynamic'
 export default async function AllocatePage({
   searchParams,
 }: {
-  searchParams: Promise<{ floor?: string; error?: string; from?: string }>
+  searchParams: Promise<{ floor?: string; error?: string; from?: string; fill?: string | string[] }>
 }) {
-  const { floor, error, from } = await searchParams
+  const { floor, error, from, fill } = await searchParams
   const { engine } = await requireEngine()
   const bufferCents = await engine.bufferCents()
+
+  // The optional first step: what is short right now. Before a split has
+  // been asked for, everything short is ticked -- covering a hole before
+  // sharing out is the sensible default -- and after that the ticks are
+  // whatever the person left.
+  const shortfalls = await engine.shortfalls()
+  const keyOf = (s: { kind: string; targetId: string }) => `${s.kind}:${s.targetId}`
+  const ticked = new Set(
+    floor === undefined
+      ? shortfalls.map(keyOf)
+      : fill === undefined
+        ? []
+        : Array.isArray(fill)
+          ? fill
+          : [fill],
+  )
+  const cover = shortfalls.filter((s) => ticked.has(keyOf(s)))
 
   // The check-in sends an account's extra here to be shared out; the run
   // then also asks for that money to be moved out of the account.
@@ -41,7 +58,7 @@ export default async function AllocatePage({
     }
   }
 
-  const plan = floorCents !== null ? await engine.previewAllocation(floorCents) : null
+  const plan = floorCents !== null ? await engine.previewAllocation(floorCents, undefined, cover) : null
 
   // The debt share is not "some money at debt": the optimizer names which debts,
   // in the same order the Debts screen shows, and it is the same call the
@@ -89,6 +106,41 @@ export default async function AllocatePage({
               ? 'The cushion you keep back stays in the account.'
               : 'The lowest your unclaimed cash gets over the coming weeks — not today’s balance.'}
           </p>
+
+          {shortfalls.length > 0 ? (
+            <fieldset className="rounded-xl border border-[var(--color-line)] p-3">
+              <legend className="px-1 text-sm font-medium">First, cover what is short?</legend>
+              <p className="mb-2 text-xs text-[var(--color-ink-soft)]">
+                Optional. Anything ticked is covered off the top, and the rest is shared out by
+                your rules.
+              </p>
+              <ul className="space-y-2">
+                {shortfalls.map((s) => (
+                  <li key={keyOf(s)}>
+                    <label className="flex items-start gap-3 text-sm">
+                      <input
+                        type="checkbox"
+                        name="fill"
+                        value={keyOf(s)}
+                        defaultChecked={ticked.has(keyOf(s))}
+                        className="mt-1 h-5 w-5 shrink-0"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-baseline justify-between gap-3">
+                          <span className="font-medium">{s.label}</span>
+                          <span className="shrink-0 tabular">
+                            <Money cents={s.shortCents} /> {s.kind === 'plan' ? 'behind' : 'short'}
+                          </span>
+                        </span>
+                        <span className="block text-xs text-[var(--color-ink-soft)]">{s.reason}</span>
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </fieldset>
+          ) : null}
+
           <button
             type="submit"
             className="w-full rounded-xl border border-[var(--color-line)] px-4 py-3 font-medium"
@@ -130,14 +182,52 @@ export default async function AllocatePage({
                     −<Money cents={plan.bufferCents} />
                   </dd>
                 </div>
+                {plan.topUpCents > 0 ? (
+                  <div className="flex justify-between">
+                    <dt>Covering what is short</dt>
+                    <dd className="tabular">
+                      −<Money cents={plan.topUpCents} />
+                    </dd>
+                  </div>
+                ) : null}
                 <div className="flex justify-between border-t border-[var(--color-line)] pt-1 font-semibold">
                   <dt>To share out</dt>
                   <dd className="tabular">
-                    <Money cents={plan.netCents} />
+                    <Money cents={plan.splitCents} />
                   </dd>
                 </div>
               </dl>
             </Card>
+
+            {plan.topUps.length > 0 ? (
+              <Card className="mb-4">
+                <h2 className="font-semibold">First, what is short</h2>
+                <ul className="mt-2 divide-y divide-[var(--color-line)]">
+                  {plan.topUps.map((t) => (
+                    <li key={`${t.kind}:${t.targetId}`} className="flex items-baseline justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0">
+                      <span>
+                        {t.label}
+                        <span className="block text-xs text-[var(--color-ink-soft)]">
+                          {t.amountCents < t.shortCents
+                            ? `Part of the ${formatCents(t.shortCents)} it is short; the rest another time.`
+                            : t.kind === 'plan'
+                              ? 'Back on pace.'
+                              : 'Cleared before the deal ends.'}
+                        </span>
+                      </span>
+                      <span className="shrink-0 font-semibold tabular">
+                        <Money cents={t.amountCents} />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                {plan.splitCents === 0 ? (
+                  <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                    That takes all of it, so there is nothing left to share out this time.
+                  </p>
+                ) : null}
+              </Card>
+            ) : null}
 
             <ul className="space-y-3">
               {plan.shares
@@ -173,6 +263,9 @@ export default async function AllocatePage({
             <form action={runAllocationAction} className="mt-5">
               <input type="hidden" name="floor" value={floor ?? ''} />
               {source ? <input type="hidden" name="from" value={source.id} /> : null}
+              {cover.map((s) => (
+                <input key={keyOf(s)} type="hidden" name="fill" value={keyOf(s)} />
+              ))}
               <button
                 type="submit"
                 className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"

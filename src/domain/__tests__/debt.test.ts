@@ -14,6 +14,7 @@ import {
   validateDebtInputs,
   validateDebtRates,
   type Debt,
+  monthlyPaymentCents,
 } from '../debt'
 
 const TODAY = '2026-09-19'
@@ -113,6 +114,39 @@ describe('promo-aware effective APR', () => {
     })
     // This is the cliff the spreadsheet could not see: a 0% APR scoring zero.
     expect(effectiveAprBasisPoints(d, TODAY)).toBe(2999)
+  })
+
+  it('judges "can it be cleared in time" on what the household actually pays, not the minimum', () => {
+    // The same $3,000 at 0%, minimum $50 -- but the family pays $300 a month
+    // at it, which clears it in ten of the twelve months. That is on track,
+    // so it is priced at 0%, and putting spare money at it gains nothing.
+    const d = debt({
+      id: 'a',
+      name: 'Balance transfer',
+      balanceCents: 300000,
+      aprBasisPoints: 2999,
+      minPaymentRule: { type: 'fixed', amountCents: 5000 },
+      plannedPaymentCents: 30000,
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-09-19' }],
+    })
+    expect(effectiveAprBasisPoints(d, TODAY)).toBe(0)
+    // And the projection runs at that pace: ten months, no interest.
+    const projection = projectPayoff({ debt: d, today: TODAY })
+    expect(projection.months).toBe(10)
+    expect(projection.totalInterestCents).toBe(0)
+  })
+
+  it('never lets a planned payment below the minimum, or above the balance, count', () => {
+    const d = debt({
+      id: 'a',
+      name: 'Card',
+      balanceCents: 20000,
+      minPaymentRule: { type: 'fixed', amountCents: 5000 },
+    })
+    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: null })).toBe(5000)
+    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: 2000 })).toBe(5000)
+    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: 12000 })).toBe(12000)
+    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: 50000 })).toBe(20000)
   })
 
   it('ramps toward the real rate as a clearable promo nears expiry', () => {

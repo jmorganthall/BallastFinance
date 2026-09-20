@@ -38,6 +38,8 @@ export interface DebtRow {
   /** The listed rate when a promo makes the effective one differ, else null. */
   listedRate: string | null
   minimumCents: number
+  /** What goes at it each month: the planned payment, else the minimum. */
+  paymentCents: number
   payoffDate: string | null
   cumulativeCostCents: number
   cumulativeFreedCents: number
@@ -66,7 +68,7 @@ export function DebtTable({ rows }: { rows: DebtRow[] }) {
             <th className={th}>Debt</th>
             <th className={`${th} text-right`}>Balance</th>
             <th className={`${th} hidden text-right sm:table-cell`}>Rate</th>
-            <th className={`${th} text-right`}>Min/mo</th>
+            <th className={`${th} text-right`}>Per month</th>
             <th className={`${th} hidden md:table-cell`}>Paid off by</th>
             <th className={`${th} w-16`}>
               <span className="sr-only">Actions</span>
@@ -138,7 +140,12 @@ function Row({
             <span className="block text-xs text-[var(--color-ink-soft)]">listed {row.listedRate}</span>
           ) : null}
         </td>
-        <td className={`${td} text-right tabular`}>{formatCents(row.minimumCents)}</td>
+        <td className={`${td} text-right tabular`}>
+          {formatCents(row.paymentCents)}
+          {row.paymentCents > row.minimumCents ? (
+            <span className="block text-xs text-[var(--color-ink-soft)]">min {formatCents(row.minimumCents)}</span>
+          ) : null}
+        </td>
         <td className={`${td} hidden md:table-cell`}>
           {row.payoffDate ? humanDate(row.payoffDate) : <span className="text-[var(--color-ink-soft)]">Never, at this rate</span>}
         </td>
@@ -198,7 +205,7 @@ function Row({
                       <input
                         name="amount"
                         inputMode="decimal"
-                        placeholder={formatCents(row.minimumCents).replace('$', '')}
+                        placeholder={formatCents(row.paymentCents).replace('$', '')}
                         className={smallField}
                       />
                     </label>
