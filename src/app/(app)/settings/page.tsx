@@ -11,7 +11,9 @@ import { Card, Hint, Money, PageHeader } from '@/components/ui'
 import {
   createReserveAccountAction,
   saveAllocationRulesAction,
+  saveNotificationPrefsAction,
   saveNudgeSettingsAction,
+  signOutAction,
 } from '@/server/actions'
 import { formatCents } from '@/domain'
 
@@ -28,14 +30,17 @@ export default async function SettingsPage({
   const { saved, error } = await searchParams
   const { engine, viewer } = await requireEngine()
 
-  const [rules, buffer, weight, accounts, nudgeWeeks, promoLead] = await Promise.all([
+  const [rules, buffer, weight, accounts, nudgeWeeks, promoLead, prefs] = await Promise.all([
     engine.allocationRules(),
     engine.bufferCents(),
     engine.priorityWeight(),
     engine.listReserveAccounts(),
     engine.getSetting<number>('check_in_nudge_weeks', 2),
     engine.promoLeadWeeks(),
+    engine.getSetting<Record<string, boolean>>('notification_prefs', {}),
   ])
+  // Absent means subscribed: both spouses receive everything by default (PRD §8).
+  const receives = prefs[viewer.userId] !== false
 
   return (
     <>
@@ -133,6 +138,32 @@ export default async function SettingsPage({
             Save reminders
           </button>
         </form>
+
+        <form
+          action={saveNotificationPrefsAction}
+          className="mt-4 border-t border-[var(--color-line)] pt-4"
+        >
+          <label className="flex items-start gap-3 text-sm font-medium">
+            <input
+              type="checkbox"
+              name="muted"
+              defaultChecked={receives}
+              className="mt-0.5 h-5 w-5"
+            />
+            <span>
+              Send these to me
+              <span className="mt-0.5 block text-xs font-normal text-[var(--color-ink-soft)]">
+                Turning this off only stops your own messages, not your spouse&apos;s.
+              </span>
+            </span>
+          </label>
+          <button
+            type="submit"
+            className="mt-3 w-full rounded-xl border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+          >
+            Save
+          </button>
+        </form>
       </Card>
 
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
@@ -202,6 +233,15 @@ export default async function SettingsPage({
           It is your data. Nothing here is locked in, and Ballast never holds a bank login.
         </p>
       </Card>
+
+      <form action={signOutAction} className="mt-6">
+        <button
+          type="submit"
+          className="w-full rounded-xl border border-[var(--color-line)] px-4 py-3 text-sm font-medium text-[var(--color-ink-soft)]"
+        >
+          Sign out
+        </button>
+      </form>
     </>
   )
 }

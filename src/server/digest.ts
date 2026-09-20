@@ -21,6 +21,14 @@ export interface DigestInput {
   today?: string
 }
 
+/** User ids who have muted themselves, passed through so n8n can skip them. */
+async function mutedUserIds(engine: Engine): Promise<string[]> {
+  const prefs = await engine.getSetting<Record<string, boolean>>('notification_prefs', {})
+  return Object.entries(prefs)
+    .filter(([, receives]) => receives === false)
+    .map(([userId]) => userId)
+}
+
 function engineFor(input: DigestInput): Engine {
   return new Engine({
     householdId: input.householdId,
@@ -104,6 +112,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   return {
     kind: 'weekly_digest',
     householdId: input.householdId,
+    mutedUserIds: await mutedUserIds(engine),
     summary,
     body: lines.join('\n'),
     link: `${input.baseUrl}/`,

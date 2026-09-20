@@ -22,6 +22,11 @@ export type NotificationKind =
 export interface NotificationPayload {
   kind: NotificationKind
   householdId: string
+  /**
+   * Who should actually receive this. n8n routes per recipient; an empty list
+   * means nobody has muted themselves and everyone gets it.
+   */
+  mutedUserIds?: string[]
   /** A one-line summary suitable for an SMS, already in plain language. */
   summary: string
   /** Longer body for email. Markdown. */

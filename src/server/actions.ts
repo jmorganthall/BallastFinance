@@ -322,6 +322,24 @@ export async function saveAllocationRulesAction(formData: FormData): Promise<voi
   redirect('/settings?saved=1')
 }
 
+export async function signOutAction(): Promise<void> {
+  const { signOut } = await import('@/auth')
+  await signOut({ redirectTo: '/sign-in' })
+}
+
+export async function saveNotificationPrefsAction(formData: FormData): Promise<void> {
+  const { engine, viewer } = await requireEngine()
+  const prefs = await engine.getSetting<Record<string, boolean>>('notification_prefs', {})
+  // Muting is per person, keyed by user id: both spouses get everything by
+  // default (PRD §8), and one muting themselves must not mute the other.
+  await engine.putSetting('notification_prefs', {
+    ...prefs,
+    [viewer.userId]: formData.get('muted') !== 'on',
+  })
+  revalidatePath('/settings')
+  redirect('/settings?saved=1')
+}
+
 export async function saveNudgeSettingsAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const weeks = Number(formData.get('check_in_nudge_weeks'))
