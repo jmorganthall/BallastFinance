@@ -13,7 +13,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "demo": "tsx scripts/demo-disney.ts"
+    "demo": "tsx scripts/demo-disney.ts",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.2",
@@ -33,7 +34,7 @@
     "postcss": "^8.5.28",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.13",
-    "typescript": "^7.0.2",
+    "typescript": "^6.0.3",
     "vitest": "^5.0.1"
   }
 }
