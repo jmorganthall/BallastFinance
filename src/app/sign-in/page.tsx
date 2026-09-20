@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import { signIn } from '@/auth'
 import { currentViewer } from '@/server/session'
 import { redirect } from 'next/navigation'
@@ -12,7 +13,21 @@ export default async function SignInPage({
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-4">
-      <h1 className="text-3xl font-semibold tracking-tight">Ballast</h1>
+      {/*
+        * The mark, with the name as live text rather than the horizontal
+        * lockup. The lockup's wordmark is navy and would disappear against the
+        * dark theme; text takes the ink colour, stays crisp at any size, and is
+        * readable by a screen reader without alt text standing in for it.
+        */}
+      <Image
+        src="/logo-mark.png"
+        alt=""
+        width={96}
+        height={97}
+        priority
+        className="h-20 w-auto"
+      />
+      <h1 className="mt-4 text-4xl font-semibold tracking-tight">Ballast</h1>
       <p className="mt-2 text-[var(--color-ink-soft)]">
         What to move into each savings account this week, and whether you are on track.
       </p>

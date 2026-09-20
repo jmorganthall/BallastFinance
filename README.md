@@ -1,4 +1,4 @@
-# Ballast Finance
+<img src="public/logo-horizontal.png" alt="Ballast" width="420">
 
 A self-hosted family reservation engine that answers one question continuously:
 **"How much needs to move into each reserve account this week, and are the reserves on pace?"**
