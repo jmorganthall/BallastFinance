@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call: # so the publish workflow can gate on this
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+
+    # The integration tests run against a real PostgreSQL 16 on purpose: the
+    # acceptance criteria are about what the app produces, not what a pure
+    # function returns. Without this service they would silently skip.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ballast
+          POSTGRES_PASSWORD: ballast
+          POSTGRES_DB: ballast
+        options: >-
+          --health-cmd "pg_isready -U ballast -d ballast"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgres://ballast:ballast@localhost:5432/ballast
+      DATABASE_MIGRATION_URL: postgres://ballast:ballast@localhost:5432/ballast
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Migrate and seed
+        run: npm run bootstrap
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        # No credentials here on purpose: the database client connects lazily,
+        # so a build that needs a DATABASE_URL is a regression.
+        run: npm run build
+        env:
+          DATABASE_URL: ''
+          DATABASE_MIGRATION_URL: ''

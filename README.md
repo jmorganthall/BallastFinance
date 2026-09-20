@@ -47,6 +47,27 @@ cd BallastFinance
 It generates the database passwords and the session secret, asks for your Google client ID
 and secret and which email addresses may sign in, writes a `.env`, and brings the stack up.
 
+<details>
+<summary><strong>Or run the published image instead — no clone, no build</strong></summary>
+
+```bash
+curl -O https://raw.githubusercontent.com/jmorganthall/BallastFinance/main/docker-compose.ghcr.yml
+```
+
+Write a `.env` beside it with `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `AUTH_SECRET`
+(`openssl rand -base64 32`), `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` and
+`SEED_ALLOWED_EMAILS`, then:
+
+```bash
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Images are `ghcr.io/jmorganthall/ballastfinance`, built for `linux/amd64` and
+`linux/arm64`. Set `BALLAST_IMAGE` to pin a version tag — `latest` follows the default
+branch and will change under you.
+
+</details>
+
 **3. Open [http://localhost:3000](http://localhost:3000)** and sign in.
 
 That is it. The first start migrates the database, creates the restricted database role,

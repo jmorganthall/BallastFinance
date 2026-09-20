@@ -1,0 +1,68 @@
+# Ballast from the published image — no clone, no build.
+#
+#   curl -O https://raw.githubusercontent.com/jmorganthall/BallastFinance/main/docker-compose.ghcr.yml
+#   # write a .env next to it (see the README)
+#   docker compose -f docker-compose.ghcr.yml up -d
+#
+# Identical to docker-compose.quickstart.yml except that it pulls rather than
+# builds. Same bootstrap, same two database roles, same everything else.
+#
+# Pin BALLAST_IMAGE to a version tag for anything you care about. `latest`
+# follows the default branch and will change under you.
+
+name: ballast
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-ballast}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}"
+      POSTGRES_DB: "${POSTGRES_DB:-ballast}"
+      TZ: "${HOUSEHOLD_TIMEZONE:-America/Chicago}"
+    volumes:
+      - ballast-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-ballast} -d ${POSTGRES_DB:-ballast}']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    expose:
+      - '5432'
+
+  app:
+    image: "${BALLAST_IMAGE:-ghcr.io/jmorganthall/ballastfinance:latest}"
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Two roles on purpose: the app cannot UPDATE or DELETE events, migrations
+      # run as the owner. Pointing both at the owner undoes the append-only
+      # guarantee that makes every balance in the app falsifiable.
+      DATABASE_URL: "postgres://ballast_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@db:5432/${POSTGRES_DB:-ballast}"
+      DATABASE_MIGRATION_URL: "postgres://${POSTGRES_USER:-ballast}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ballast}"
+      APP_DB_PASSWORD: "${APP_DB_PASSWORD}"
+
+      AUTH_SECRET: "${AUTH_SECRET:?generate one by running openssl rand -base64 32}"
+      AUTH_GOOGLE_ID: "${AUTH_GOOGLE_ID:?create a Google OAuth client and set AUTH_GOOGLE_ID}"
+      AUTH_GOOGLE_SECRET: "${AUTH_GOOGLE_SECRET:?create a Google OAuth client and set AUTH_GOOGLE_SECRET}"
+      AUTH_URL: "${AUTH_URL:-http://localhost:3000}"
+      AUTH_TRUST_HOST: 'true'
+
+      SEED_ALLOWED_EMAILS: "${SEED_ALLOWED_EMAILS:?the email addresses allowed to sign in, comma separated}"
+      SEED_HOUSEHOLD_NAME: "${SEED_HOUSEHOLD_NAME:-Household}"
+
+      N8N_WEBHOOK_URL: "${N8N_WEBHOOK_URL:-}"
+      N8N_WEBHOOK_TOKEN: "${N8N_WEBHOOK_TOKEN:-}"
+
+      HOUSEHOLD_TIMEZONE: "${HOUSEHOLD_TIMEZONE:-America/Chicago}"
+      TZ: "${HOUSEHOLD_TIMEZONE:-America/Chicago}"
+    ports:
+      - '${APP_PORT:-3000}:3000'
+
+volumes:
+  ballast-data:
