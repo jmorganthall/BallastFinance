@@ -79,6 +79,15 @@ database, so a crash-looping app container means: read the log.
 `SKIP_BOOTSTRAP=1` starts the server without any of that. Only useful when you are
 deliberately managing migrations yourself.
 
+### Keeping the bank figure steady
+
+Each account's weekly transfer is rounded **up** to a step (Settings, "The weekly
+transfer"; the nearest $10 unless you change it, 0 for the exact figure), so a plan
+that moves by a few cents does not mean editing Capital One every week. The screen
+shows the exact figure beside the rounded one. The little extra the rounding leaves
+behind is deliberate and shows up as "ahead" at a check-in, where it is counted
+toward your plans like any other extra.
+
 ### Knowing when to update
 
 The footer of every page names the running build and, when the published image has

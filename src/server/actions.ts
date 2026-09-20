@@ -675,6 +675,20 @@ export async function saveNotificationPrefsAction(formData: FormData): Promise<v
   redirect('/settings?saved=1')
 }
 
+export async function saveTransferRoundingAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull } = await import('@/domain')
+  const raw = String(formData.get('round_up') ?? '').trim()
+  const cents = raw === '' ? 0 : parseAmountOrNull(raw)
+  if (cents === null || cents < 0 || cents > 100_000) {
+    redirect(`/settings?error=${encodeURIComponent('Enter the step as an amount, like 10, or 0 for the exact figure.')}`)
+  }
+  await engine.putSetting('transfer_round_up_cents', cents)
+  revalidatePath('/')
+  revalidatePath('/settings')
+  redirect('/settings?saved=1')
+}
+
 export async function saveNudgeSettingsAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const weeks = Number(formData.get('check_in_nudge_weeks'))

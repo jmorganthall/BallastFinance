@@ -41,6 +41,13 @@ export interface DerivationInput {
   driftAdjustments?: readonly DriftAdjustment[]
   /** Cycle starts and opening balances, per item. Absent means "since commit, from $0". */
   cycleStarts?: readonly LineItemCycle[]
+  /**
+   * Round each account's bank figure up to this step (a household setting,
+   * nearest $10 by default). Only the account total is rounded -- it is the
+   * one number that becomes a Capital One transfer; a part's or a plan's
+   * weekly figure stays exact so the parts still add up.
+   */
+  transferRoundUpCents?: Cents
 }
 
 /**
@@ -180,7 +187,7 @@ export function accountViews(input: DerivationInput): AccountView[] {
 
     return {
       account,
-      weekly: weeklyBreakdown(components, today),
+      weekly: weeklyBreakdown(components, today, input.transferRoundUpCents ?? 0),
       shouldHaveSavedCents: items.reduce((s, v) => s + v.shouldHaveSavedCents, 0),
       outstandingCents: items.reduce((s, v) => s + v.remainingCents, 0),
       items,

@@ -25,8 +25,8 @@ export default async function ThisWeekPage() {
   ])
   const today = engine.today()
 
-  const withWork = accounts.filter((a) => a.weekly.totalPerWeekCents !== 0)
-  const grandTotal = withWork.reduce((s, a) => s + a.weekly.totalPerWeekCents, 0)
+  const withWork = accounts.filter((a) => a.weekly.transferPerWeekCents !== 0)
+  const grandTotal = withWork.reduce((s, a) => s + a.weekly.transferPerWeekCents, 0)
   const shouldHold = accounts.reduce((s, a) => s + a.shouldHaveSavedCents, 0)
 
   const firstName = viewer.name?.split(' ')[0] ?? 'there'
@@ -199,7 +199,7 @@ export default async function ThisWeekPage() {
                     <p className="mt-4 rounded-xl bg-[var(--color-surface)] p-3 text-sm">
                       In Capital One 360, set the recurring transfer into{' '}
                       <strong>{view.account.name}</strong> to{' '}
-                      <strong>{formatCents(view.weekly.totalPerWeekCents)} per week</strong>.
+                      <strong>{formatCents(view.weekly.transferPerWeekCents)} per week</strong>.
                     </p>
                   </Card>
                 </li>

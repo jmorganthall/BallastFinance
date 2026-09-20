@@ -49,8 +49,8 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
     engine.closeOutPrompts(),
   ])
 
-  const active = accounts.filter((a) => a.weekly.totalPerWeekCents !== 0)
-  const total = active.reduce((s, a) => s + a.weekly.totalPerWeekCents, 0)
+  const active = accounts.filter((a) => a.weekly.transferPerWeekCents !== 0)
+  const total = active.reduce((s, a) => s + a.weekly.transferPerWeekCents, 0)
 
   const lines: string[] = [`## This week — ${today}`, '']
 
@@ -70,7 +70,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
               )
               .join('')})`
           : ''
-      lines.push(`- **${view.account.name}**: ${formatCents(w.totalPerWeekCents)}/week${parts}`)
+      lines.push(`- **${view.account.name}**: ${formatCents(w.transferPerWeekCents)}/week${parts}`)
       lines.push(`  - should hold ${formatCents(view.shouldHaveSavedCents)} today`)
     }
   }
@@ -125,7 +125,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
       accounts: active.map((a) => ({
         id: a.account.id,
         name: a.account.name,
-        per_week_cents: a.weekly.totalPerWeekCents,
+        per_week_cents: a.weekly.transferPerWeekCents,
         should_hold_cents: a.shouldHaveSavedCents,
       })),
       outstanding_count: outstanding.length,

@@ -25,9 +25,16 @@ export function WeeklyNumber({
   return (
     <div>
       <div className={size === 'large' ? 'text-3xl font-semibold' : 'text-lg font-semibold'}>
-        <Money cents={weekly.totalPerWeekCents} />
+        <Money cents={weekly.transferPerWeekCents} />
         <span className="text-[var(--color-ink-soft)] font-normal text-base"> / week</span>
       </div>
+      {weekly.transferPerWeekCents !== weekly.totalPerWeekCents ? (
+        <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+          <Hint detail="The transfer is rounded up so a plan that moves by a few cents does not mean editing the bank every week. The little extra it leaves behind shows up as ahead at a check-in. Change the step in Settings.">
+            Exactly {formatCents(weekly.totalPerWeekCents)}, rounded up so the transfer stays put
+          </Hint>
+        </p>
+      ) : null}
 
       {hasCatchUp ? (
         <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
