@@ -368,8 +368,52 @@ describe('counting an overage toward the plans', () => {
     expect(assignExtraToPlans({ extraCents: 0, items: [item('a', 'A', '2026-11-01', 100, 0)] })).toEqual({
       assignments: [],
       leftoverCents: 0,
+      stillShort: [{ lineItemId: 'a', label: 'A', dueDate: '2026-11-01', shortCents: 100 }],
+      alreadyFundedCount: 0,
     })
-    expect(assignExtraToPlans({ extraCents: 500, items: [] })).toEqual({ assignments: [], leftoverCents: 500 })
+    expect(assignExtraToPlans({ extraCents: 500, items: [] })).toEqual({
+      assignments: [],
+      leftoverCents: 500,
+      stillShort: [],
+      alreadyFundedCount: 0,
+    })
+  })
+
+  it('never lists a part that is already fully funded, and says how many were skipped', () => {
+    const result = assignExtraToPlans({
+      extraCents: 1000,
+      items: [
+        item('done1', 'HOA', '2026-10-03', 5000, 5000),
+        item('done2', 'Prime', '2026-12-01', 13900, 13900),
+        item('open', 'Christmas', '2026-12-19', 100000, 20000),
+      ],
+    })
+    expect(result.assignments.map((a) => a.label)).toEqual(['Christmas'])
+    expect(result.assignments[0]).toMatchObject({ shortCents: 80000, addedCents: 1000, fullyFunded: false })
+    expect(result.alreadyFundedCount).toBe(2)
+    expect(result.stillShort).toEqual([])
+  })
+
+  it('names the parts the extra could not reach, so the list is not mistaken for a top few', () => {
+    const result = assignExtraToPlans({
+      extraCents: 6000,
+      items: [
+        item('a', 'HOA', '2026-10-03', 5000, 0),
+        item('b', 'Thanksgiving', '2026-11-01', 20000, 10000),
+        item('c', 'Christmas', '2026-12-19', 100000, 20000),
+        item('d', 'Insurance', '2027-02-15', 60000, 60000),
+      ],
+    })
+    // $50 finishes the HOA, the last $10 dents Thanksgiving, Christmas gets nothing.
+    expect(result.assignments.map((a) => [a.label, a.addedCents, a.fullyFunded])).toEqual([
+      ['HOA', 5000, true],
+      ['Thanksgiving', 1000, false],
+    ])
+    expect(result.stillShort).toEqual([
+      { lineItemId: 'c', label: 'Christmas', dueDate: '2026-12-19', shortCents: 80000 },
+    ])
+    expect(result.alreadyFundedCount).toBe(1)
+    expect(result.leftoverCents).toBe(0)
   })
 })
 

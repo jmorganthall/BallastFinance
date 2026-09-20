@@ -362,20 +362,38 @@ export interface OpeningAssignment {
   lineItemId: Id
   label: string
   dueDate: CivilDate
+  /** What the part still needed before any of the extra was counted. */
+  shortCents: Cents
   /** Money from the extra counted toward this part. */
   addedCents: Cents
   /** What the part holds after that: its new opening balance. */
   openingCents: Cents
-  /** True when the part is now fully funded. */
+  /** True when this finishes it: nothing more to set aside for this part. */
   fullyFunded: boolean
+}
+
+export interface ExtraAssignment {
+  assignments: OpeningAssignment[]
+  /** What no plan here could use: a genuine surplus. */
+  leftoverCents: Cents
+  /**
+   * Parts that still need money but got none, because the extra ran out
+   * before their turn. Named so the screen can say the list is not "the top
+   * few" -- it is everything the extra could reach, soonest first.
+   */
+  stillShort: { lineItemId: Id; label: string; dueDate: CivilDate; shortCents: Cents }[]
+  /** Parts already fully funded, which are never listed: nothing to count toward. */
+  alreadyFundedCount: number
 }
 
 export function assignExtraToPlans(args: {
   extraCents: Cents
   items: readonly Pick<LineItemView, 'lineItem' | 'totalCents' | 'shouldHaveSavedCents'>[]
-}): { assignments: OpeningAssignment[]; leftoverCents: Cents } {
+}): ExtraAssignment {
   let remaining = Math.max(0, args.extraCents)
   const assignments: OpeningAssignment[] = []
+  const stillShort: ExtraAssignment['stillShort'] = []
+  let alreadyFundedCount = 0
 
   const ordered = [...args.items].sort(
     (a, b) =>
@@ -384,21 +402,35 @@ export function assignExtraToPlans(args: {
   )
   for (const item of ordered) {
     const lacks = Math.max(0, item.totalCents - item.shouldHaveSavedCents)
+    // Already funded: nothing to count toward, so it is not offered.
+    if (lacks <= 0) {
+      alreadyFundedCount += 1
+      continue
+    }
     const added = Math.min(lacks, remaining)
-    if (added <= 0) continue
+    if (added <= 0) {
+      stillShort.push({
+        lineItemId: item.lineItem.id,
+        label: item.lineItem.label,
+        dueDate: item.lineItem.dueDate,
+        shortCents: lacks,
+      })
+      continue
+    }
     remaining -= added
     const openingCents = item.shouldHaveSavedCents + added
     assignments.push({
       lineItemId: item.lineItem.id,
       label: item.lineItem.label,
       dueDate: item.lineItem.dueDate,
+      shortCents: lacks,
       addedCents: added,
       openingCents,
       fullyFunded: openingCents >= item.totalCents,
     })
   }
 
-  return { assignments, leftoverCents: remaining }
+  return { assignments, leftoverCents: remaining, stillShort, alreadyFundedCount }
 }
 
 function addWeeks(d: CivilDate, weeks: number): CivilDate {

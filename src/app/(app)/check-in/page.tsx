@@ -133,7 +133,7 @@ export default async function CheckInPage({
               // shared out, or the weekly set-aside can ease off.
               const counted = ahead
                 ? assignExtraToPlans({ extraCents: shortfall, items: view.items })
-                : { assignments: [], leftoverCents: 0 }
+                : { assignments: [], leftoverCents: 0, stillShort: [], alreadyFundedCount: 0 }
               const easeOff = ahead
                 ? aheadOptions({
                     extraCents: shortfall,
@@ -223,7 +223,9 @@ export default async function CheckInPage({
                                     {a.label}
                                     <span className="text-[var(--color-ink-soft)]">
                                       {' '}· {humanDate(a.dueDate)}
-                                      {a.fullyFunded ? ' · fully funded' : ''}
+                                      {a.fullyFunded
+                                        ? ' · the last it needs'
+                                        : ` · of the ${formatCents(a.shortCents)} it still needs`}
                                     </span>
                                   </span>
                                   <span className="shrink-0 tabular">
@@ -236,6 +238,16 @@ export default async function CheckInPage({
                               The weekly amounts drop to match, and nothing has to move.
                               {counted.leftoverCents > 0
                                 ? ` The other ${formatCents(counted.leftoverCents)} is more than every plan here needs.`
+                                : ''}
+                              {counted.stillShort.length > 0
+                                ? ` The extra runs out there; ${
+                                    counted.stillShort.length === 1
+                                      ? `${counted.stillShort[0]!.label} still needs ${formatCents(counted.stillShort[0]!.shortCents)}`
+                                      : `${counted.stillShort.length} later plans here still need more`
+                                  } and will keep saving weekly.`
+                                : ''}
+                              {counted.alreadyFundedCount > 0
+                                ? ` ${counted.alreadyFundedCount === 1 ? 'One plan here is' : `${counted.alreadyFundedCount} plans here are`} already fully funded, so ${counted.alreadyFundedCount === 1 ? 'it is' : 'they are'} not listed.`
                                 : ''}
                             </p>
                             <button
