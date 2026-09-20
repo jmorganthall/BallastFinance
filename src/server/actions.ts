@@ -182,3 +182,26 @@ export async function confirmSpendAction(formData: FormData): Promise<void> {
   revalidatePath('/')
   revalidatePath('/packages')
 }
+
+/**
+ * Record an allocation run (PRD §6). Produces a set of instructions, each of
+ * which stays outstanding until a human confirms it happened.
+ */
+export async function runAllocationAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const raw = String(formData.get('floor') ?? '').trim()
+  if (raw === '') return
+
+  const { parseAmountToCents } = await import('@/domain')
+  let floorCents: number
+  try {
+    floorCents = parseAmountToCents(raw)
+  } catch {
+    redirect('/allocate?error=amount')
+  }
+
+  await engine.runAllocation({ floorCents })
+  revalidatePath('/')
+  revalidatePath('/allocate')
+  redirect('/')
+}

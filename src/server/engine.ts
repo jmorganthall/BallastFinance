@@ -23,6 +23,9 @@ import { randomUUID } from 'node:crypto'
 import {
   accountViews,
   closeOutPrompts,
+  DEFAULT_ALLOCATION_RULES,
+  DEFAULT_BUFFER_CENTS,
+  planAllocation,
   outstandingInstructions,
   packageViews,
   todayIn,
@@ -47,6 +50,8 @@ import {
   type InstructionType,
   type IssuedInstruction,
   type OutstandingInstruction,
+  type AllocationPlan,
+  type AllocationRule,
 } from '@/domain'
 
 export class EngineError extends Error {}
@@ -567,6 +572,108 @@ export class Engine {
       this.listConfirmedInstructions(),
     ])
     return outstandingInstructions({ issued, confirmed, today: this.today() })
+  }
+
+  // ---------------------------------------------------------------- allocation
+
+  async allocationRules(): Promise<AllocationRule[]> {
+    return this.getSetting<AllocationRule[]>('allocation_split', DEFAULT_ALLOCATION_RULES)
+  }
+
+  async bufferCents(): Promise<number> {
+    return this.getSetting<number>('buffer_amount', DEFAULT_BUFFER_CENTS)
+  }
+
+  /** Preview only: shows the split without recording anything (PRD §6). */
+  async previewAllocation(floorCents: Cents, rules?: AllocationRule[]): Promise<AllocationPlan> {
+    return planAllocation({
+      floorCents,
+      bufferCents: await this.bufferCents(),
+      rules: rules ?? (await this.allocationRules()),
+      today: this.today(),
+    })
+  }
+
+  /**
+   * Record an allocation run: one allocation_entered event plus an issued
+   * instruction per destination, each independently confirmable (PRD §6).
+   *
+   * Nothing here moves money or marks anything done. The run is a recommendation
+   * until a human confirms each instruction.
+   */
+  async runAllocation(input: {
+    floorCents: Cents
+    rules?: AllocationRule[]
+  }): Promise<{ plan: AllocationPlan; instructionIds: Id[] }> {
+    const today = this.today()
+    const plan = await this.previewAllocation(input.floorCents, input.rules)
+
+    if (plan.netCents <= 0) return { plan, instructionIds: [] }
+
+    const accounts = await this.listReserveAccounts()
+    const instructionIds: Id[] = []
+
+    for (const share of plan.shares) {
+      if (share.amountCents <= 0) continue
+
+      if (share.destination === 'lifestyle') {
+        // Released in halves so it is not spent all at once (PRD §6).
+        for (const release of plan.lifestyleReleases) {
+          if (release.amountCents <= 0) continue
+          instructionIds.push(
+            await this.issueInstruction({
+              type: 'one_time_move',
+              amountCents: release.amountCents,
+              targetId: 'lifestyle',
+              targetLabel: share.label,
+              endsOn: release.releaseOn,
+              note:
+                release.releaseOn === today
+                  ? 'First half, available now.'
+                  : `Second half, from ${release.releaseOn}.`,
+            }),
+          )
+        }
+        continue
+      }
+
+      // A destination that maps to a real reserve account names that account,
+      // so the instruction says where the money actually goes.
+      const account = accounts.find((a) => a.name.toLowerCase() === share.label.toLowerCase())
+
+      instructionIds.push(
+        await this.issueInstruction({
+          type: share.destination === 'debt' ? 'debt_payment' : 'one_time_move',
+          amountCents: share.amountCents,
+          targetId: account?.id ?? share.destination,
+          targetLabel: account?.name ?? share.label,
+          ...(share.destination === 'debt'
+            ? { note: 'Which debt this goes to is decided by the payoff order.' }
+            : {}),
+        }),
+      )
+    }
+
+    await this.db.insert(events).values({
+      householdId: this.householdId,
+      kind: 'allocation_entered',
+      occurredAt: today,
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload: {
+        floor_cents: plan.floorCents,
+        buffer_cents: plan.bufferCents,
+        net_cents: plan.netCents,
+        splits: plan.shares.map((s) => ({
+          destination: s.destination,
+          percent: s.percent,
+          amount_cents: s.amountCents,
+        })),
+        instruction_set: instructionIds,
+      },
+    })
+
+    return { plan, instructionIds }
   }
 
   /** Settings are versioned by effective_from; a change adds a row, never edits one. */
