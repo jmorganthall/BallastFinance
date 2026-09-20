@@ -10,6 +10,17 @@
 import type { ReactNode } from 'react'
 import { formatCents, type Cents } from '@/domain'
 
+/** "Sep 1, 2026" from a civil date, with no timezone involved. */
+export function humanDate(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
 export function Card({
   children,
   className = '',

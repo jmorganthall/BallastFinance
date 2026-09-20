@@ -50,6 +50,32 @@ export interface Debt {
 export class DebtDataError extends Error {}
 
 /**
+ * How long a balance may go unchecked before the screen says so. Every score
+ * and projection here is only as good as the balance it starts from, and a
+ * statement cycle is a month, so a balance older than one is a guess.
+ */
+export const BALANCE_STALE_AFTER_DAYS = 31
+
+/** Days since the balance was last confirmed or read off a statement. */
+export function balanceAgeDays(debt: Pick<Debt, 'balanceAsOf'>, today: CivilDate): number {
+  return Math.max(0, compareDates(today, debt.balanceAsOf))
+}
+
+/**
+ * A gentle nudge, not an error: the balance is old enough that the numbers
+ * built on it deserve a fresh look. Never fires for a paid-off debt, whose
+ * balance is a fact that does not age.
+ */
+export function balanceFreshness(
+  debt: Pick<Debt, 'balanceAsOf' | 'state'>,
+  today: CivilDate,
+  staleAfterDays: number = BALANCE_STALE_AFTER_DAYS,
+): { ageDays: number; stale: boolean } {
+  const ageDays = balanceAgeDays(debt, today)
+  return { ageDays, stale: debt.state === 'open' && ageDays > staleAfterDays }
+}
+
+/**
  * A promo rate that is not actually cheaper than the rate it reverts to is a
  * data-entry mistake, and a costly one: it silently disables the whole
  * promo-cliff mechanism, which exists precisely to raise this debt's priority

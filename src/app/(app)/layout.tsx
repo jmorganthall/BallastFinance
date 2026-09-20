@@ -1,37 +1,32 @@
-import Link from 'next/link'
 import { requireViewer } from '@/server/session'
+import { AppHeader } from '@/components/shell/header'
+import { AppFooter } from '@/components/shell/footer'
+import { Sidebar } from '@/components/shell/sidebar'
+import { BottomNav } from '@/components/shell/nav'
 
-const TABS = [
-  { href: '/', label: 'This week' },
-  { href: '/check-in', label: 'Check in' },
-  { href: '/allocate', label: 'Share out' },
-  { href: '/debts', label: 'Debts' },
-  { href: '/packages', label: 'Plans' },
-  { href: '/settings', label: 'Settings' },
-]
-
+/**
+ * The shell every signed-in screen sits in.
+ *
+ * Phone: a top bar with the mark and the person, the page, the footer, and a
+ * fixed tab bar within reach of a thumb (PRD §9). Tablet and up: the same
+ * screens beside a left sidebar, the tab bar gone, the top bar naming the
+ * section. One layout, two widths -- not two apps.
+ */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
-  await requireViewer()
+  const viewer = await requireViewer()
 
   return (
-    <div className="mx-auto min-h-dvh w-full max-w-2xl px-4 pb-24 pt-6">
-      {children}
+    <div className="min-h-dvh md:grid md:grid-cols-[15rem_minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)]">
+      <Sidebar />
 
-      {/* Fixed bottom nav: everything reachable with a thumb (PRD §9). */}
-      <nav className="fixed inset-x-0 bottom-0 border-t border-[var(--color-line)] bg-[var(--color-card)] pb-[env(safe-area-inset-bottom)]">
-        <ul className="mx-auto flex max-w-2xl">
-          {TABS.map((tab) => (
-            <li key={tab.href} className="flex-1">
-              <Link
-                href={tab.href}
-                className="flex h-14 items-center justify-center px-1 text-center text-xs font-medium sm:text-sm"
-              >
-                {tab.label}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </nav>
+      {/* Bottom padding on a phone clears the fixed tab bar plus the home indicator. */}
+      <div className="flex min-h-dvh min-w-0 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
+        <AppHeader viewer={viewer} />
+        <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-6">{children}</main>
+        <AppFooter />
+      </div>
+
+      <BottomNav />
     </div>
   )
 }

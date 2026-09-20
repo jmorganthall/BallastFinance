@@ -79,6 +79,21 @@ database, so a crash-looping app container means: read the log.
 `SKIP_BOOTSTRAP=1` starts the server without any of that. Only useful when you are
 deliberately managing migrations yourself.
 
+### Knowing when to update
+
+The footer of every page names the running build and, when the published image has
+moved on, says so. The published image carries the git revision it was built from; the
+running app compares its own against the `latest` tag on `ghcr.io` (four small anonymous
+requests, at most once every six hours, never on the page's critical path) and shows a
+notice when they differ. Updating is what it always was: pull the image and restart.
+
+- `BALLAST_UPDATE_CHECK=off` skips the check, for a box with no outbound network or a
+  fork that publishes its own image. `BALLAST_IMAGE_REPO` points it at a different image.
+- A local build only knows its revision if `GIT_SHA` was passed as a build argument.
+  `scripts/quickstart.sh` does this for you; by hand it is
+  `GIT_SHA=$(git rev-parse HEAD) docker compose up -d --build`. Without it the footer
+  says the check is unavailable rather than guessing.
+
 Point `DATA_DIR` at the array (`/mnt/user/appdata/ballast/pgdata`) rather than a
 docker volume, so the database is covered by the array's parity and by your
 existing backup routine.

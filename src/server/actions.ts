@@ -216,88 +216,43 @@ export async function runAllocationAction(formData: FormData): Promise<void> {
 
 // ---------------------------------------------------------------- Phase D
 
-export async function createDebtAction(formData: FormData): Promise<void> {
+/**
+ * What the add-a-debt form gets back. A problem names the box it belongs to,
+ * so the form can show it in place and keep everything the person typed. A
+ * redirect on error was what used to wipe the form.
+ */
+export interface DebtFormState {
+  problems: { field: string; message: string }[]
+  /** Bumped on every successful add, so the form knows to clear itself. */
+  saved: number
+}
+
+export async function createDebtAction(
+  previous: DebtFormState,
+  formData: FormData,
+): Promise<DebtFormState> {
   const { engine } = await requireEngine()
-  const { parseAmountOrNull } = await import('@/domain')
+  const { debtFormValuesFrom, parseDebtForm, DebtDataError } = await import('@/domain')
 
-  const fail = (message: string): never => redirect(`/debts?error=${encodeURIComponent(message)}`)
-
-  const name = String(formData.get('name') ?? '').trim()
-  if (!name) fail('Give the debt a name.')
-
-  const balanceCents = parseAmountOrNull(formData.get('balance') as string)
-  if (balanceCents === null) fail('Enter the balance owed, like 5000 or 5,000.00.')
-  if (balanceCents! < 0) fail('A balance cannot be negative.')
-
-  const aprRaw = Number(formData.get('apr'))
-  if (!Number.isFinite(aprRaw) || aprRaw < 0) fail('Enter the interest rate as a number, like 24.99.')
-  // APR arrives as a percentage a human typed; basis points keep it exact.
-  const aprBasisPoints = Math.round(aprRaw * 100)
-
-  const minType = String(formData.get('min_type') ?? 'fixed')
-  const percentRaw = Number(formData.get('min_percent'))
-
-  let minPaymentRule
-  if (minType === 'percent' || minType === 'percent_with_floor') {
-    if (!Number.isFinite(percentRaw) || percentRaw <= 0) {
-      fail('Enter the minimum payment percentage, like 2.')
-    }
-    const basisPoints = Math.round(percentRaw * 100)
-    if (minType === 'percent') {
-      minPaymentRule = { type: 'percent' as const, basisPoints }
-    } else {
-      const floorCents = parseAmountOrNull(formData.get('min_floor') as string)
-      if (floorCents === null) fail('Enter the amount the minimum never drops below, like 25.')
-      minPaymentRule = { type: 'percent_with_floor' as const, basisPoints, floorCents: floorCents! }
-    }
-  } else {
-    const amountCents = parseAmountOrNull(formData.get('min_amount') as string)
-    // This is the one that crashed: the field is optional in the markup, so a
-    // blank box reached a parser that throws.
-    if (amountCents === null) fail('Enter the minimum payment each month, like 150.')
-    if (amountCents! <= 0) fail('The minimum payment must be more than zero.')
-    minPaymentRule = { type: 'fixed' as const, amountCents: amountCents! }
-  }
-
-  const promoUntil = String(formData.get('promo_until') ?? '').trim()
-  const promoRules = promoUntil
-    ? [
-        {
-          rateBasisPoints: Math.round(Number(formData.get('promo_rate') ?? 0) * 100),
-          appliesTo: 'full' as const,
-          untilDate: promoUntil,
-        },
-      ]
-    : []
-
-  const limitRaw = String(formData.get('credit_limit') ?? '').trim()
-  const creditLimitCents = limitRaw === '' ? null : parseAmountOrNull(limitRaw)
-  if (limitRaw !== '' && creditLimitCents === null) {
-    fail('That credit limit did not look like an amount. Leave it blank if there is none.')
-  }
+  // The browser already ran this same validator; running it again here is what
+  // makes the browser's check a convenience rather than the only guard.
+  const parsed = parseDebtForm(debtFormValuesFrom((name) => formData.get(name)))
+  if (!parsed.ok) return { problems: parsed.problems, saved: previous.saved }
 
   try {
-    await engine.createDebt({
-      name,
-      category: (String(formData.get('category') ?? 'consumer') as 'consumer' | 'auto' | 'mortgage'),
-      balanceCents: balanceCents!,
-      aprBasisPoints,
-      minPaymentRule,
-      promoRules,
-      creditLimitCents,
-      fixedPayment: formData.get('fixed_payment') === 'on',
-    })
+    await engine.createDebt(parsed.input)
   } catch (error) {
     // A rejected debt comes back as a readable message on the page rather than
     // a crash; the rate guard exists to be seen, not to break the form.
-    const { DebtDataError } = await import('@/domain')
     if (error instanceof DebtDataError) {
-      redirect(`/debts?error=${encodeURIComponent(error.message)}`)
+      return { problems: [{ field: 'form', message: error.message }], saved: previous.saved }
     }
     throw error
   }
 
   revalidatePath('/debts')
+  revalidatePath('/allocate')
+  return { problems: [], saved: previous.saved + 1 }
 }
 
 export async function confirmDebtPaymentAction(formData: FormData): Promise<void> {
@@ -311,6 +266,26 @@ export async function confirmDebtPaymentAction(formData: FormData): Promise<void
   }
 
   await engine.confirmDebtPayment({ debtId, amountCents: amountCents! })
+  revalidatePath('/debts')
+  revalidatePath('/')
+}
+
+/**
+ * A balance read off a statement, as opposed to a payment made. This is how a
+ * balance that has gone stale gets refreshed, and it stamps today as the date
+ * it was last known to be right.
+ */
+export async function updateDebtBalanceAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull } = await import('@/domain')
+  const debtId = String(formData.get('debt_id'))
+
+  const balanceCents = parseAmountOrNull(formData.get('balance') as string)
+  if (balanceCents === null || balanceCents < 0) {
+    redirect(`/debts?error=${encodeURIComponent('Enter the balance from the statement, like 4,321.00.')}`)
+  }
+
+  await engine.updateDebtBalance({ debtId, balanceCents: balanceCents! })
   revalidatePath('/debts')
   revalidatePath('/')
 }

@@ -111,7 +111,7 @@ which uses `docker-compose.yml` instead. Same image, same bootstrap, different d
 
 ## Status
 
-**All four build phases are implemented**, with 191 tests passing against a live
+**All four build phases are implemented**, with 254 tests passing against a live
 PostgreSQL 16.
 
 | Phase | Contents | Status |
@@ -176,5 +176,5 @@ remember.
 
 You can run it, change it and share it. If you run a **modified** version as a
 network service, section 13 obliges you to offer your users its source — which is why
-Settings carries a link back here. Running it unmodified for your own household obliges
+the footer of every page carries a link back here. Running it unmodified for your own household obliges
 you to nothing.

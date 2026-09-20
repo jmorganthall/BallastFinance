@@ -10,14 +10,18 @@
  */
 
 import { requireEngine } from '@/server/session'
-import { Card, Empty, Hint, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Empty, Hint, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import {
   confirmDebtPaymentAction,
   createDebtAction,
   setPriorityWeightAction,
+  updateDebtBalanceAction,
 } from '@/server/actions'
-import { formatCents, parseAmountToCents, projectPayoff } from '@/domain'
+import { balanceFreshness, formatCents, parseAmountToCents, projectPayoff } from '@/domain'
 import { DebtForm } from './debt-form'
+
+const smallField =
+  'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-2 text-base text-[var(--color-ink)]'
 
 export const dynamic = 'force-dynamic'
 
@@ -50,12 +54,47 @@ export default async function DebtsPage({
     }
   }
 
+  // A balance older than a statement cycle is a guess, and every number on this
+  // screen is built on it. Said gently: the debt is still here, it just needs
+  // a fresh look.
+  const stale = ladder
+    .map((rung) => ({ rung, freshness: balanceFreshness(rung.debt, today) }))
+    .filter((entry) => entry.freshness.stale)
+
   return (
     <>
       <PageHeader
         title="Payoff order"
         subtitle="Which debt to clear next, and where a lump sum should go."
       />
+
+      {error ? (
+        <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
+          {error}
+        </p>
+      ) : null}
+
+      {stale.length > 0 ? (
+        <Card className="mb-4 bg-[var(--color-accent-soft)]">
+          <h2 className="font-semibold">
+            {stale.length === 1 ? 'One balance' : `${stale.length} balances`} could do with a fresh
+            look
+          </h2>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+            The payoff order is only as good as the balances it starts from. When you have a
+            statement handy, type the current balance in below and Ballast will note today as the
+            date it was last checked.
+          </p>
+          <ul className="mt-2 space-y-1 text-sm">
+            {stale.map(({ rung, freshness }) => (
+              <li key={rung.debt.id}>
+                <strong>{rung.debt.name}</strong> — last checked {humanDate(rung.debt.balanceAsOf)},{' '}
+                {freshness.ageDays} days ago.
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       {warnings.length > 0 ? (
         <Card className="mb-4 bg-[var(--color-behind-soft)]">
@@ -121,6 +160,7 @@ export default async function DebtsPage({
           <ol className="space-y-3">
             {ladder.map((rung) => {
               const projection = projectPayoff({ debt: rung.debt, today })
+              const freshness = balanceFreshness(rung.debt, today)
               return (
                 <li key={rung.debt.id}>
                   <Card>
@@ -133,9 +173,12 @@ export default async function DebtsPage({
                           {rung.debt.category}
                         </p>
                       </div>
-                      <Pill tone={rung.rank === 1 ? 'accent' : 'neutral'}>
-                        {rung.rank === 1 ? 'Next' : `#${rung.rank}`}
-                      </Pill>
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {freshness.stale ? <Pill tone="accent">Check the balance</Pill> : null}
+                        <Pill tone={rung.rank === 1 ? 'accent' : 'neutral'}>
+                          {rung.rank === 1 ? 'Next' : `#${rung.rank}`}
+                        </Pill>
+                      </div>
                     </div>
 
                     <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
@@ -143,6 +186,15 @@ export default async function DebtsPage({
                         <dt className="text-[var(--color-ink-soft)]">Balance</dt>
                         <dd className="font-medium">
                           <Money cents={rung.debt.balanceCents} />
+                        </dd>
+                        <dd
+                          className={`mt-0.5 text-xs ${freshness.stale ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-soft)]'}`}
+                        >
+                          <Hint detail="The date this balance was last confirmed: when the debt was added, a payment was recorded, or a statement balance was typed in.">
+                            {freshness.ageDays === 0
+                              ? 'Checked today'
+                              : `As of ${humanDate(rung.debt.balanceAsOf)}, ${freshness.ageDays} days ago`}
+                          </Hint>
                         </dd>
                       </div>
                       <div>
@@ -183,24 +235,53 @@ export default async function DebtsPage({
                         : '.'}
                     </p>
 
-                    <form action={confirmDebtPaymentAction} className="mt-3 flex items-end gap-2">
-                      <input type="hidden" name="debt_id" value={rung.debt.id} />
-                      <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
-                        I paid
-                        <input
-                          name="amount"
-                          inputMode="decimal"
-                          placeholder={formatCents(rung.minimumPaymentCents).replace('$', '')}
-                          className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-2 text-base text-[var(--color-ink)]"
-                        />
-                      </label>
-                      <button
-                        type="submit"
-                        className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm"
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <form action={confirmDebtPaymentAction} className="flex items-end gap-2">
+                        <input type="hidden" name="debt_id" value={rung.debt.id} />
+                        <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+                          I paid
+                          <input
+                            name="amount"
+                            inputMode="decimal"
+                            placeholder={formatCents(rung.minimumPaymentCents).replace('$', '')}
+                            className={smallField}
+                          />
+                        </label>
+                        <button
+                          type="submit"
+                          className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm"
+                        >
+                          Record
+                        </button>
+                      </form>
+
+                      {/*
+                        * A statement balance, as opposed to a payment: the way to
+                        * bring a stale balance up to date without pretending money
+                        * moved. Interest and new spending change a balance too.
+                        */}
+                      <form
+                        action={updateDebtBalanceAction}
+                        className={`flex items-end gap-2 ${freshness.stale ? 'rounded-lg bg-[var(--color-accent-soft)] p-2 sm:-m-2' : ''}`}
                       >
-                        Record
-                      </button>
-                    </form>
+                        <input type="hidden" name="debt_id" value={rung.debt.id} />
+                        <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+                          The statement says it is
+                          <input
+                            name="balance"
+                            inputMode="decimal"
+                            placeholder={formatCents(rung.debt.balanceCents).replace('$', '')}
+                            className={smallField}
+                          />
+                        </label>
+                        <button
+                          type="submit"
+                          className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm"
+                        >
+                          Update
+                        </button>
+                      </form>
+                    </div>
                   </Card>
                 </li>
               )
@@ -278,11 +359,6 @@ export default async function DebtsPage({
       <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
         Add a debt
       </h2>
-      {error ? (
-        <p className="mb-3 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
-          {error}
-        </p>
-      ) : null}
       <DebtForm action={createDebtAction} />
     </>
   )

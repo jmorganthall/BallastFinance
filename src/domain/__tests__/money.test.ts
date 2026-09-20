@@ -5,6 +5,7 @@ import {
   formatCents,
   parseAmountOrNull,
   parseAmountToCents,
+  parsePercentOrNull,
   proratedCeil,
 } from '../money'
 
@@ -99,5 +100,40 @@ describe('parsing a form field that a person may leave blank', () => {
     expect(parseAmountOrNull('150')).toBe(15000)
     expect(parseAmountOrNull('$1,234.56')).toBe(123456)
     expect(parseAmountOrNull('0')).toBe(0)
+  })
+})
+
+describe('parsing a percentage a person typed', () => {
+  it('takes the ways people write a rate', () => {
+    // Regression: "20.49%" with the sign a card statement prints went through
+    // Number(), came back NaN, and the whole form was thrown away over it.
+    expect(parsePercentOrNull('20.49')).toBe(2049)
+    expect(parsePercentOrNull('20.49%')).toBe(2049)
+    expect(parsePercentOrNull(' 20.49 % ')).toBe(2049)
+    expect(parsePercentOrNull('2')).toBe(200)
+    expect(parsePercentOrNull('0')).toBe(0)
+    expect(parsePercentOrNull('.5')).toBeNull() // no leading digit: not a number people type
+  })
+
+  it('is exact where floating point is not', () => {
+    // 20.49 * 100 is 2048.9999999999998 in IEEE doubles.
+    expect(parsePercentOrNull('20.49')).toBe(2049)
+    expect(parsePercentOrNull('0.0625')).toBe(6) // rounds to the nearest basis point
+    expect(parsePercentOrNull('0.0649')).toBe(6)
+    expect(parsePercentOrNull('0.0650')).toBe(7)
+  })
+
+  it('returns null for blanks and junk rather than throwing', () => {
+    expect(parsePercentOrNull('')).toBeNull()
+    expect(parsePercentOrNull('   ')).toBeNull()
+    expect(parsePercentOrNull(null)).toBeNull()
+    expect(parsePercentOrNull(undefined)).toBeNull()
+    expect(parsePercentOrNull('twenty')).toBeNull()
+    expect(parsePercentOrNull('20.49.1')).toBeNull()
+    expect(parsePercentOrNull('1.23456')).toBeNull()
+  })
+
+  it('keeps the sign so the caller can refuse a negative rate with its own words', () => {
+    expect(parsePercentOrNull('-5')).toBe(-500)
   })
 })

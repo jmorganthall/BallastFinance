@@ -41,6 +41,10 @@ services:
   app:
     build:
       context: .
+      args:
+        # The quick start script fills this from git so the footer can say
+        # which build this is and whether a newer image is published.
+        GIT_SHA: "${GIT_SHA:-}"
     restart: unless-stopped
     depends_on:
       db:
