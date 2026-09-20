@@ -29,7 +29,7 @@ import {
   transferWeeksBetween,
   type CivilDate,
 } from './dates'
-import { ceilDiv, proratedCeil, type Cents } from './money'
+import { ceilDiv, proratedCeil, roundUpToStep, type Cents } from './money'
 import { previousOccurrence, type Recurrence } from './recurrence'
 import {
   lineItemTotalCents,
@@ -260,8 +260,14 @@ export interface CatchUpGroup {
 }
 
 export interface WeeklyBreakdown {
-  /** The number to put into the bank. Always >= the sum of its parts. */
+  /** The exact weekly figure: the sum of the parts below. */
   totalPerWeekCents: Cents
+  /**
+   * The number to put into the bank: the total, rounded up to the household's
+   * step (nearest $10 by default) so small plan changes do not mean editing
+   * the recurring transfer. Equals the total when no step applies.
+   */
+  transferPerWeekCents: Cents
   /** Base components: the stable, ongoing set-aside. */
   ongoingPerWeekCents: Cents
   /**
@@ -282,6 +288,8 @@ export interface WeeklyBreakdown {
 export function weeklyBreakdown(
   components: readonly RateComponent[],
   asOf: CivilDate,
+  /** Round the bank figure up to this step; 0 or absent means exact. */
+  roundUpToCents: Cents = 0,
 ): WeeklyBreakdown {
   const active = components.filter((c) => isComponentActive(c, asOf))
 
@@ -299,10 +307,12 @@ export function weeklyBreakdown(
     .filter((g) => g.perWeekCents !== 0)
     .sort((a, b) => compareDates(a.endDate, b.endDate))
 
+  const totalPerWeekCents = ongoingPerWeekCents + catchUp.reduce((s, g) => s + g.perWeekCents, 0)
   return {
     ongoingPerWeekCents,
     catchUp,
-    totalPerWeekCents: ongoingPerWeekCents + catchUp.reduce((s, g) => s + g.perWeekCents, 0),
+    totalPerWeekCents,
+    transferPerWeekCents: roundUpToStep(totalPerWeekCents, roundUpToCents),
   }
 }
 

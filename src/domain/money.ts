@@ -105,3 +105,22 @@ export function formatCents(cents: Cents): string {
 export function ceilToWholeDollars(cents: Cents): Cents {
   return ceilDiv(cents, 100) * 100
 }
+
+/**
+ * Round a transfer up to the nearest step: $291.26 to the nearest $10 is
+ * $300. A household rule for the Capital One figure, so a plan that moves by
+ * a few cents does not mean editing the bank every week; the little extra it
+ * leaves behind is on purpose ("rather a few cents more than not enough").
+ * A step of zero means exact. Nothing at or below zero is rounded: a cut is
+ * still a cut.
+ */
+export function roundUpToStep(cents: Cents, stepCents: Cents): Cents {
+  if (!Number.isInteger(cents) || !Number.isInteger(stepCents)) {
+    throw new MoneyError(`roundUpToStep needs integers, got ${cents} to ${stepCents}`)
+  }
+  if (stepCents <= 0 || cents <= 0) return cents
+  return ceilDiv(cents, stepCents) * stepCents
+}
+
+/** Nearest $10: the household's opening position on how steady the bank figure should be. */
+export const DEFAULT_TRANSFER_ROUND_UP_CENTS: Cents = 1000

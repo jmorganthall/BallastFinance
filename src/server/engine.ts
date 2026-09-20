@@ -27,6 +27,7 @@ import {
   apportion,
   canWriteAccount,
   closeOutPrompts,
+  DEFAULT_TRANSFER_ROUND_UP_CENTS,
   findShortfalls,
   formatCents,
   lineItemTotalCents,
@@ -704,7 +705,7 @@ export class Engine {
 
   /** Load every fact the derivation module needs, in one place. */
   async derivationInput(): Promise<DerivationInput> {
-    const [accounts, packages, lineItems, changes, driftAdjustments, cycleStarts] =
+    const [accounts, packages, lineItems, changes, driftAdjustments, cycleStarts, transferRoundUpCents] =
       await Promise.all([
         this.listReserveAccounts(),
         this.listPackages(),
@@ -712,6 +713,7 @@ export class Engine {
         this.listLineItemChanges(),
         this.acceptedDriftAdjustments(),
         this.listCycleStarts(),
+        this.transferRoundUpCents(),
       ])
     return {
       today: this.today(),
@@ -721,7 +723,17 @@ export class Engine {
       changes,
       driftAdjustments,
       cycleStarts,
+      transferRoundUpCents,
     }
+  }
+
+  /**
+   * The step the bank figure is rounded up to. A household rule (a setting,
+   * versioned like the others): nearest $10 unless they say otherwise, zero
+   * for exact.
+   */
+  async transferRoundUpCents(): Promise<Cents> {
+    return this.getSetting<number>('transfer_round_up_cents', DEFAULT_TRANSFER_ROUND_UP_CENTS)
   }
 
   /** Home / This Week: the per-account numbers to move (PRD §9). */

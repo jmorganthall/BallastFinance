@@ -13,6 +13,7 @@ import {
   saveAllocationRulesAction,
   saveNotificationPrefsAction,
   saveNudgeSettingsAction,
+  saveTransferRoundingAction,
   signOutAction,
 } from '@/server/actions'
 import { formatCents } from '@/domain'
@@ -31,7 +32,7 @@ export default async function SettingsPage({
   const { saved, error } = await searchParams
   const { engine, viewer } = await requireEngine()
 
-  const [rules, buffer, weight, accounts, nudgeWeeks, promoLead, prefs] = await Promise.all([
+  const [rules, buffer, weight, accounts, nudgeWeeks, promoLead, prefs, roundUp] = await Promise.all([
     engine.allocationRules(),
     engine.bufferCents(),
     engine.priorityWeight(),
@@ -39,6 +40,7 @@ export default async function SettingsPage({
     engine.getSetting<number>('check_in_nudge_weeks', 2),
     engine.promoLeadWeeks(),
     engine.getSetting<Record<string, boolean>>('notification_prefs', {}),
+    engine.transferRoundUpCents(),
   ])
   // Absent means subscribed: both spouses receive everything by default (PRD §8).
   const receives = prefs[viewer.userId] !== false
@@ -99,6 +101,37 @@ export default async function SettingsPage({
             className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"
           >
             Save these rules
+          </button>
+        </form>
+      </Card>
+
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+        The weekly transfer
+      </h2>
+      <Card className="mb-6">
+        <form action={saveTransferRoundingAction} className="space-y-3">
+          <label className="block text-sm font-medium">
+            Round each account&apos;s weekly transfer up to the nearest
+            <span className="mt-1 flex items-center gap-2">
+              <span className="text-[var(--color-ink-soft)]">$</span>
+              <input
+                name="round_up"
+                inputMode="decimal"
+                defaultValue={formatCents(roundUp).replace('$', '').replace(/,/g, '')}
+                className={field.replace('mt-1 ', '')}
+              />
+            </span>
+            <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+              So a plan that moves by a few cents does not mean editing Capital One every week.
+              $291.26 becomes $300 at the nearest $10. The little extra it leaves behind shows up
+              as ahead at a check-in. Enter 0 for the exact figure.
+            </span>
+          </label>
+          <button
+            type="submit"
+            className="w-full rounded-xl border border-[var(--color-line)] px-4 py-3 font-medium"
+          >
+            Save
           </button>
         </form>
       </Card>

@@ -7,6 +7,7 @@ import {
   parseAmountToCents,
   parsePercentOrNull,
   proratedCeil,
+  roundUpToStep,
 } from '../money'
 
 describe('ceiling division', () => {
@@ -135,5 +136,24 @@ describe('parsing a percentage a person typed', () => {
 
   it('keeps the sign so the caller can refuse a negative rate with its own words', () => {
     expect(parsePercentOrNull('-5')).toBe(-500)
+  })
+})
+
+describe('rounding the bank figure up to a step', () => {
+  it('rounds up to the nearest step, and leaves an exact multiple alone', () => {
+    expect(roundUpToStep(29126, 1000)).toBe(30000)
+    expect(roundUpToStep(29126, 500)).toBe(29500)
+    expect(roundUpToStep(30000, 1000)).toBe(30000)
+    expect(roundUpToStep(1, 1000)).toBe(1000)
+  })
+
+  it('is exact with no step, and never rounds nothing or a cut', () => {
+    expect(roundUpToStep(29126, 0)).toBe(29126)
+    expect(roundUpToStep(0, 1000)).toBe(0)
+    expect(roundUpToStep(-2500, 1000)).toBe(-2500)
+  })
+
+  it('refuses fractions of a cent', () => {
+    expect(() => roundUpToStep(291.26, 1000)).toThrow()
   })
 })

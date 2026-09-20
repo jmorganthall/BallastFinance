@@ -86,6 +86,24 @@ describe('the Disney package rolls up to a Capital One instruction (Phase A acce
     ],
   }
 
+  it('rounds only the account transfer up to the household step, and says what it really is', () => {
+    const exact = accountViews(input)
+    const rounded = accountViews({ ...input, transferRoundUpCents: 1000 })
+    for (const [e, r] of exact.map((v, i) => [v, rounded[i]!] as const)) {
+      // The exact figure and its parts are untouched; only the bank figure moves.
+      expect(r.weekly.totalPerWeekCents).toBe(e.weekly.totalPerWeekCents)
+      expect(r.weekly.ongoingPerWeekCents).toBe(e.weekly.ongoingPerWeekCents)
+      expect(e.weekly.transferPerWeekCents).toBe(e.weekly.totalPerWeekCents)
+      expect(r.weekly.transferPerWeekCents % 1000).toBe(0)
+      expect(r.weekly.transferPerWeekCents).toBeGreaterThanOrEqual(r.weekly.totalPerWeekCents)
+      expect(r.weekly.transferPerWeekCents - r.weekly.totalPerWeekCents).toBeLessThan(1000)
+      // A part's weekly figure is never rounded: the parts still add up.
+      for (const item of r.items) {
+        expect(item.weekly.transferPerWeekCents).toBe(item.weekly.totalPerWeekCents)
+      }
+    }
+  })
+
   it('gives each account its own weekly number', () => {
     const [annualView, ltView] = accountViews(input)
 
