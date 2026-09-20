@@ -137,7 +137,7 @@ describe('close-out', () => {
       dueDate: '2026-11-21',
       reserveAccountId: 'acct-annual',
       state: 'accruing',
-      recurrence: 'none',
+      recurrence: null,
       ...over,
     }
   }

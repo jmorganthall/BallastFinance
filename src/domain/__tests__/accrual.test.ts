@@ -9,6 +9,7 @@ import {
   shouldHaveSavedForItem,
   weeklyBreakdown,
   type RateComponent,
+  openingSinceLastOccurrence,
 } from '../accrual'
 import { transferWeeksBetween, type CivilDate } from '../dates'
 import type { LineItem, LineItemChange, LineItemSnapshot } from '../types'
@@ -28,7 +29,7 @@ function item(over: Partial<LineItem> = {}): LineItem {
     dueDate: DUE,
     reserveAccountId: ACCOUNT,
     state: 'accruing',
-    recurrence: 'none',
+    recurrence: null,
     ...over,
   }
 }
@@ -433,5 +434,46 @@ describe('the should-have-saved curve', () => {
 
   it('degrades to a single point when there is no time to plot', () => {
     expect(accrualCurve({ components, from: DUE, to: DUE, capCents: 60000 })).toHaveLength(1)
+  })
+})
+
+describe('what a recurring item would already have set aside', () => {
+  // $1,200 due 15 Feb 2027, every year: the last one was 15 Feb 2026, and
+  // saving since then would be 31 Saturday transfers into a 52-week cycle.
+  it('prices the elapsed part of the cycle exactly as a committed item would', () => {
+    const suggestion = openingSinceLastOccurrence({
+      totalCents: 120000,
+      dueDate: '2027-02-15',
+      recurrence: { every: 1, unit: 'year' },
+      today: '2026-09-19',
+    })
+    expect(suggestion).toEqual({ lastOccurrence: '2026-02-15', cents: 71539 })
+  })
+
+  it('has nothing to say for a one-off, or a cycle that has not started', () => {
+    expect(
+      openingSinceLastOccurrence({ totalCents: 120000, dueDate: '2027-02-15', recurrence: null, today: '2026-09-19' }),
+    ).toBeNull()
+    // Due in three weeks, every 2 weeks: the previous one is still ahead of us.
+    expect(
+      openingSinceLastOccurrence({
+        totalCents: 5000,
+        dueDate: '2026-10-10',
+        recurrence: { every: 2, unit: 'week' },
+        today: '2026-09-19',
+      }),
+    ).toBeNull()
+  })
+
+  it('never suggests more than the item costs', () => {
+    // Due tomorrow, every month: nearly the whole cycle has elapsed.
+    const suggestion = openingSinceLastOccurrence({
+      totalCents: 9900,
+      dueDate: '2026-09-20',
+      recurrence: { every: 1, unit: 'month' },
+      today: '2026-09-19',
+    })
+    expect(suggestion!.cents).toBeLessThanOrEqual(9900)
+    expect(suggestion!.cents).toBeGreaterThan(0)
   })
 })

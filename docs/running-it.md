@@ -128,6 +128,13 @@ week. A recurring row whose Next Due has passed rolls to its next occurrence. Ea
 loan row becomes a debt with its balance dated "As of". Anything wrong afterwards
 is changed on the plan's or the debt's own screen.
 
+"Due Every" is read as a number of days (the sheet's 7, 14, 90, 183, 365, 730,
+1825), as words ("year", "6 months", "every 3 weeks", "once"), or as a count and
+a unit ("18 months", "2 yrs"). Day counts that are really calendar periods become
+those periods, so a yearly bill keeps its date rather than drifting a day every
+leap year; anything else stays the interval it says (203 days is every 203
+days). The preview shows the interval in plain words before anything is made.
+
 ## Backups
 
 Nightly `pg_dump` to the array, retained 30 days (PRD §11). **Test a restore

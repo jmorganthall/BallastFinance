@@ -66,8 +66,8 @@ export interface LineItem {
   dueDate: CivilDate
   reserveAccountId: Id
   state: LineItemState
-  /** 'none' is a one-off. Anything else rolls forward when confirmed spent. */
-  recurrence: Recurrence
+  /** null is a one-off. An interval rolls forward when confirmed spent. */
+  recurrence: Recurrence | null
 }
 
 /** Total obligation of a line item. The one place unit x quantity is computed. */

@@ -49,17 +49,27 @@ describe('a valid intake', () => {
         quantity: 3,
         dueDate: '2027-01-16',
         reserveAccountId: 'acct-annual',
-        recurrence: 'none',
+        recurrence: null,
       },
     ])
   })
 
   it('carries a recurrence when the producer sends one', () => {
     const result = validateIntake(
+      intake({
+        line_items: [{ ...intake().line_items[0], recurrence: { every: 3, unit: 'week' } }],
+      }),
+      context,
+    )
+    expect(result.ok && result.value.lineItems[0]!.recurrence).toEqual({ every: 3, unit: 'week' })
+  })
+
+  it('still understands the fixed names the first version used', () => {
+    const result = validateIntake(
       intake({ line_items: [{ ...intake().line_items[0], recurrence: 'annual' }] }),
       context,
     )
-    expect(result.ok && result.value.lineItems[0]!.recurrence).toBe('annual')
+    expect(result.ok && result.value.lineItems[0]!.recurrence).toEqual({ every: 1, unit: 'year' })
   })
 
   it('rolls a recurring item entered with a past date to its next occurrence', () => {

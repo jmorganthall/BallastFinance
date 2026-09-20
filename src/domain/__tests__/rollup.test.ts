@@ -56,7 +56,7 @@ function li(over: Partial<LineItem> & Pick<LineItem, 'id'>): LineItem {
     dueDate: '2027-01-16',
     reserveAccountId: annual.id,
     state: 'accruing',
-    recurrence: 'none',
+    recurrence: null,
     ...over,
   }
 }
@@ -288,7 +288,7 @@ describe('cycles and opening balances', () => {
     const later: DerivationInput = {
       ...input,
       today: '2026-11-21',
-      lineItems: [li({ id: 'li-ins', unitAmountCents: 60000, dueDate: '2027-11-20', recurrence: 'annual' })],
+      lineItems: [li({ id: 'li-ins', unitAmountCents: 60000, dueDate: '2027-11-20', recurrence: { every: 1, unit: 'year' } })],
       cycleStarts: [
         { lineItemId: 'li-ins', startDate: TODAY, openingCents: 26000 },
         // Confirmed spent and rolled forward on 2026-11-20: a fresh cycle at $0.
@@ -308,7 +308,7 @@ describe('cycles and opening balances', () => {
     const rolled: DerivationInput = {
       ...input,
       today: '2026-12-05',
-      lineItems: [li({ id: 'li-ins', unitAmountCents: 60000, dueDate: '2027-11-20', recurrence: 'annual' })],
+      lineItems: [li({ id: 'li-ins', unitAmountCents: 60000, dueDate: '2027-11-20', recurrence: { every: 1, unit: 'year' } })],
       changes: [
         {
           lineItemId: 'li-ins',

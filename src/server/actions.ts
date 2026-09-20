@@ -8,7 +8,12 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { requireEngine } from '@/server/session'
-import { INTAKE_CONTRACT_VERSION } from '@/domain'
+import {
+  INTAKE_CONTRACT_VERSION,
+  describeRecurrence,
+  recurrenceOf,
+  type Recurrence,
+} from '@/domain'
 
 export interface FormState {
   problems: { path: string; message: string }[]
@@ -25,7 +30,8 @@ export async function createPackageAction(
   const quantities = formData.getAll('quantity').map(String)
   const dueDates = formData.getAll('due_date').map(String)
   const accounts = formData.getAll('reserve_account').map(String)
-  const recurrences = formData.getAll('recurrence').map(String)
+  const units = formData.getAll('recurrence_unit').map(String)
+  const everys = formData.getAll('recurrence_every').map(String)
 
   const lineItems = labels
     .map((label, i) => ({
@@ -34,7 +40,7 @@ export async function createPackageAction(
       quantity: Number(quantities[i] ?? '1') || 1,
       due_date: dueDates[i] ?? '',
       reserve_account: accounts[i] ?? '',
-      recurrence: recurrences[i] || 'none',
+      recurrence: recurrenceOf(everys[i] ?? 1, units[i] ?? 'none'),
     }))
     // An untouched blank row is not an error, it is just not a line item.
     .filter((item) => item.label.trim() !== '' || item.unit_amount.trim() !== '')
@@ -57,6 +63,21 @@ export async function commitPackageAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const { parseAmountOrNull } = await import('@/domain')
   const packageId = String(formData.get('package_id'))
+
+  // Taking the offer recomputes it here rather than believing the form: the
+  // figure decides a weekly number, so it comes from the same place the screen
+  // got it, not from whatever was posted back.
+  if (formData.get('use_suggested')) {
+    const suggested = await engine.suggestedOpenings(packageId)
+    await engine.commitPackage(packageId, {
+      openingByLineItem: Object.fromEntries(suggested.map((s) => [s.lineItemId, s.cents])),
+    })
+    revalidatePath('/')
+    revalidatePath('/packages')
+    revalidatePath(`/packages/${packageId}`)
+    return
+  }
+
   const raw = String(formData.get('opening') ?? '').trim()
   const openingCents = raw === '' ? 0 : parseAmountOrNull(raw)
   if (openingCents === null || openingCents < 0) {
@@ -70,11 +91,13 @@ export async function commitPackageAction(formData: FormData): Promise<void> {
   revalidatePath(`/packages/${packageId}`)
 }
 
-const RECURRENCE_VALUES = new Set(['none', 'monthly', 'quarterly', 'semiannual', 'annual'])
-
-function readRecurrence(value: unknown): 'none' | 'monthly' | 'quarterly' | 'semiannual' | 'annual' {
-  const text = String(value ?? 'none')
-  return (RECURRENCE_VALUES.has(text) ? text : 'none') as ReturnType<typeof readRecurrence>
+/**
+ * How often, as a form sends it: a unit ("none" for a one-off) and a count.
+ * An unusable pair is a one-off rather than an error -- the same reading the
+ * domain gives it, so a screen and the engine can never disagree.
+ */
+function readRecurrence(formData: FormData): Recurrence | null {
+  return recurrenceOf(formData.get('recurrence_every') ?? 1, formData.get('recurrence_unit'))
 }
 
 /** Every field of a part, in one save. */
@@ -105,7 +128,7 @@ export async function updateLineItemAction(formData: FormData): Promise<void> {
       quantity,
       dueDate,
       reserveAccountId,
-      recurrence: readRecurrence(formData.get('recurrence')),
+      recurrence: readRecurrence(formData),
     })
   } catch (error) {
     if (error instanceof EngineError) fail(error.message)
@@ -144,7 +167,7 @@ export async function addLineItemAction(formData: FormData): Promise<void> {
       quantity,
       dueDate,
       reserveAccountId,
-      recurrence: readRecurrence(formData.get('recurrence')),
+      recurrence: readRecurrence(formData),
     })
   } catch (error) {
     if (error instanceof EngineError) fail(error.message)
@@ -540,7 +563,9 @@ export type SheetImportState =
         account: string
         amountCents: number
         dueDate: string
+        /** Already in plain words: "Every 3 weeks". */
         recurrence: string
+        repeats: boolean
         openingCents: number
         notes: string[]
       }[]
@@ -594,7 +619,11 @@ export async function sheetImportAction(
     return {
       phase: 'preview',
       text,
-      expenses: parsed.expenses,
+      expenses: parsed.expenses.map((e) => ({
+        ...e,
+        recurrence: describeRecurrence(e.recurrence),
+        repeats: e.recurrence !== null,
+      })),
       debts: parsed.debts.map((d) => ({
         row: d.row,
         name: d.name,

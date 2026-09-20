@@ -15,7 +15,7 @@
 import { z } from 'zod'
 import { assertCivilDate, compareDates, type CivilDate } from './dates'
 import { parseAmountToCents, type Cents } from './money'
-import { RECURRENCES, rollToFuture, type Recurrence } from './recurrence'
+import { recurrenceOf, rollToFuture, RECURRENCE_UNITS, type Recurrence } from './recurrence'
 import { canWriteAccount, type Id, type Package, type PackageState, type ReserveAccount } from './types'
 
 /** Bump only for a breaking change. Unknown versions are rejected loudly (PRD §4). */
@@ -33,9 +33,40 @@ const intakeLineItemSchema = z.object({
   reserve_account: z.string().trim().min(1),
   /**
    * How often it comes round (PRD D8, superseded). Additive to the contract:
-   * a producer that does not send it gets a one-off, exactly as before.
+   * a producer that does not send it gets a one-off, exactly as before, and
+   * one still naming the old fixed set ("annual") gets the interval that
+   * always was.
    */
-  recurrence: z.enum(RECURRENCES as [Recurrence, ...Recurrence[]]).default('none'),
+  recurrence: z
+    .union([
+      z.string(),
+      z.null(),
+      z.object({
+        every: z.number().int().min(1),
+        unit: z.enum(RECURRENCE_UNITS as [string, ...string[]]),
+      }),
+    ])
+    .optional()
+    .transform((value, ctx) => {
+      if (value == null) return null
+      if (typeof value === 'string' && (value === '' || value === 'none')) return null
+      const parsed =
+        typeof value === 'string' ? recurrenceOf(1, value) : recurrenceOf(value.every, value.unit)
+      if (!parsed) {
+        // Refused, never guessed: a producer that means "every fortnight" and
+        // gets a one-off has been quietly misunderstood, and the weekly number
+        // would be wrong for the rest of the series.
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            typeof value === 'string'
+              ? `Not a recurrence: "${value}". Send { every, unit } with unit one of day, week, month, year.`
+              : `Not a recurrence: every ${value.every} ${value.unit}.`,
+        })
+        return z.NEVER
+      }
+      return parsed
+    }),
 })
 
 const intakePackageSchema = z.object({
@@ -64,7 +95,7 @@ export interface NormalisedLineItem {
   quantity: number
   dueDate: CivilDate
   reserveAccountId: Id
-  recurrence: Recurrence
+  recurrence: Recurrence | null
 }
 
 export interface NormalisedIntake {

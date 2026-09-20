@@ -22,7 +22,8 @@ import {
   retirePackageAction,
   updateLineItemAction,
 } from '@/server/actions'
-import { formatCents, RECURRENCE_LABELS, RECURRENCES } from '@/domain'
+import { describeRecurrence, formatCents } from '@/domain'
+import { RecurrenceFields } from '@/components/recurrence-fields'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,6 +48,10 @@ export default async function PackageDetailPage({
   if (!view) notFound()
 
   const isDraft = view.package.state === 'simulated'
+  // What a recurring part would already hold, had saving started last time
+  // round. Offered, never assumed: the person picks it or types their own.
+  const suggested = isDraft ? await engine.suggestedOpenings(view.package.id) : []
+  const suggestedTotal = suggested.reduce((sum, s) => sum + s.cents, 0)
   const isDone = view.package.state === 'retired'
   const whatIf = isDraft ? await engine.whatIf(id) : []
   const curve = isDraft || isDone ? null : await engine.packageCurve(id)
@@ -62,11 +67,6 @@ export default async function PackageDetailPage({
     <option key={a.id} value={a.id} disabled={!a.writable}>
       {a.name}
       {a.scope === 'individual' ? (a.writable ? ' (yours)' : ' — theirs') : ''}
-    </option>
-  ))
-  const recurrenceOptions = RECURRENCES.map((r) => (
-    <option key={r} value={r}>
-      {RECURRENCE_LABELS[r]}
     </option>
   ))
 
@@ -126,10 +126,51 @@ export default async function PackageDetailPage({
               )}
             </div>
 
+            {suggested.length > 0 ? (
+              <form
+                action={commitPackageAction}
+                className="mt-4 rounded-xl border-2 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3"
+              >
+                <input type="hidden" name="package_id" value={view.package.id} />
+                <p className="text-sm font-medium">
+                  You would have <Money cents={suggestedTotal} /> set aside by now
+                </p>
+                <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                  If you had been saving since the last time this came round. Is that about what
+                  you have?
+                </p>
+                <ul className="mt-2 space-y-1 text-sm">
+                  {suggested.map((s) => (
+                    <li key={s.lineItemId} className="flex justify-between gap-3">
+                      <span>
+                        {s.label}
+                        <span className="block text-xs text-[var(--color-ink-soft)]">
+                          last due {humanDate(s.lastOccurrence)}
+                        </span>
+                      </span>
+                      <span className="shrink-0 tabular">
+                        <Money cents={s.cents} />
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="submit"
+                  name="use_suggested"
+                  value="1"
+                  className="mt-3 w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"
+                >
+                  Yes, start with <Money cents={suggestedTotal} /> set aside
+                </button>
+              </form>
+            ) : null}
+
             <form action={commitPackageAction} className="mt-4 space-y-3">
               <input type="hidden" name="package_id" value={view.package.id} />
               <label className="block text-sm font-medium">
-                Already set aside for this (optional)
+                {suggested.length > 0
+                  ? 'Or tell us what is actually set aside'
+                  : 'Already set aside for this (optional)'}
                 <input name="opening" inputMode="decimal" placeholder="0" className={field} />
                 <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
                   Money you already have toward it. Shared across the parts by cost, so the
@@ -138,9 +179,13 @@ export default async function PackageDetailPage({
               </label>
               <button
                 type="submit"
-                className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"
+                className={`w-full rounded-xl px-4 py-3 font-medium ${
+                  suggested.length > 0
+                    ? 'border border-[var(--color-line)]'
+                    : 'bg-[var(--color-accent)] text-white'
+                }`}
               >
-                Start saving for this
+                {suggested.length > 0 ? 'Start with this amount instead' : 'Start saving for this'}
               </button>
             </form>
           </>
@@ -180,9 +225,9 @@ export default async function PackageDetailPage({
                   <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
                     {accountName(item.lineItem.reserveAccountId)}
                     {' · '}
-                    {item.lineItem.recurrence === 'none'
+                    {item.lineItem.recurrence === null
                       ? `needed by ${humanDate(item.lineItem.dueDate)}`
-                      : `${RECURRENCE_LABELS[item.lineItem.recurrence].toLowerCase()}, next ${humanDate(item.lineItem.dueDate)}`}
+                      : `${describeRecurrence(item.lineItem.recurrence).toLowerCase()}, next ${humanDate(item.lineItem.dueDate)}`}
                   </p>
                 </div>
                 {item.isOverdue ? <Pill tone="behind">Date has passed</Pill> : null}
@@ -246,12 +291,7 @@ export default async function PackageDetailPage({
                           className={field}
                         />
                       </label>
-                      <label className="block text-sm font-medium">
-                        How often
-                        <select name="recurrence" defaultValue={item.lineItem.recurrence} className={field}>
-                          {recurrenceOptions}
-                        </select>
-                      </label>
+                      <RecurrenceFields defaultValue={item.lineItem.recurrence} />
                     </div>
                     <label className="block text-sm font-medium">
                       Save it in
@@ -329,12 +369,7 @@ export default async function PackageDetailPage({
                   Needed by
                   <input name="due_date" type="date" className={field} />
                 </label>
-                <label className="block text-sm font-medium">
-                  How often
-                  <select name="recurrence" defaultValue="none" className={field}>
-                    {recurrenceOptions}
-                  </select>
-                </label>
+                <RecurrenceFields />
               </div>
               <label className="block text-sm font-medium">
                 Save it in
