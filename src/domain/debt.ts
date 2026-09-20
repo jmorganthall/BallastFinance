@@ -43,6 +43,11 @@ export interface Debt {
   promoRules: PromoRule[]
   minPaymentRule: MinPaymentRule
   creditLimitCents?: Cents | null
+  /**
+   * Listed in the PRD's data model, read by nothing. The form no longer asks
+   * for it: a set-amount minimum already says the payment never changes, and
+   * asking twice looked like two different questions. Stays false.
+   */
   fixedPayment: boolean
   state: DebtState
 }

@@ -50,7 +50,6 @@ describeDb('debts, the ladder and the optimizer', () => {
       balanceCents: 1200000,
       aprBasisPoints: 599,
       minPaymentRule: { type: 'fixed', amountCents: 40000 },
-      fixedPayment: true,
     })
   })
 

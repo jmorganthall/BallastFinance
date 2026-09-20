@@ -183,7 +183,7 @@ export function DebtForm({
             value={values.min_type}
             onChange={(e) => set('min_type', e.target.value)}
           >
-            <option value="fixed">A set amount each month</option>
+            <option value="fixed">A set amount each month (a loan, or a card with a flat minimum)</option>
             <option value="percent">A percentage of the balance</option>
             <option value="percent_with_floor">A percentage, but never below a set amount</option>
           </select>
@@ -279,17 +279,6 @@ export function DebtForm({
           </p>
         </>
       ) : null}
-
-      <label className="flex min-h-11 items-center gap-3 text-sm font-medium">
-        <input
-          type="checkbox"
-          name="fixed_payment"
-          checked={values.fixed_payment}
-          onChange={(e) => set('fixed_payment', e.target.checked)}
-          className="h-5 w-5 shrink-0"
-        />
-        The payment never changes (a loan, not a card)
-      </label>
 
       <button
         type="submit"

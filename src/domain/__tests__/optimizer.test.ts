@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { optimiseLumpSum } from '../optimizer'
-import type { Debt } from '../debt'
+import { projectPayoff, type Debt } from '../debt'
 
 const TODAY = '2026-09-19'
 
@@ -56,11 +56,57 @@ describe('knockouts first', () => {
     expect(result.interestAvoidedCents).toBeGreaterThan(0)
   })
 
-  it('explains itself in plain language', () => {
+  it('reports interest never paid over the life of the debts, and months knocked off', () => {
     const result = optimiseLumpSum({ debts, amountCents: 107500, today: TODAY })
-    expect(result.why).toContain('clears Store card outright')
-    expect(result.why).toContain('most expensive one left')
-    expect(result.why).toMatch(/\$\d+\.\d{2} a month back/)
+    const [cleared, dented] = result.allocations
+
+    // Clearing the store card outright saves every cent of interest it would
+    // have cost at its minimum, and ends it that many months early.
+    const storeAlone = projectPayoff({ debt: debts[0]!, today: TODAY })
+    expect(cleared!.lifetimeInterestAvoidedCents).toBe(storeAlone.totalInterestCents)
+    expect(cleared!.monthsSooner).toBe(storeAlone.months)
+
+    // A $675 dent in the big card: less interest over its life, gone sooner.
+    const bigBefore = projectPayoff({ debt: debts[1]!, today: TODAY })
+    const bigAfter = projectPayoff({ debt: { ...debts[1]!, balanceCents: 900000 - 67500 }, today: TODAY })
+    expect(dented!.lifetimeInterestAvoidedCents).toBe(
+      bigBefore.totalInterestCents - bigAfter.totalInterestCents,
+    )
+    expect(dented!.lifetimeInterestAvoidedCents).toBeGreaterThan(0)
+    expect(dented!.monthsSooner).toBe(bigBefore.months! - bigAfter.months!)
+    expect(dented!.monthsSooner).toBeGreaterThan(0)
+    expect(dented!.reason).toMatch(/Gone \d+ months sooner\.$/)
+
+    // The long view exceeds the twelve-month view when payoff takes years.
+    expect(result.lifetimeInterestAvoidedCents).toBe(
+      cleared!.lifetimeInterestAvoidedCents! + dented!.lifetimeInterestAvoidedCents!,
+    )
+    expect(result.lifetimeInterestAvoidedCents!).toBeGreaterThan(result.interestAvoidedCents)
+  })
+
+  it('is honest when a debt would never be paid off at its minimum', () => {
+    // 1% of the balance a month against 29.99% never gets there.
+    const endless = debt({
+      id: 'endless',
+      name: 'Endless card',
+      balanceCents: 500000,
+      aprBasisPoints: 2999,
+      minPaymentRule: { type: 'percent', basisPoints: 100 },
+    })
+    const result = optimiseLumpSum({ debts: [endless], amountCents: 100000, today: TODAY })
+    expect(result.allocations[0]!.lifetimeInterestAvoidedCents).toBeNull()
+    expect(result.allocations[0]!.monthsSooner).toBeNull()
+    expect(result.allocations[0]!.reason).not.toContain('sooner')
+    // No "life of the loan" figure, but the next-year figure still stands.
+    expect(result.lifetimeInterestAvoidedCents).toBeNull()
+    expect(result.interestAvoidedCents).toBeGreaterThan(0)
+  })
+
+  it('explains itself in plain language, leaving the figures to the figures', () => {
+    const result = optimiseLumpSum({ debts, amountCents: 107500, today: TODAY })
+    expect(result.why).toBe(
+      'This clears Store card outright. The rest goes at Big card, the most expensive one left.',
+    )
   })
 })
 
