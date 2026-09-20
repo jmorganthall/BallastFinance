@@ -53,6 +53,23 @@ export function parseAmountToCents(input: string): Cents {
   return negative ? -cents : cents
 }
 
+/**
+ * Parse, or null if it is not an amount.
+ *
+ * Anything reading a form field should use this rather than parseAmountToCents:
+ * a person leaving a box empty, or typing three decimal places, is ordinary
+ * input and must produce a message on the page, never a server exception.
+ */
+export function parseAmountOrNull(input: string | null | undefined): Cents | null {
+  if (input === null || input === undefined) return null
+  if (input.trim() === '') return null
+  try {
+    return parseAmountToCents(input)
+  } catch {
+    return null
+  }
+}
+
 /** "$1,234.56" — the canonical display form. */
 export function formatCents(cents: Cents): string {
   const negative = cents < 0

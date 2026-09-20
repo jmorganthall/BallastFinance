@@ -9,6 +9,7 @@
 
 import type { CivilDate } from './dates'
 import type { Cents } from './money'
+import type { Recurrence } from './recurrence'
 
 export type Id = string
 
@@ -65,6 +66,8 @@ export interface LineItem {
   dueDate: CivilDate
   reserveAccountId: Id
   state: LineItemState
+  /** 'none' is a one-off. Anything else rolls forward when confirmed spent. */
+  recurrence: Recurrence
 }
 
 /** Total obligation of a line item. The one place unit x quantity is computed. */

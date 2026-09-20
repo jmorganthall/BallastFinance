@@ -28,6 +28,7 @@ function item(over: Partial<LineItem> = {}): LineItem {
     dueDate: DUE,
     reserveAccountId: ACCOUNT,
     state: 'accruing',
+    recurrence: 'none',
     ...over,
   }
 }

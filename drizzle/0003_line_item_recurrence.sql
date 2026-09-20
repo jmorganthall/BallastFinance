@@ -1,0 +1,2 @@
+CREATE TYPE "public"."recurrence" AS ENUM('none', 'monthly', 'quarterly', 'semiannual', 'annual');--> statement-breakpoint
+ALTER TABLE "line_items" ADD COLUMN "recurrence" "recurrence" DEFAULT 'none' NOT NULL;

@@ -39,7 +39,14 @@ import {
   type LineItemSnapshot,
 } from './types'
 
-export type ComponentKind = 'base' | 'catch_up'
+/**
+ * 'opening' is money the household already had when the cycle began. It is a
+ * component so that every other calculation — delivery, the edit delta, the
+ * curve, the invariant — works on it unchanged, with no special case. It has a
+ * zero-length window, so it counts as delivered immediately and never appears
+ * in a weekly transfer figure.
+ */
+export type ComponentKind = 'base' | 'catch_up' | 'opening'
 
 export interface RateComponent {
   kind: ComponentKind
@@ -126,10 +133,25 @@ export function componentsForLineItem(args: {
   lineItem: LineItem
   commitDate: CivilDate
   changes?: readonly LineItemChange[]
+  /**
+   * When the current cycle began: the date this item was last confirmed spent.
+   * A recurring item that has just been paid starts again at zero, so anything
+   * before this date belongs to a settled cycle and must not affect the new
+   * one's math.
+   */
+  cycleStartDate?: CivilDate
+  /** Money already set aside for this item when the cycle began. */
+  openingCents?: Cents
 }): RateComponent[] {
-  const { lineItem, commitDate } = args
+  const { lineItem } = args
+  const commitDate = args.cycleStartDate
+    ? maxDate(args.commitDate, args.cycleStartDate)
+    : args.commitDate
+
   const changes = [...(args.changes ?? [])]
     .filter((c) => c.lineItemId === lineItem.id)
+    // Edits made during a settled cycle are history, not part of this plan.
+    .filter((c) => compareDates(c.occurredAt, commitDate) >= 0)
     .sort((a, b) => compareDates(a.occurredAt, b.occurredAt))
 
   // State at commit is the state before the first edit, or the current state if none.
@@ -143,16 +165,34 @@ export function componentsForLineItem(args: {
         reserveAccountId: lineItem.reserveAccountId,
       }
 
-  const components: RateComponent[] = [
+  // An opening balance cannot exceed what the item costs; the surplus is the
+  // account's business, not this line item's.
+  const openingCents = Math.max(0, Math.min(args.openingCents ?? 0, snapshotTotal(atCommit)))
+
+  const components: RateComponent[] = []
+
+  if (openingCents > 0) {
+    components.push({
+      kind: 'opening',
+      lineItemId: lineItem.id,
+      reserveAccountId: atCommit.reserveAccountId,
+      startDate: commitDate,
+      endDate: commitDate,
+      amountCents: openingCents,
+      weeks: 1,
+    })
+  }
+
+  components.push(
     buildComponent({
       kind: 'base',
       lineItemId: lineItem.id,
       reserveAccountId: atCommit.reserveAccountId,
       startDate: commitDate,
       endDate: maxDate(atCommit.dueDate, commitDate),
-      amountCents: snapshotTotal(atCommit),
+      amountCents: snapshotTotal(atCommit) - openingCents,
     }),
-  ]
+  )
 
   for (const change of changes) {
     // An edit before the package was committed just moves the starting plan.

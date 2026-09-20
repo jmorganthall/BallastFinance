@@ -15,10 +15,10 @@ const annual = { id: 'a1', householdId: 'h', name: 'Annual Expenses', institutio
 const longTerm = { id: 'a2', householdId: 'h', name: 'Long Term Savings', institutionLabel: '', scope: 'household' as const, ownerUserId: null, active: true }
 
 const items: LineItem[] = [
-  { id: 'i1', packageId: 'p1', label: 'Park tickets', unitAmountCents: 60000, quantity: 3, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing' },
-  { id: 'i2', packageId: 'p1', label: 'Airfare',      unitAmountCents: 45000, quantity: 3, dueDate: '2026-11-21', reserveAccountId: 'a1', state: 'accruing' },
-  { id: 'i3', packageId: 'p1', label: 'Lodging',      unitAmountCents: 120000, quantity: 1, dueDate: '2027-01-16', reserveAccountId: 'a2', state: 'accruing' },
-  { id: 'i4', packageId: 'p1', label: 'Park food',    unitAmountCents: 9000,  quantity: 5, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing' },
+  { id: 'i1', packageId: 'p1', label: 'Park tickets', unitAmountCents: 60000, quantity: 3, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: 'none' },
+  { id: 'i2', packageId: 'p1', label: 'Airfare',      unitAmountCents: 45000, quantity: 3, dueDate: '2026-11-21', reserveAccountId: 'a1', state: 'accruing', recurrence: 'none' },
+  { id: 'i3', packageId: 'p1', label: 'Lodging',      unitAmountCents: 120000, quantity: 1, dueDate: '2027-01-16', reserveAccountId: 'a2', state: 'accruing', recurrence: 'none' },
+  { id: 'i4', packageId: 'p1', label: 'Park food',    unitAmountCents: 9000,  quantity: 5, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: 'none' },
 ]
 
 const input: DerivationInput = {

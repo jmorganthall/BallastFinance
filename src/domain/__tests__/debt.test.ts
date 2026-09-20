@@ -9,6 +9,7 @@ import {
   promoExpiryWarning,
   scoreDebts,
   snowballLadder,
+  validateDebtInputs,
   validateDebtRates,
   type Debt,
 } from '../debt'
@@ -329,5 +330,46 @@ describe('guarding against the one data-entry mistake that breaks everything', (
         promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-01-01' }],
       }),
     ).toThrow(/interest rate field/)
+  })
+})
+
+describe('rejecting a debt that cannot describe a real debt', () => {
+  const ok = { balanceCents: 500000, aprBasisPoints: 2499 }
+
+  it('refuses a minimum payment of zero — the crash case, at the engine boundary', () => {
+    expect(() =>
+      validateDebtInputs({ ...ok, minPaymentRule: { type: 'fixed', amountCents: 0 } }),
+    ).toThrow(/more than zero/)
+  })
+
+  it('refuses NaN, which is what Number("") of a blank box produces', () => {
+    expect(() =>
+      validateDebtInputs({ ...ok, minPaymentRule: { type: 'fixed', amountCents: Number.NaN } }),
+    ).toThrow(DebtDataError)
+    expect(() =>
+      validateDebtInputs({ ...ok, aprBasisPoints: Number.NaN, minPaymentRule: { type: 'fixed', amountCents: 15000 } }),
+    ).toThrow(DebtDataError)
+  })
+
+  it('refuses a negative balance or rate', () => {
+    const rule = { type: 'fixed' as const, amountCents: 15000 }
+    expect(() => validateDebtInputs({ ...ok, balanceCents: -1, minPaymentRule: rule })).toThrow()
+    expect(() => validateDebtInputs({ ...ok, aprBasisPoints: -1, minPaymentRule: rule })).toThrow()
+  })
+
+  it('refuses a zero percentage minimum', () => {
+    expect(() =>
+      validateDebtInputs({ ...ok, minPaymentRule: { type: 'percent', basisPoints: 0 } }),
+    ).toThrow(/percentage must be more than zero/)
+  })
+
+  it('accepts every well-formed rule shape', () => {
+    for (const minPaymentRule of [
+      { type: 'fixed' as const, amountCents: 15000 },
+      { type: 'percent' as const, basisPoints: 200 },
+      { type: 'percent_with_floor' as const, basisPoints: 200, floorCents: 2500 },
+    ]) {
+      expect(() => validateDebtInputs({ ...ok, minPaymentRule })).not.toThrow()
+    }
   })
 })

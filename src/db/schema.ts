@@ -44,6 +44,18 @@ export const lineItemStateEnum = pgEnum('line_item_state', [
  */
 export const accountScopeEnum = pgEnum('account_scope', ['household', 'individual'])
 
+/**
+ * How often a line item comes round again. A recurring item rolls its due date
+ * forward in place when confirmed spent, rather than retiring (PRD D8).
+ */
+export const recurrenceEnum = pgEnum('recurrence', [
+  'none',
+  'monthly',
+  'quarterly',
+  'semiannual',
+  'annual',
+])
+
 export const debtCategoryEnum = pgEnum('debt_category', ['consumer', 'auto', 'mortgage'])
 export const debtStateEnum = pgEnum('debt_state', ['open', 'paid_off'])
 
@@ -184,6 +196,7 @@ export const lineItems = pgTable(
       .notNull()
       .references(() => reserveAccounts.id, { onDelete: 'restrict' }),
     state: lineItemStateEnum('state').notNull().default('planned'),
+    recurrence: recurrenceEnum('recurrence').notNull().default('none'),
   },
   (t) => [
     index('line_items_package_idx').on(t.packageId),

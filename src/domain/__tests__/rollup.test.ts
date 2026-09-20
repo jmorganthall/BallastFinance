@@ -54,6 +54,7 @@ function li(over: Partial<LineItem> & Pick<LineItem, 'id'>): LineItem {
     dueDate: '2027-01-16',
     reserveAccountId: annual.id,
     state: 'accruing',
+    recurrence: 'none',
     ...over,
   }
 }

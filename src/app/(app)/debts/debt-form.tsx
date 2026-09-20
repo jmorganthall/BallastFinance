@@ -65,18 +65,18 @@ export function DebtForm({ action }: { action: (formData: FormData) => void }) {
       {minType === 'fixed' ? (
         <label className="block text-sm font-medium">
           Minimum each month
-          <input name="min_amount" inputMode="decimal" placeholder="150" className={field} />
+          <input name="min_amount" inputMode="decimal" required placeholder="150" className={field} />
         </label>
       ) : (
         <div className="grid grid-cols-2 gap-3">
           <label className="block text-sm font-medium">
             Percentage
-            <input name="min_percent" inputMode="decimal" placeholder="2" className={field} />
+            <input name="min_percent" inputMode="decimal" required placeholder="2" className={field} />
           </label>
           {minType === 'percent_with_floor' ? (
             <label className="block text-sm font-medium">
               But never below
-              <input name="min_floor" inputMode="decimal" placeholder="25" className={field} />
+              <input name="min_floor" inputMode="decimal" required placeholder="25" className={field} />
             </label>
           ) : null}
         </div>

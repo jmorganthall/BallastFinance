@@ -218,26 +218,46 @@ export async function runAllocationAction(formData: FormData): Promise<void> {
 
 export async function createDebtAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const { parseAmountToCents } = await import('@/domain')
+  const { parseAmountOrNull } = await import('@/domain')
+
+  const fail = (message: string): never => redirect(`/debts?error=${encodeURIComponent(message)}`)
 
   const name = String(formData.get('name') ?? '').trim()
-  if (!name) return
+  if (!name) fail('Give the debt a name.')
 
-  const balanceCents = parseAmountToCents(String(formData.get('balance') ?? '0'))
+  const balanceCents = parseAmountOrNull(formData.get('balance') as string)
+  if (balanceCents === null) fail('Enter the balance owed, like 5000 or 5,000.00.')
+  if (balanceCents! < 0) fail('A balance cannot be negative.')
+
+  const aprRaw = Number(formData.get('apr'))
+  if (!Number.isFinite(aprRaw) || aprRaw < 0) fail('Enter the interest rate as a number, like 24.99.')
   // APR arrives as a percentage a human typed; basis points keep it exact.
-  const aprBasisPoints = Math.round(Number(formData.get('apr') ?? 0) * 100)
-  const minType = String(formData.get('min_type') ?? 'fixed')
+  const aprBasisPoints = Math.round(aprRaw * 100)
 
-  const minPaymentRule =
-    minType === 'percent'
-      ? { type: 'percent' as const, basisPoints: Math.round(Number(formData.get('min_percent') ?? 0) * 100) }
-      : minType === 'percent_with_floor'
-        ? {
-            type: 'percent_with_floor' as const,
-            basisPoints: Math.round(Number(formData.get('min_percent') ?? 0) * 100),
-            floorCents: parseAmountToCents(String(formData.get('min_floor') ?? '0')),
-          }
-        : { type: 'fixed' as const, amountCents: parseAmountToCents(String(formData.get('min_amount') ?? '0')) }
+  const minType = String(formData.get('min_type') ?? 'fixed')
+  const percentRaw = Number(formData.get('min_percent'))
+
+  let minPaymentRule
+  if (minType === 'percent' || minType === 'percent_with_floor') {
+    if (!Number.isFinite(percentRaw) || percentRaw <= 0) {
+      fail('Enter the minimum payment percentage, like 2.')
+    }
+    const basisPoints = Math.round(percentRaw * 100)
+    if (minType === 'percent') {
+      minPaymentRule = { type: 'percent' as const, basisPoints }
+    } else {
+      const floorCents = parseAmountOrNull(formData.get('min_floor') as string)
+      if (floorCents === null) fail('Enter the amount the minimum never drops below, like 25.')
+      minPaymentRule = { type: 'percent_with_floor' as const, basisPoints, floorCents: floorCents! }
+    }
+  } else {
+    const amountCents = parseAmountOrNull(formData.get('min_amount') as string)
+    // This is the one that crashed: the field is optional in the markup, so a
+    // blank box reached a parser that throws.
+    if (amountCents === null) fail('Enter the minimum payment each month, like 150.')
+    if (amountCents! <= 0) fail('The minimum payment must be more than zero.')
+    minPaymentRule = { type: 'fixed' as const, amountCents: amountCents! }
+  }
 
   const promoUntil = String(formData.get('promo_until') ?? '').trim()
   const promoRules = promoUntil
@@ -250,17 +270,21 @@ export async function createDebtAction(formData: FormData): Promise<void> {
       ]
     : []
 
-  const limit = String(formData.get('credit_limit') ?? '').trim()
+  const limitRaw = String(formData.get('credit_limit') ?? '').trim()
+  const creditLimitCents = limitRaw === '' ? null : parseAmountOrNull(limitRaw)
+  if (limitRaw !== '' && creditLimitCents === null) {
+    fail('That credit limit did not look like an amount. Leave it blank if there is none.')
+  }
 
   try {
     await engine.createDebt({
       name,
       category: (String(formData.get('category') ?? 'consumer') as 'consumer' | 'auto' | 'mortgage'),
-      balanceCents,
+      balanceCents: balanceCents!,
       aprBasisPoints,
       minPaymentRule,
       promoRules,
-      creditLimitCents: limit ? parseAmountToCents(limit) : null,
+      creditLimitCents,
       fixedPayment: formData.get('fixed_payment') === 'on',
     })
   } catch (error) {
@@ -278,12 +302,15 @@ export async function createDebtAction(formData: FormData): Promise<void> {
 
 export async function confirmDebtPaymentAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const { parseAmountToCents } = await import('@/domain')
+  const { parseAmountOrNull } = await import('@/domain')
   const debtId = String(formData.get('debt_id'))
-  const raw = String(formData.get('amount') ?? '').trim()
-  if (!raw) return
 
-  await engine.confirmDebtPayment({ debtId, amountCents: parseAmountToCents(raw) })
+  const amountCents = parseAmountOrNull(formData.get('amount') as string)
+  if (amountCents === null || amountCents <= 0) {
+    redirect(`/debts?error=${encodeURIComponent('Enter the amount you paid, like 150.')}`)
+  }
+
+  await engine.confirmDebtPayment({ debtId, amountCents: amountCents! })
   revalidatePath('/debts')
   revalidatePath('/')
 }

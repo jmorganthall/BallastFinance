@@ -56,6 +56,47 @@ export class DebtDataError extends Error {}
  * before interest lands. Caught at the point of entry rather than showing a
  * confident, wrong payoff order.
  */
+/**
+ * Reject a debt whose numbers cannot describe a real debt.
+ *
+ * The UI validates too, but a route handler is not the last line: a blank
+ * minimum-payment box once reached a parser that throws and took the whole
+ * page down with a 500. Anything that would produce a nonsense payoff order
+ * fails here, where every caller passes.
+ */
+export function validateDebtInputs(input: {
+  balanceCents: Cents
+  aprBasisPoints: number
+  minPaymentRule: MinPaymentRule
+}): void {
+  if (!Number.isFinite(input.balanceCents) || input.balanceCents < 0) {
+    throw new DebtDataError('A debt balance must be zero or more.')
+  }
+  if (!Number.isFinite(input.aprBasisPoints) || input.aprBasisPoints < 0) {
+    throw new DebtDataError('An interest rate cannot be negative.')
+  }
+
+  const rule = input.minPaymentRule
+  switch (rule.type) {
+    case 'fixed':
+      if (!Number.isFinite(rule.amountCents) || rule.amountCents <= 0) {
+        throw new DebtDataError('The minimum payment must be more than zero.')
+      }
+      break
+    case 'percent':
+    case 'percent_with_floor':
+      if (!Number.isFinite(rule.basisPoints) || rule.basisPoints <= 0) {
+        throw new DebtDataError('The minimum payment percentage must be more than zero.')
+      }
+      if (rule.type === 'percent_with_floor') {
+        if (!Number.isFinite(rule.floorCents) || rule.floorCents < 0) {
+          throw new DebtDataError('The minimum payment floor cannot be negative.')
+        }
+      }
+      break
+  }
+}
+
 export function validateDebtRates(input: {
   aprBasisPoints: number
   promoRules: readonly PromoRule[]

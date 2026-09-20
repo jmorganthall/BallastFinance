@@ -34,6 +34,7 @@ import {
   planAllocation,
   promoExpiryWarning,
   scoreDebts,
+  validateDebtInputs,
   validateDebtRates,
   snowballLadder,
   outstandingInstructions,
@@ -858,6 +859,11 @@ export class Engine {
     creditLimitCents?: Cents | null
     fixedPayment?: boolean
   }): Promise<Debt> {
+    validateDebtInputs({
+      balanceCents: input.balanceCents,
+      aprBasisPoints: input.aprBasisPoints,
+      minPaymentRule: input.minPaymentRule,
+    })
     validateDebtRates({
       aprBasisPoints: input.aprBasisPoints,
       promoRules: input.promoRules ?? [],
@@ -1068,5 +1074,6 @@ function toLineItem(r: typeof lineItemsTable.$inferSelect): LineItem {
     dueDate: r.dueDate as CivilDate,
     reserveAccountId: r.reserveAccountId,
     state: r.state,
+    recurrence: r.recurrence,
   }
 }

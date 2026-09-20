@@ -3,6 +3,7 @@ import {
   ceilDiv,
   ceilToWholeDollars,
   formatCents,
+  parseAmountOrNull,
   parseAmountToCents,
   proratedCeil,
 } from '../money'
@@ -75,5 +76,28 @@ describe('parsing and formatting', () => {
   it('rounds an instruction up to whole dollars', () => {
     expect(ceilToWholeDollars(8572)).toBe(8600)
     expect(ceilToWholeDollars(8600)).toBe(8600)
+  })
+})
+
+describe('parsing a form field that a person may leave blank', () => {
+  it('returns null instead of throwing — a blank box is ordinary input', () => {
+    // Regression: a blank minimum-payment box reached parseAmountToCents, which
+    // throws, and the server action had no catch. The page 500'd.
+    expect(parseAmountOrNull('')).toBeNull()
+    expect(parseAmountOrNull('   ')).toBeNull()
+    expect(parseAmountOrNull(null)).toBeNull()
+    expect(parseAmountOrNull(undefined)).toBeNull()
+  })
+
+  it('returns null for junk rather than throwing', () => {
+    expect(parseAmountOrNull('abc')).toBeNull()
+    expect(parseAmountOrNull('150.000')).toBeNull()
+    expect(parseAmountOrNull('-')).toBeNull()
+  })
+
+  it('still parses anything real', () => {
+    expect(parseAmountOrNull('150')).toBe(15000)
+    expect(parseAmountOrNull('$1,234.56')).toBe(123456)
+    expect(parseAmountOrNull('0')).toBe(0)
   })
 })
