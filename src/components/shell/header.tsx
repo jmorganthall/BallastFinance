@@ -13,7 +13,8 @@ import { SectionTitle } from './nav'
 export function AppHeader({ viewer }: { viewer: Viewer }) {
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--color-line)] bg-[var(--color-card)]/90 pt-[env(safe-area-inset-top)] backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between gap-3 px-4">
+      {/* Full width, no centred cap: the person is always at the far right edge. */}
+      <div className="flex h-14 w-full items-center gap-3 px-4">
         <Link href="/" className="flex items-center gap-2 md:hidden" aria-label="Ballast home">
           <Image src="/logo-mark.png" alt="" width={32} height={32} priority className="h-8 w-auto" />
           <span className="text-lg font-semibold tracking-tight">Ballast</span>
@@ -21,7 +22,9 @@ export function AppHeader({ viewer }: { viewer: Viewer }) {
         <div className="hidden md:block">
           <SectionTitle />
         </div>
-        <ProfileMenu viewer={{ name: viewer.name, email: viewer.email, image: viewer.image }} />
+        <div className="ml-auto">
+          <ProfileMenu viewer={{ name: viewer.name, email: viewer.email, image: viewer.image }} />
+        </div>
       </div>
     </header>
   )
