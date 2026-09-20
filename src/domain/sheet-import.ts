@@ -19,7 +19,7 @@
 import { assertCivilDate, compareDates, type CivilDate } from './dates'
 import type { DebtCategory, MinPaymentRule } from './debt'
 import { parseAmountOrNull, parsePercentOrNull, type Cents } from './money'
-import { rollToFuture, type Recurrence } from './recurrence'
+import { recurrenceOf, rollToFuture, type Recurrence, type RecurrenceUnit } from './recurrence'
 
 export interface ImportedExpense {
   row: number
@@ -27,7 +27,7 @@ export interface ImportedExpense {
   account: string
   amountCents: Cents
   dueDate: CivilDate
-  recurrence: Recurrence
+  recurrence: Recurrence | null
   /** "Reserved Now": what is already set aside, which becomes the opening balance. */
   openingCents: Cents
   notes: string[]
@@ -134,17 +134,108 @@ export function parseSheetDate(input: string): CivilDate | null {
   return null
 }
 
-/** "Year", "6 months", "Quarterly", "Once" -> a recurrence, or null when it is none of ours. */
-export function parseDueEvery(input: string): Recurrence | null {
-  const text = norm(input).replace(/[^a-z0-9 ]/g, '')
-  if (text === '' || /^(once|one time|onetime|none|no|na|n a|single)$/.test(text)) return 'none'
-  if (/^(1|1 month|month|monthly|every month|mo)$/.test(text)) return 'monthly'
-  if (/^(3|3 months|quarter|quarterly|every quarter|qtr)$/.test(text)) return 'quarterly'
-  if (/^(6|6 months|semi|semiannual|semi annual|semiannually|half year|half yearly|twice a year|biannual)$/.test(text)) {
-    return 'semiannual'
+/**
+ * "Year", "6 months", "Quarterly", "every 3 weeks", "Once", or a plain day
+ * count -- the sheet writes all of these.
+ *
+ * A bare number is a COUNT OF DAYS, because that is what the column holds:
+ * 365, 730, 1825, 7, 14, 203. Day counts that are really calendar periods
+ * come back as those periods, so a yearly bill keeps its date rather than
+ * drifting a day every leap year; anything else stays the interval it says.
+ *
+ * Returns 'once' for a one-off and null when the cell means nothing here, so
+ * the two can be told apart.
+ */
+export function parseDueEvery(input: string): Recurrence | 'once' | null {
+  const text = norm(input).replace(/[^a-z0-9 ]/g, '').trim()
+  if (text === '' || /^(once|one time|onetime|none|no|na|n a|single)$/.test(text)) return 'once'
+
+  const named: Record<string, Recurrence> = {
+    daily: { every: 1, unit: 'day' },
+    day: { every: 1, unit: 'day' },
+    weekly: { every: 1, unit: 'week' },
+    week: { every: 1, unit: 'week' },
+    biweekly: { every: 2, unit: 'week' },
+    fortnight: { every: 2, unit: 'week' },
+    fortnightly: { every: 2, unit: 'week' },
+    month: { every: 1, unit: 'month' },
+    monthly: { every: 1, unit: 'month' },
+    mo: { every: 1, unit: 'month' },
+    bimonthly: { every: 2, unit: 'month' },
+    quarter: { every: 3, unit: 'month' },
+    quarterly: { every: 3, unit: 'month' },
+    qtr: { every: 3, unit: 'month' },
+    semi: { every: 6, unit: 'month' },
+    semiannual: { every: 6, unit: 'month' },
+    'semi annual': { every: 6, unit: 'month' },
+    semiannually: { every: 6, unit: 'month' },
+    'half year': { every: 6, unit: 'month' },
+    'half yearly': { every: 6, unit: 'month' },
+    'twice a year': { every: 6, unit: 'month' },
+    biannual: { every: 6, unit: 'month' },
+    year: { every: 1, unit: 'year' },
+    yearly: { every: 1, unit: 'year' },
+    annual: { every: 1, unit: 'year' },
+    annually: { every: 1, unit: 'year' },
+    yr: { every: 1, unit: 'year' },
+    biennial: { every: 2, unit: 'year' },
   }
-  if (/^(12|12 months|year|yearly|annual|annually|every year|yr|1 year)$/.test(text)) return 'annual'
+  const bare = text.replace(/^every /, '')
+  const byName = named[bare]
+  if (byName) return { ...byName }
+
+  // "3 weeks", "every 18 months", "45 days", "2 yrs"
+  const spelled = bare.match(/^(\d{1,3}) ?(day|days|week|weeks|wk|wks|month|months|mo|mos|year|years|yr|yrs)$/)
+  if (spelled) {
+    const every = Number(spelled[1])
+    const head = spelled[2]!
+    const unit: RecurrenceUnit = head.startsWith('d')
+      ? 'day'
+      : head.startsWith('w')
+        ? 'week'
+        : head.startsWith('y')
+          ? 'year'
+          : 'month'
+    return recurrenceOf(every, unit)
+  }
+
+  const days = /^\d{1,5}$/.test(bare) ? Number(bare) : null
+  if (days !== null && days >= 1) return fromDayCount(days)
   return null
+}
+
+/** Day counts that are really calendar periods, so the date stays put. */
+const CALENDAR_DAYS: Record<number, Recurrence> = {
+  30: { every: 1, unit: 'month' },
+  31: { every: 1, unit: 'month' },
+  60: { every: 2, unit: 'month' },
+  61: { every: 2, unit: 'month' },
+  90: { every: 3, unit: 'month' },
+  91: { every: 3, unit: 'month' },
+  92: { every: 3, unit: 'month' },
+  120: { every: 4, unit: 'month' },
+  122: { every: 4, unit: 'month' },
+  182: { every: 6, unit: 'month' },
+  183: { every: 6, unit: 'month' },
+  184: { every: 6, unit: 'month' },
+  365: { every: 1, unit: 'year' },
+  366: { every: 1, unit: 'year' },
+  730: { every: 2, unit: 'year' },
+  731: { every: 2, unit: 'year' },
+  1095: { every: 3, unit: 'year' },
+  1096: { every: 3, unit: 'year' },
+  1460: { every: 4, unit: 'year' },
+  1461: { every: 4, unit: 'year' },
+  1825: { every: 5, unit: 'year' },
+  1826: { every: 5, unit: 'year' },
+}
+
+function fromDayCount(days: number): Recurrence | null {
+  const calendar = CALENDAR_DAYS[days]
+  if (calendar) return { ...calendar }
+  // Up to two months, a multiple of seven is how people say it: every 3 weeks.
+  if (days % 7 === 0 && days <= 56) return { every: days / 7, unit: 'week' }
+  return recurrenceOf(days, 'day')
 }
 
 function money(cell: string): Cents | null {
@@ -235,27 +326,28 @@ export function parseSheet(
         const label = cell('expense').trim()
         const account = cell('account').trim()
         const amountCents = money(cell('amount'))
-        const recurrence = parseDueEvery(cell('due every'))
+        const every = parseDueEvery(cell('due every'))
+        const recurrence = every === 'once' ? null : every
         const due = parseSheetDate(cell('next due'))
         const opening = cell('reserved now').trim() === '' ? 0 : money(cell('reserved now'))
 
         if (!label) fail('No expense name.')
         if (!account) fail('No account.')
         if (amountCents === null || amountCents <= 0) fail(`Amount "${cell('amount')}" is not an amount above zero.`)
-        if (recurrence === null) {
+        if (every === null) {
           fail(
-            `Due Every "${cell('due every')}" is not one Ballast plans by (once, month, quarter, 6 months, year). A weekly bill is better entered as its monthly amount.`,
+            `Due Every "${cell('due every')}" is not something Ballast can read. Use a number of days (365), a plain interval ("every 3 weeks", "6 months"), or "once".`,
           )
         }
         if (!due) fail(`Next Due "${cell('next due')}" is not a date.`)
         if (opening === null || opening < 0) fail(`Reserved Now "${cell('reserved now')}" is not an amount.`)
-        if (!label || !account || amountCents === null || amountCents <= 0 || recurrence === null || !due || opening === null || opening < 0) {
+        if (!label || !account || amountCents === null || amountCents <= 0 || every === null || !due || opening === null || opening < 0) {
           continue
         }
 
         let dueDate = due
         if (compareDates(dueDate, context.today) <= 0) {
-          if (recurrence === 'none') {
+          if (!recurrence) {
             fail(`Next Due ${dueDate} has passed and this does not repeat, so there is nothing left to save for.`)
             continue
           }

@@ -19,6 +19,7 @@ import {
   check,
   date,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -45,16 +46,14 @@ export const lineItemStateEnum = pgEnum('line_item_state', [
 export const accountScopeEnum = pgEnum('account_scope', ['household', 'individual'])
 
 /**
- * How often a line item comes round again. A recurring item rolls its due date
+ * How often a line item comes round again, as an interval: `recur_every` of
+ * `recur_unit`. Both null is a one-off. A recurring item rolls its due date
  * forward in place when confirmed spent, rather than retiring (PRD D8).
+ *
+ * An interval rather than a fixed menu, because a bill every 3 weeks or an
+ * inspection every 2 years is as ordinary as an annual one.
  */
-export const recurrenceEnum = pgEnum('recurrence', [
-  'none',
-  'monthly',
-  'quarterly',
-  'semiannual',
-  'annual',
-])
+export const recurrenceUnitEnum = pgEnum('recurrence_unit', ['day', 'week', 'month', 'year'])
 
 export const debtCategoryEnum = pgEnum('debt_category', ['consumer', 'auto', 'mortgage'])
 export const debtStateEnum = pgEnum('debt_state', ['open', 'paid_off'])
@@ -205,10 +204,17 @@ export const lineItems = pgTable(
       .notNull()
       .references(() => reserveAccounts.id, { onDelete: 'restrict' }),
     state: lineItemStateEnum('state').notNull().default('planned'),
-    recurrence: recurrenceEnum('recurrence').notNull().default('none'),
+    recurEvery: integer('recur_every'),
+    recurUnit: recurrenceUnitEnum('recur_unit'),
   },
   (t) => [
     index('line_items_package_idx').on(t.packageId),
+    // An interval is both halves or neither. Half of one -- a number with no
+    // unit -- has no meaning, and the roll-forward would silently do nothing.
+    check(
+      'line_items_recurrence_is_whole',
+      sql`(${t.recurEvery} is null) = (${t.recurUnit} is null)`,
+    ),
     index('line_items_account_idx').on(t.householdId, t.reserveAccountId, t.state),
   ],
 )

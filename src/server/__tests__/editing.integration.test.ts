@@ -71,7 +71,7 @@ describeDb('editing plans and debts', () => {
         package: { name: 'Car costs' },
         line_items: [
           { label: 'Insurance', unit_amount: '600', due_date: '2027-01-16', reserve_account: accountId, recurrence: 'semiannual' },
-          { label: 'Registration', unit_amount: '200', due_date: '2027-01-16', reserve_account: accountId, recurrence: 'annual' },
+          { label: 'Registration', unit_amount: '200', due_date: '2027-01-16', reserve_account: accountId, recurrence: { every: 1, unit: 'year' } },
         ],
       })
       if (!created.ok) throw new Error(JSON.stringify(created.problems))
@@ -87,7 +87,7 @@ describeDb('editing plans and debts', () => {
       expect(byLabel.Registration!.shouldHaveSavedCents).toBe(10000)
       // Only the remaining $400 is spread over the 17 weeks to the due date.
       expect(view.weekly.totalPerWeekCents).toBe(Math.ceil(30000 / 17) + Math.ceil(10000 / 17))
-      expect(byLabel.Insurance!.lineItem.recurrence).toBe('semiannual')
+      expect(byLabel.Insurance!.lineItem.recurrence).toEqual({ every: 6, unit: 'month' })
 
       const [commit] = await eventsOfKind('package_committed')
       expect((commit!.payload as { opening_cents: number }).opening_cents).toBe(40000)
@@ -127,10 +127,10 @@ describeDb('editing plans and debts', () => {
 
     it('edits every field of a part, and only a money change leaves a component behind', async () => {
       const tyres = (await engine.listLineItems()).find((i) => i.label === 'Tyres')!
-      await engine.updateLineItem(tyres.id, { label: 'Winter tyres', recurrence: 'annual' })
+      await engine.updateLineItem(tyres.id, { label: 'Winter tyres', recurrence: { every: 1, unit: 'year' } })
       let after = (await engine.listLineItems()).find((i) => i.id === tyres.id)!
       expect(after.label).toBe('Winter tyres')
-      expect(after.recurrence).toBe('annual')
+      expect(after.recurrence).toEqual({ every: 1, unit: 'year' })
       expect((await engine.listLineItemChanges()).filter((c) => c.lineItemId === tyres.id)).toHaveLength(0)
 
       await engine.updateLineItem(tyres.id, { unitAmountCents: 40000 })
@@ -164,7 +164,7 @@ describeDb('editing plans and debts', () => {
       expect(item.shouldHaveSavedCents).toBe(0)
       // The one-off registration, confirmed, retires as before.
       const registration = (await engine.listLineItems()).find((i) => i.label === 'Registration')!
-      await engine.updateLineItem(registration.id, { recurrence: 'none' })
+      await engine.updateLineItem(registration.id, { recurrence: null })
       await engine.confirmSpend({ lineItemId: registration.id, actualAmountCents: 20000 })
       expect((await engine.listLineItems()).find((i) => i.id === registration.id)!.state).toBe('retired')
     })
@@ -286,6 +286,46 @@ describeDb('editing plans and debts', () => {
       expect((await engine.listDebts()).find((d) => d.id === debtId)).toBeUndefined()
       const [event] = await eventsOfKind('debt_removed')
       expect((event!.payload as { name: string }).name).toBe('Store card (Josh)')
+    })
+  })
+
+  describe('what a recurring plan would already have set aside', () => {
+    it('offers the elapsed part of each repeating cycle, and commits it part by part', async () => {
+      // Other tests move the clock; this one is priced against 19 Sep 2026.
+      const engine = new Engine({ householdId, actorUserId: null, db, today: '2026-09-19' })
+      // Insurance every year, next due 16 Jan 2027: the last one was 16 Jan
+      // 2026, so most of a year's saving should already be there. The one-off
+      // registration has no history and gets nothing.
+      const created = await engine.createPackageFromIntake({
+        contract_version: INTAKE_CONTRACT_VERSION,
+        package: { name: 'Offered opening' },
+        line_items: [
+          { label: 'Boat insurance', unit_amount: '530', due_date: '2027-01-16', reserve_account: accountId, recurrence: { every: 1, unit: 'year' } },
+          { label: 'Boat one-off', unit_amount: '200', due_date: '2027-01-16', reserve_account: accountId },
+        ],
+      })
+      if (!created.ok) throw new Error(JSON.stringify(created.problems))
+
+      const suggested = await engine.suggestedOpenings(created.packageId)
+      expect(suggested.map((s) => s.label)).toEqual(['Boat insurance'])
+      expect(suggested[0]!.lastOccurrence).toBe('2026-01-16')
+      // 16 Jan 2026 is a Friday, so the cycle holds 53 Saturdays (17 Jan 2026
+      // through 16 Jan 2027) and 36 of them have passed by 19 Sep 2026:
+      // 36/53 of $530, rounded up.
+      expect(suggested[0]!.cents).toBe(36000)
+
+      await engine.commitPackage(created.packageId, {
+        openingByLineItem: Object.fromEntries(suggested.map((s) => [s.lineItemId, s.cents])),
+      })
+      const view = (await engine.packageViews()).find((v) => v.package.id === created.packageId)!
+      const byLabel = Object.fromEntries(view.items.map((i) => [i.lineItem.label, i]))
+      // The money lands on the part it belongs to, not spread by cost.
+      expect(byLabel['Boat insurance']!.shouldHaveSavedCents).toBe(36000)
+      expect(byLabel['Boat one-off']!.shouldHaveSavedCents).toBe(0)
+
+      const commits = await eventsOfKind('package_committed')
+      const mine = commits.find((e) => (e.payload as { package_id: string }).package_id === created.packageId)!
+      expect((mine.payload as { opening_cents: number }).opening_cents).toBe(36000)
     })
   })
 })

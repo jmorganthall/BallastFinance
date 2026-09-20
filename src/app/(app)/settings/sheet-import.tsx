@@ -9,7 +9,6 @@
 
 import { useActionState } from 'react'
 import { formatCents } from '@/domain/money'
-import { RECURRENCE_LABELS, type Recurrence } from '@/domain/recurrence'
 import { humanDate } from '@/components/ui'
 import { sheetImportAction, type SheetImportState } from '@/server/actions'
 
@@ -122,8 +121,8 @@ export function SheetImport() {
                       <span className="shrink-0 tabular">{formatCents(e.amountCents)}</span>
                     </div>
                     <p className="text-xs text-[var(--color-ink-soft)]">
-                      {e.account} · {RECURRENCE_LABELS[e.recurrence as Recurrence].toLowerCase()}
-                      {e.recurrence === 'none' ? ', needed by' : ', next'} {humanDate(e.dueDate)}
+                      {e.account} · {e.recurrence.toLowerCase()}
+                      {e.repeats ? ', next' : ', needed by'} {humanDate(e.dueDate)}
                       {e.openingCents > 0 ? ` · ${formatCents(e.openingCents)} already set aside` : ''}
                     </p>
                     {e.notes.map((n, i) => (

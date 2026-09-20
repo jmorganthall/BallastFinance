@@ -30,6 +30,7 @@ import {
   type CivilDate,
 } from './dates'
 import { ceilDiv, proratedCeil, type Cents } from './money'
+import { previousOccurrence, type Recurrence } from './recurrence'
 import {
   lineItemTotalCents,
   type DriftAdjustment,
@@ -373,4 +374,44 @@ function advanceWeeks(from: CivilDate, weeks: number): CivilDate {
   const base = new Date(`${from}T00:00:00Z`)
   base.setUTCDate(base.getUTCDate() + weeks * 7)
   return base.toISOString().slice(0, 10)
+}
+
+/**
+ * What a recurring item would already have set aside, had the household been
+ * saving for it since the last time it came round.
+ *
+ * A plan entered as "every year, next due 15 February" carries its own history:
+ * the previous one was a year before that, and a household saving steadily
+ * since then would be part-way there by now. Offering that figure turns a plan
+ * that starts at $0 -- and therefore demands a year's saving in the months that
+ * remain -- into one that starts where the money actually is.
+ *
+ * It is a suggestion, never an assertion: the money is only there if the
+ * household says it is, so nothing here writes anything. Returns null when
+ * there is nothing to suggest -- a one-off, or a cycle that has not started.
+ */
+export function openingSinceLastOccurrence(args: {
+  totalCents: Cents
+  dueDate: CivilDate
+  recurrence: Recurrence | null
+  today: CivilDate
+}): { lastOccurrence: CivilDate; cents: Cents } | null {
+  const last = previousOccurrence(args.dueDate, args.recurrence)
+  if (!last) return null
+  // The cycle has not begun: there is no elapsed time to have saved over.
+  if (compareDates(last, args.today) >= 0) return null
+  if (args.totalCents <= 0) return null
+
+  // The same base component a committed item gets, priced over the whole cycle.
+  const component: RateComponent = {
+    kind: 'base',
+    lineItemId: null,
+    reserveAccountId: '',
+    startDate: last,
+    endDate: args.dueDate,
+    amountCents: args.totalCents,
+    weeks: accrualWeeksBetween(last, args.dueDate),
+  }
+  const cents = Math.max(0, Math.min(componentDeliveredBy(component, args.today), args.totalCents))
+  return cents > 0 ? { lastOccurrence: last, cents } : null
 }

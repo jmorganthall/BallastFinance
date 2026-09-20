@@ -32,16 +32,34 @@ describe('reading the sheet', () => {
   })
 
   it('reads how often something comes round', () => {
-    expect(parseDueEvery('Year')).toBe('annual')
-    expect(parseDueEvery('annually')).toBe('annual')
-    expect(parseDueEvery('12 months')).toBe('annual')
-    expect(parseDueEvery('6 months')).toBe('semiannual')
-    expect(parseDueEvery('Semi-Annual')).toBe('semiannual')
-    expect(parseDueEvery('Quarter')).toBe('quarterly')
-    expect(parseDueEvery('Month')).toBe('monthly')
-    expect(parseDueEvery('Once')).toBe('none')
-    expect(parseDueEvery('')).toBe('none')
-    expect(parseDueEvery('2 weeks')).toBeNull()
+    expect(parseDueEvery('Year')).toEqual({ every: 1, unit: 'year' })
+    expect(parseDueEvery('annually')).toEqual({ every: 1, unit: 'year' })
+    expect(parseDueEvery('12 months')).toEqual({ every: 12, unit: 'month' })
+    expect(parseDueEvery('6 months')).toEqual({ every: 6, unit: 'month' })
+    expect(parseDueEvery('Semi-Annual')).toEqual({ every: 6, unit: 'month' })
+    expect(parseDueEvery('Quarter')).toEqual({ every: 3, unit: 'month' })
+    expect(parseDueEvery('Month')).toEqual({ every: 1, unit: 'month' })
+    expect(parseDueEvery('Once')).toBe('once')
+    expect(parseDueEvery('')).toBe('once')
+    expect(parseDueEvery('every 3 weeks')).toEqual({ every: 3, unit: 'week' })
+    expect(parseDueEvery('18 months')).toEqual({ every: 18, unit: 'month' })
+    expect(parseDueEvery('2 yrs')).toEqual({ every: 2, unit: 'year' })
+    expect(parseDueEvery('when I feel like it')).toBeNull()
+  })
+
+  it('reads the sheet\'s day counts as the periods they are', () => {
+    // The real column holds days: 7, 14, 90, 183, 365, 730, 1825 -- and one
+    // 203 that is nothing in particular.
+    expect(parseDueEvery('7')).toEqual({ every: 1, unit: 'week' })
+    expect(parseDueEvery('14')).toEqual({ every: 2, unit: 'week' })
+    expect(parseDueEvery('21')).toEqual({ every: 3, unit: 'week' })
+    expect(parseDueEvery('90')).toEqual({ every: 3, unit: 'month' })
+    expect(parseDueEvery('183')).toEqual({ every: 6, unit: 'month' })
+    // A year as 365 days would drift a day every leap year; it is a year.
+    expect(parseDueEvery('365')).toEqual({ every: 1, unit: 'year' })
+    expect(parseDueEvery('730')).toEqual({ every: 2, unit: 'year' })
+    expect(parseDueEvery('1825')).toEqual({ every: 5, unit: 'year' })
+    expect(parseDueEvery('203')).toEqual({ every: 203, unit: 'day' })
   })
 
   it('keeps the raw inputs of an expense row and throws the sheet’s own arithmetic away', () => {
@@ -55,7 +73,7 @@ describe('reading the sheet', () => {
       account: 'Annual Expenses',
       amountCents: 123000,
       dueDate: '2027-02-15',
-      recurrence: 'semiannual',
+      recurrence: { every: 6, unit: 'month' },
       openingCents: 41000,
       notes: [],
     })
@@ -67,7 +85,7 @@ describe('reading the sheet', () => {
     expect(prime.notes[0]).toMatch(/has passed/)
 
     const passport = result.expenses.find((e) => e.label === 'Passport')!
-    expect(passport.recurrence).toBe('none')
+    expect(passport.recurrence).toBeNull()
     expect(passport.openingCents).toBe(0)
   })
 
@@ -133,7 +151,7 @@ describe('reading the sheet', () => {
     const text = [
       'Account\tIn Simplifi\tExpense\tBracket\tDue Every\tNext Due\tReserved Now\tAmount\tMonthly\tWeekly',
       'Annual Expenses\tYes\tGood one\tA\tYear\t3/1/2027\t\t$100\t\t',
-      'Annual Expenses\tYes\tWeekly thing\tA\t2 weeks\t3/1/2027\t\t$100\t\t',
+      'Annual Expenses\tYes\tUnreadable\tA\twhenever\t3/1/2027\t\t$100\t\t',
       'Annual Expenses\tYes\tPast one-off\tA\tOnce\t3/1/2026\t\t$100\t\t',
       'Annual Expenses\tYes\tNo amount\tA\tYear\t3/1/2027\t\t\t\t',
     ].join('\n')

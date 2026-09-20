@@ -18,7 +18,8 @@
 
 import { useActionState, useState } from 'react'
 import { createPackageAction, type FormState } from '@/server/actions'
-import { RECURRENCE_LABELS, RECURRENCES, type Recurrence } from '@/domain/recurrence'
+import { type Recurrence } from '@/domain/recurrence'
+import { RecurrenceFields } from '@/components/recurrence-fields'
 
 interface AccountOption {
   id: string
@@ -35,7 +36,7 @@ interface Row {
   quantity: string
   dueDate: string
   account: string
-  recurrence: Recurrence
+  recurrence: Recurrence | null
 }
 
 let nextKey = 1
@@ -46,7 +47,7 @@ const blankRow = (account: string): Row => ({
   quantity: '1',
   dueDate: '',
   account,
-  recurrence: 'none',
+  recurrence: null,
 })
 
 const field =
@@ -126,26 +127,10 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
           <Problem message={problemFor(index, 'due_date')} />
         </label>
 
-        <label className="block text-sm font-medium">
-          How often
-          <select
-            name="recurrence"
-            value={row.recurrence}
-            onChange={(e) => update(row.key, { recurrence: e.target.value as Recurrence })}
-            className={field}
-          >
-            {RECURRENCES.map((r) => (
-              <option key={r} value={r}>
-                {RECURRENCE_LABELS[r]}
-              </option>
-            ))}
-          </select>
-          {row.recurrence !== 'none' ? (
-            <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
-              Comes round again on its own. A past date means the last one was then.
-            </span>
-          ) : null}
-        </label>
+        <RecurrenceFields
+          defaultValue={row.recurrence}
+          onChange={(recurrence) => update(row.key, { recurrence })}
+        />
       </div>
 
       <div className="mt-3">

@@ -19,7 +19,7 @@ const SHEET = [
   'Account\tIn Simplifi\tExpense\tBracket\tDue Every\tNext Due\tReserved Now\tAmount\tMonthly\tWeekly',
   'Annual Expenses\tYes\tCar insurance\tA\t6 months\t2/15/2027\t$410.00\t$1,230.00\t$205.00\t$47.31',
   'Gifts & Giving\tYes\tChristmas\tA\tYear\t12/19/2026\t$250\t$1,000\t$83.33\t$19.23',
-  'Annual Expenses\tYes\tBroken row\tA\tfortnight\t12/19/2026\t\t$10\t\t',
+  'Annual Expenses\tYes\tBroken row\tA\twhenever\t12/19/2026\t\t$10\t\t',
   '',
   'Loan\tCategory\tFreed Up\tMonthly\tAPR\t%\t$\tPrincipal/Month\tInt/Month\tInterest at Min Pmt\tMonths @ Min\tBalance\tLimit\tUtil\tAs of\tFixed Pmt.\tLong Term\tShort Term\tPriority',
   'Store card\tCredit Card\t$40\t$40\t29.99%\t\t$40\t\t\t\t\t$400\t$2,000\t20%\t8/1/2026\tN\t\t\t1',
@@ -69,7 +69,7 @@ describeDb('bringing in the spreadsheet', () => {
     const car = views.find((v) => v.package.name === 'Car insurance')!
     expect(car.package.state).toBe('active')
     expect(car.package.module).toBe('sheet')
-    expect(car.items[0]!.lineItem.recurrence).toBe('semiannual')
+    expect(car.items[0]!.lineItem.recurrence).toEqual({ every: 6, unit: 'month' })
     expect(car.items[0]!.lineItem.dueDate).toBe('2027-02-15')
     // $410 reserved now is already set aside; only the rest is spread.
     expect(car.shouldHaveSavedCents).toBe(41000)

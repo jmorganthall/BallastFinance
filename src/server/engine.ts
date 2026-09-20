@@ -27,6 +27,9 @@ import {
   apportion,
   canWriteAccount,
   closeOutPrompts,
+  lineItemTotalCents,
+  openingSinceLastOccurrence,
+  recurrenceOf,
   rollToFuture,
   DEFAULT_ALLOCATION_RULES,
   DEFAULT_BUFFER_CENTS,
@@ -230,7 +233,8 @@ export class Engine {
             quantity: item.quantity,
             dueDate: item.dueDate,
             reserveAccountId: item.reserveAccountId,
-            recurrence: item.recurrence,
+            recurEvery: item.recurrence?.every ?? null,
+            recurUnit: item.recurrence?.unit ?? null,
             state: 'planned' as const,
           })),
         )
@@ -252,9 +256,24 @@ export class Engine {
    * base components have to cover, so the weekly figure is right from the
    * first week rather than over-collecting for money the household already has.
    */
-  async commitPackage(packageId: Id, options: { openingCents?: Cents } = {}): Promise<void> {
+  async commitPackage(
+    packageId: Id,
+    options: {
+      openingCents?: Cents
+      /**
+       * What each part already holds, when the caller knows per part -- the
+       * figure offered for a recurring plan, where one part may be most of a
+       * year in and another brand new. Apportioning a single total by cost
+       * would put that money in the wrong places.
+       */
+      openingByLineItem?: Readonly<Record<Id, Cents>>
+    } = {},
+  ): Promise<void> {
     const today = this.today()
-    const openingCents = Math.max(0, options.openingCents ?? 0)
+    const perItem = options.openingByLineItem
+    const openingCents = perItem
+      ? Object.values(perItem).reduce((sum, cents) => sum + Math.max(0, cents), 0)
+      : Math.max(0, options.openingCents ?? 0)
 
     await this.db.transaction(async (tx) => {
       const [pkg] = await tx
@@ -281,8 +300,11 @@ export class Engine {
         .set({ state: 'accruing' })
         .where(and(eq(lineItemsTable.packageId, packageId), eq(lineItemsTable.state, 'planned')))
 
-      const shares =
-        openingCents > 0 && items.length > 0
+      const shares = perItem
+        ? items.map((item) =>
+            Math.max(0, Math.min(perItem[item.id] ?? 0, item.unitAmountCents * item.quantity)),
+          )
+        : openingCents > 0 && items.length > 0
           ? apportion(
               openingCents,
               items.map((i) => i.unitAmountCents * i.quantity),
@@ -303,6 +325,47 @@ export class Engine {
           })),
         },
       })
+    })
+  }
+
+  /**
+   * What each part of a not-yet-committed plan would already have set aside,
+   * had the household been saving since the last time it came round.
+   *
+   * Only a suggestion, and only for the parts that repeat: the money is only
+   * there if a person says it is (PRD §5 -- nothing is done until a human
+   * confirms it). The figure comes from the domain, which prices a full cycle
+   * exactly as a committed item is priced.
+   */
+  async suggestedOpenings(
+    packageId: Id,
+  ): Promise<{ lineItemId: Id; label: string; lastOccurrence: CivilDate; cents: Cents }[]> {
+    const today = this.today()
+    const rows = await this.db
+      .select()
+      .from(lineItemsTable)
+      .where(
+        and(eq(lineItemsTable.packageId, packageId), eq(lineItemsTable.householdId, this.householdId)),
+      )
+
+    return rows.flatMap((row) => {
+      const item = toLineItem(row)
+      const suggestion = openingSinceLastOccurrence({
+        totalCents: lineItemTotalCents(item),
+        dueDate: item.dueDate,
+        recurrence: item.recurrence,
+        today,
+      })
+      return suggestion
+        ? [
+            {
+              lineItemId: item.id,
+              label: item.label,
+              lastOccurrence: suggestion.lastOccurrence,
+              cents: suggestion.cents,
+            },
+          ]
+        : []
     })
   }
 
@@ -405,9 +468,18 @@ export class Engine {
         reserveAccountId: patch.reserveAccountId ?? before.reserveAccountId,
       }
 
+      const { recurrence, ...columns } = patch
       await tx
         .update(lineItemsTable)
-        .set({ ...patch })
+        .set(
+          'recurrence' in patch
+            ? {
+                ...columns,
+                recurEvery: recurrence?.every ?? null,
+                recurUnit: recurrence?.unit ?? null,
+              }
+            : columns,
+        )
         .where(eq(lineItemsTable.id, lineItemId))
 
       const movesMoney =
@@ -442,7 +514,7 @@ export class Engine {
       quantity: number
       dueDate: CivilDate
       reserveAccountId: Id
-      recurrence?: Recurrence
+      recurrence?: Recurrence | null
     },
   ): Promise<Id> {
     const today = this.today()
@@ -462,7 +534,7 @@ export class Engine {
       if (!pkg) throw new EngineError('No such package in this household')
       if (pkg.state === 'retired') throw new EngineError(`"${pkg.name}" is finished`)
 
-      const recurrence = item.recurrence ?? 'none'
+      const recurrence = item.recurrence ?? null
       const dueDate = rollToFuture(item.dueDate, recurrence, today)
       if (dueDate <= today) throw new EngineError('The date has to be ahead of us')
 
@@ -476,7 +548,8 @@ export class Engine {
           quantity: item.quantity,
           dueDate,
           reserveAccountId: item.reserveAccountId,
-          recurrence,
+          recurEvery: recurrence?.every ?? null,
+          recurUnit: recurrence?.unit ?? null,
           state: pkg.state === 'active' ? 'accruing' : 'planned',
         })
         .returning({ id: lineItemsTable.id })
@@ -840,10 +913,10 @@ export class Engine {
       // A one-off retires. A recurring part rolls its due date to the next
       // occurrence in place and starts a fresh cycle from today at $0 saved
       // (PRD D8, superseded); the settled cycle stays in the log.
-      const rolledTo =
-        row.recurrence !== 'none'
-          ? rollToFuture(row.dueDate as CivilDate, row.recurrence, today)
-          : null
+      const recurrence = recurrenceOf(row.recurEvery, row.recurUnit)
+      const rolledTo = recurrence
+        ? rollToFuture(row.dueDate as CivilDate, recurrence, today)
+        : null
 
       await tx
         .update(lineItemsTable)
@@ -1566,6 +1639,6 @@ function toLineItem(r: typeof lineItemsTable.$inferSelect): LineItem {
     dueDate: r.dueDate as CivilDate,
     reserveAccountId: r.reserveAccountId,
     state: r.state,
-    recurrence: r.recurrence,
+    recurrence: recurrenceOf(r.recurEvery, r.recurUnit),
   }
 }

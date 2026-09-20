@@ -85,7 +85,10 @@ describeDb('debts, the ladder and the optimizer', () => {
     const result = await engine.optimiseLumpSum(107500)
     expect(result.allocations[0]!.debtName).toBe('Store card')
     expect(result.allocations[0]!.clearsIt).toBe(true)
-    expect(result.monthlyFreedCents).toBe(4000)
+    // The store card's $40 minimum goes, and the $675 left dents the big
+    // card: 2% of $9,000 is $180, 2% of $8,325 is $166.50, so $13.50 a
+    // month comes back from that too.
+    expect(result.monthlyFreedCents).toBe(4000 + 1350)
     expect(result.why).toContain('Store card')
   })
 
