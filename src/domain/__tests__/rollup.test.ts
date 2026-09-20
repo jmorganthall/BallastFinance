@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   accountViews,
+  aheadOptions,
   catchUpOptions,
   computeDrift,
   packageViews,
@@ -243,5 +244,91 @@ describe('drift and catch-up', () => {
     const after = accountViews(withAdjustment)[0]!.weekly.totalPerWeekCents
     expect(after).toBeGreaterThan(before)
     expect(accountViews(withAdjustment)[0]!.weekly.catchUp).toHaveLength(1)
+  })
+})
+
+describe('ahead of the plan', () => {
+  const today = '2026-11-21'
+
+  it('offers moving the extra out, and easing off the weekly set-aside', () => {
+    const options = aheadOptions({ extraCents: 19000, weeklyCents: 5000, today, overWeeks: 8 })
+    expect(options).toHaveLength(2)
+
+    const [out, cut] = options
+    expect(out).toEqual({ kind: 'one_time_out', amountCents: 19000 })
+
+    expect(cut!.kind).toBe('rate_cut')
+    expect(cut!.perWeekCents).toBe(2375) // $190 over 8 weeks
+    expect(cut!.weeks).toBe(8)
+    expect(cut!.endDate).toBe('2027-01-16')
+    expect(cut!.amountCents).toBe(19000) // the cut and its weekly figure agree exactly
+    expect(cut!.pauses).toBe(false)
+    expect(cut!.leftoverCents).toBe(0)
+  })
+
+  it('rounds a cut DOWN, so the account ends a few cents ahead rather than behind', () => {
+    const cut = aheadOptions({ extraCents: 100, weeklyCents: 5000, today, overWeeks: 3 })[1]!
+    expect(cut.perWeekCents).toBe(33)
+    expect(cut.amountCents).toBe(99)
+    expect(cut.leftoverCents).toBe(1)
+  })
+
+  it('never cuts more than is being set aside: a big extra becomes a pause', () => {
+    // $4,925.10 extra against $50/week: 98 whole weeks would do it, capped at a year.
+    const cut = aheadOptions({ extraCents: 492510, weeklyCents: 5000, today, overWeeks: 8 })[1]!
+    expect(cut.pauses).toBe(true)
+    expect(cut.perWeekCents).toBe(5000)
+    expect(cut.weeks).toBe(52)
+    expect(cut.amountCents).toBe(260000)
+    expect(cut.leftoverCents).toBe(232510)
+    expect(cut.endDate).toBe('2027-11-20')
+  })
+
+  it('pauses for whole weeks only, leaving the odd cents as cushion', () => {
+    // $1,250 extra at $100/week over a 4-week window: too much to trim, 12 whole weeks to pause.
+    const cut = aheadOptions({ extraCents: 125000, weeklyCents: 10000, today, overWeeks: 4 })[1]!
+    expect(cut.pauses).toBe(true)
+    expect(cut.weeks).toBe(12)
+    expect(cut.amountCents).toBe(120000)
+    expect(cut.leftoverCents).toBe(5000)
+  })
+
+  it('only offers the move-out when nothing is being set aside', () => {
+    const options = aheadOptions({ extraCents: 492510, weeklyCents: 0, today, overWeeks: 8 })
+    expect(options.map((o) => o.kind)).toEqual(['one_time_out'])
+  })
+
+  it('offers nothing when the account is not ahead', () => {
+    expect(aheadOptions({ extraCents: 0, weeklyCents: 5000, today, overWeeks: 8 })).toEqual([])
+    expect(aheadOptions({ extraCents: -500, weeklyCents: 5000, today, overWeeks: 8 })).toEqual([])
+  })
+
+  it('folds an accepted cut into the account weekly number, never below zero', () => {
+    const input: DerivationInput = {
+      today,
+      accounts: [annual],
+      packages: [pkg()],
+      lineItems: [li({ id: 'li-tickets', unitAmountCents: 60000 })],
+    }
+    const withCut: DerivationInput = {
+      ...input,
+      driftAdjustments: [
+        {
+          id: 'cut-1',
+          reserveAccountId: annual.id,
+          amountCents: -19000,
+          startDate: today,
+          endDate: '2027-01-16',
+        },
+      ],
+    }
+    const before = accountViews(input)[0]!
+    const after = accountViews(withCut)[0]!
+    expect(before.weekly.totalPerWeekCents).toBe(3530) // $600 over 17 weeks, rounded up
+    expect(after.weekly.catchUp).toEqual([{ endDate: '2027-01-16', perWeekCents: -2375 }])
+    expect(after.weekly.totalPerWeekCents).toBe(3530 - 2375)
+    expect(after.weekly.ongoingPerWeekCents).toBe(before.weekly.ongoingPerWeekCents)
+    // A cut changes what goes in each week, not what the plan says should be there.
+    expect(after.shouldHaveSavedCents).toBe(before.shouldHaveSavedCents)
   })
 })

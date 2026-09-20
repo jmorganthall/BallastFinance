@@ -63,7 +63,11 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
       const parts =
         w.catchUp.length > 0
           ? ` (${formatCents(w.ongoingPerWeekCents)} ongoing${w.catchUp
-              .map((g) => ` + ${formatCents(g.perWeekCents)} extra until ${g.endDate}`)
+              .map((g) =>
+                g.perWeekCents < 0
+                  ? ` − ${formatCents(Math.abs(g.perWeekCents))} less until ${g.endDate}`
+                  : ` + ${formatCents(g.perWeekCents)} extra until ${g.endDate}`,
+              )
               .join('')})`
           : ''
       lines.push(`- **${view.account.name}**: ${formatCents(w.totalPerWeekCents)}/week${parts}`)

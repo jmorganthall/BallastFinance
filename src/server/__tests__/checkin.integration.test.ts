@@ -11,7 +11,7 @@ import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
 import { Engine } from '@/server/engine'
-import { INTAKE_CONTRACT_VERSION, catchUpOptions, computeDrift } from '@/domain'
+import { INTAKE_CONTRACT_VERSION, aheadOptions, catchUpOptions, computeDrift } from '@/domain'
 
 const url = process.env.DATABASE_URL
 const describeDb = url ? describe : describe.skip
@@ -116,6 +116,36 @@ describeDb('check-ins, drift and close-out', () => {
     expect(after.weekly.catchUp).toHaveLength(1)
     // And it drops off the to-do list.
     expect(await engine.outstandingInstructions()).toHaveLength(0)
+  })
+
+  it('eases off the weekly number once an accepted cut is confirmed', async () => {
+    const before = (await engine.accountViews()).find((v) => v.account.id === accountId)!
+    const cut = aheadOptions({
+      extraCents: 8000,
+      weeklyCents: before.weekly.totalPerWeekCents,
+      today,
+      overWeeks: 4,
+    }).find((o) => o.kind === 'rate_cut')!
+
+    const id = await engine.issueInstruction({
+      type: 'rate_cut',
+      amountCents: cut.amountCents,
+      targetId: accountId,
+      targetLabel: 'Annual Expenses',
+      endsOn: cut.endDate!,
+    })
+    // Offered is not accepted: nothing moves yet.
+    const offered = (await engine.accountViews()).find((v) => v.account.id === accountId)!
+    expect(offered.weekly.totalPerWeekCents).toBe(before.weekly.totalPerWeekCents)
+
+    await engine.confirmInstruction({ instructionId: id })
+
+    const after = (await engine.accountViews()).find((v) => v.account.id === accountId)!
+    expect(after.weekly.totalPerWeekCents).toBe(before.weekly.totalPerWeekCents - cut.perWeekCents!)
+    expect(after.weekly.totalPerWeekCents).toBeGreaterThanOrEqual(0)
+    expect(after.weekly.catchUp.some((g) => g.perWeekCents < 0)).toBe(true)
+    // What the plan says should be there is untouched by easing off.
+    expect(after.shouldHaveSavedCents).toBe(before.shouldHaveSavedCents)
   })
 
   it('keeps asking about a passed due date instead of dropping it', async () => {

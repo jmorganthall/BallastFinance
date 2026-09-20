@@ -111,7 +111,7 @@ which uses `docker-compose.yml` instead. Same image, same bootstrap, different d
 
 ## Status
 
-**All four build phases are implemented**, with 254 tests passing against a live
+**All four build phases are implemented**, with 264 tests passing against a live
 PostgreSQL 16.
 
 | Phase | Contents | Status |

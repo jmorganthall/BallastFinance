@@ -78,7 +78,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 254 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 264 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
