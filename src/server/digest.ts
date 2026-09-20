@@ -174,3 +174,25 @@ export async function buildCheckInNudge(
     detail: { stale_account_ids: stale.map((v) => v.account.id) },
   }
 }
+
+/**
+ * Promo-expiry warnings (PRD §8). Fired early enough to act on: the whole point
+ * is clearing the balance before the rate resets, not being told afterwards.
+ */
+export async function buildPromoWarnings(input: DigestInput): Promise<NotificationPayload[]> {
+  const engine = engineFor(input)
+  const warnings = await engine.promoWarnings()
+
+  return warnings.map((warning) => ({
+    kind: 'promo_expiry_warning' as const,
+    householdId: input.householdId,
+    summary: `Ballast: ${warning.debt.name} stops being 0% on ${warning.untilDate}.`,
+    body: `**${warning.debt.name}** has ${formatCents(warning.debt.balanceCents)} on a promotional rate that ends ${warning.untilDate}.\n\nTo clear it before interest starts, it needs ${formatCents(warning.monthlyToClearCents)} a month from here. After that date it costs ${(warning.debt.aprBasisPoints / 100).toFixed(2)}%.`,
+    link: `${input.baseUrl}/debts`,
+    detail: {
+      debt_id: warning.debt.id,
+      until_date: warning.untilDate,
+      monthly_to_clear_cents: warning.monthlyToClearCents,
+    },
+  }))
+}

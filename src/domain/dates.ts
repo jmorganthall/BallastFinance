@@ -95,3 +95,20 @@ export function transferWeeksBetween(from: CivilDate, to: CivilDate): number {
 export function accrualWeeksBetween(from: CivilDate, to: CivilDate): number {
   return Math.max(1, transferWeeksBetween(from, to))
 }
+
+/** Whole months from `from` to `to`, rounded down. Never negative. */
+export function monthsBetween(from: CivilDate, to: CivilDate): number {
+  const [fy, fm, fd] = from.split('-').map(Number) as [number, number, number]
+  const [ty, tm, td] = to.split('-').map(Number) as [number, number, number]
+  const months = (ty - fy) * 12 + (tm - fm) - (td < fd ? 1 : 0)
+  return Math.max(0, months)
+}
+
+/** The same day-of-month `months` later, clamped to the end of a short month. */
+export function addMonths(d: CivilDate, months: number): CivilDate {
+  const [y, m, day] = d.split('-').map(Number) as [number, number, number]
+  const target = new Date(Date.UTC(y, m - 1 + months, 1))
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate()
+  target.setUTCDate(Math.min(day, lastDay))
+  return target.toISOString().slice(0, 10)
+}

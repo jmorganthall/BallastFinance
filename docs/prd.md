@@ -44,7 +44,11 @@ repo still has to know them. Everything else: read the document.
 
 | Phase | Contents | Status |
 | --- | --- | --- |
-| A | Schema, auth + household, ReserveAccounts, package builder via intake, accrual derivations, Home/This Week | In progress |
-| B | Check-ins, drift, close-out, instructions, n8n notifications, weekly digest | Not started |
-| C | Simulate → commit, what-if overlay, Allocate screen | Not started |
-| D | Debt inventory, scoring + slider, ladder, projections, lump-sum optimizer | Not started |
+| A | Schema, auth + household, ReserveAccounts, package builder via intake, accrual derivations, Home/This Week | Built |
+| B | Check-ins, drift, close-out, instructions, n8n notifications, weekly digest | Built |
+| C | Simulate → commit, what-if overlay, Allocate screen | Built |
+| D | Debt inventory, scoring + slider, ladder, projections, lump-sum optimizer | Built |
+
+All four phases are implemented and tested. What remains before v1 is done is
+verification against reality, not more building — see the PRD's acceptance
+criteria (§12) and the open items (§13).

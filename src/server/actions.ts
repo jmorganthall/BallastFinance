@@ -205,3 +205,76 @@ export async function runAllocationAction(formData: FormData): Promise<void> {
   revalidatePath('/allocate')
   redirect('/')
 }
+
+// ---------------------------------------------------------------- Phase D
+
+export async function createDebtAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountToCents } = await import('@/domain')
+
+  const name = String(formData.get('name') ?? '').trim()
+  if (!name) return
+
+  const balanceCents = parseAmountToCents(String(formData.get('balance') ?? '0'))
+  // APR arrives as a percentage a human typed; basis points keep it exact.
+  const aprBasisPoints = Math.round(Number(formData.get('apr') ?? 0) * 100)
+  const minType = String(formData.get('min_type') ?? 'fixed')
+
+  const minPaymentRule =
+    minType === 'percent'
+      ? { type: 'percent' as const, basisPoints: Math.round(Number(formData.get('min_percent') ?? 0) * 100) }
+      : minType === 'percent_with_floor'
+        ? {
+            type: 'percent_with_floor' as const,
+            basisPoints: Math.round(Number(formData.get('min_percent') ?? 0) * 100),
+            floorCents: parseAmountToCents(String(formData.get('min_floor') ?? '0')),
+          }
+        : { type: 'fixed' as const, amountCents: parseAmountToCents(String(formData.get('min_amount') ?? '0')) }
+
+  const promoUntil = String(formData.get('promo_until') ?? '').trim()
+  const promoRules = promoUntil
+    ? [
+        {
+          rateBasisPoints: Math.round(Number(formData.get('promo_rate') ?? 0) * 100),
+          appliesTo: 'full' as const,
+          untilDate: promoUntil,
+        },
+      ]
+    : []
+
+  const limit = String(formData.get('credit_limit') ?? '').trim()
+
+  await engine.createDebt({
+    name,
+    category: (String(formData.get('category') ?? 'consumer') as 'consumer' | 'auto' | 'mortgage'),
+    balanceCents,
+    aprBasisPoints,
+    minPaymentRule,
+    promoRules,
+    creditLimitCents: limit ? parseAmountToCents(limit) : null,
+    fixedPayment: formData.get('fixed_payment') === 'on',
+  })
+
+  revalidatePath('/debts')
+}
+
+export async function confirmDebtPaymentAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountToCents } = await import('@/domain')
+  const debtId = String(formData.get('debt_id'))
+  const raw = String(formData.get('amount') ?? '').trim()
+  if (!raw) return
+
+  await engine.confirmDebtPayment({ debtId, amountCents: parseAmountToCents(raw) })
+  revalidatePath('/debts')
+  revalidatePath('/')
+}
+
+export async function setPriorityWeightAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const weight = Number(formData.get('weight'))
+  if (Number.isFinite(weight) && weight >= 0 && weight <= 1) {
+    await engine.putSetting('priority_weights', weight)
+  }
+  revalidatePath('/debts')
+}

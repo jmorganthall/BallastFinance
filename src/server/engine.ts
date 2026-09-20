@@ -13,6 +13,7 @@
 import { and, eq } from 'drizzle-orm'
 import { db as defaultDb, type Db } from '@/db/client'
 import {
+  debts as debtsTable,
   events,
   lineItems as lineItemsTable,
   packages as packagesTable,
@@ -25,7 +26,13 @@ import {
   closeOutPrompts,
   DEFAULT_ALLOCATION_RULES,
   DEFAULT_BUFFER_CENTS,
+  DEFAULT_PRIORITY_WEIGHT,
+  DEFAULT_PROMO_LEAD_WEEKS,
+  optimiseLumpSum,
   planAllocation,
+  promoExpiryWarning,
+  scoreDebts,
+  snowballLadder,
   outstandingInstructions,
   packageViews,
   todayIn,
@@ -52,6 +59,12 @@ import {
   type OutstandingInstruction,
   type AllocationPlan,
   type AllocationRule,
+  type Debt,
+  type DebtCategory,
+  type LadderRung,
+  type MinPaymentRule,
+  type OptimizerResult,
+  type PromoRule,
 } from '@/domain'
 
 export class EngineError extends Error {}
@@ -637,19 +650,64 @@ export class Engine {
         continue
       }
 
+      if (share.destination === 'debt') {
+        // The debt share is handed to the optimizer, which names actual debts
+        // (PRD §6 step 3) rather than leaving "put it at debt" for the user to
+        // resolve. If there are no debts, it comes back with nothing and the
+        // share is issued unassigned rather than silently dropped.
+        const optimised = await this.optimiseLumpSum(share.amountCents)
+
+        if (optimised.allocations.length === 0) {
+          instructionIds.push(
+            await this.issueInstruction({
+              type: 'debt_payment',
+              amountCents: share.amountCents,
+              targetId: 'debt',
+              targetLabel: share.label,
+              note: 'No debts recorded yet, so this has nowhere specific to go.',
+            }),
+          )
+          continue
+        }
+
+        for (const allocation of optimised.allocations) {
+          instructionIds.push(
+            await this.issueInstruction({
+              type: 'debt_payment',
+              amountCents: allocation.amountCents,
+              targetId: allocation.debtId,
+              targetLabel: allocation.debtName,
+              note: allocation.reason,
+            }),
+          )
+        }
+
+        // Anything the optimizer could not place (every debt cleared) is still
+        // the household's money and must not vanish from the plan.
+        if (optimised.unallocatedCents > 0) {
+          instructionIds.push(
+            await this.issueInstruction({
+              type: 'one_time_move',
+              amountCents: optimised.unallocatedCents,
+              targetId: 'debt',
+              targetLabel: share.label,
+              note: 'Left over after clearing every debt — decide where this goes.',
+            }),
+          )
+        }
+        continue
+      }
+
       // A destination that maps to a real reserve account names that account,
       // so the instruction says where the money actually goes.
       const account = accounts.find((a) => a.name.toLowerCase() === share.label.toLowerCase())
 
       instructionIds.push(
         await this.issueInstruction({
-          type: share.destination === 'debt' ? 'debt_payment' : 'one_time_move',
+          type: 'one_time_move',
           amountCents: share.amountCents,
           targetId: account?.id ?? share.destination,
           targetLabel: account?.name ?? share.label,
-          ...(share.destination === 'debt'
-            ? { note: 'Which debt this goes to is decided by the payoff order.' }
-            : {}),
         }),
       )
     }
@@ -674,6 +732,162 @@ export class Engine {
     })
 
     return { plan, instructionIds }
+  }
+
+  // ---------------------------------------------------------------- debts
+
+  async listDebts(): Promise<Debt[]> {
+    const rows = await this.db
+      .select()
+      .from(debtsTable)
+      .where(eq(debtsTable.householdId, this.householdId))
+    return rows.map(toDebt)
+  }
+
+  async createDebt(input: {
+    name: string
+    category: DebtCategory
+    balanceCents: Cents
+    aprBasisPoints: number
+    minPaymentRule: MinPaymentRule
+    promoRules?: PromoRule[]
+    creditLimitCents?: Cents | null
+    fixedPayment?: boolean
+  }): Promise<Debt> {
+    const [row] = await this.db
+      .insert(debtsTable)
+      .values({
+        householdId: this.householdId,
+        name: input.name.trim(),
+        category: input.category,
+        balanceCents: input.balanceCents,
+        balanceAsOf: this.today(),
+        aprBasisPoints: input.aprBasisPoints,
+        promoRules: input.promoRules ?? [],
+        minPaymentRule: input.minPaymentRule,
+        creditLimitCents: input.creditLimitCents ?? null,
+        fixedPayment: input.fixedPayment ?? false,
+        state: 'open',
+      })
+      .returning()
+    if (!row) throw new EngineError('Could not create the debt')
+    return toDebt(row)
+  }
+
+  /**
+   * A confirmed payment (PRD §7). Balances move only through confirmations, so a
+   * recommendation the user did not act on never changes a score.
+   */
+  async confirmDebtPayment(input: { debtId: Id; amountCents: Cents }): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(debtsTable)
+        .where(and(eq(debtsTable.id, input.debtId), eq(debtsTable.householdId, this.householdId)))
+      if (!row) throw new EngineError('No such debt in this household')
+
+      const balanceCents = Math.max(0, row.balanceCents - input.amountCents)
+      await tx
+        .update(debtsTable)
+        .set({
+          balanceCents,
+          balanceAsOf: today,
+          state: balanceCents === 0 ? 'paid_off' : 'open',
+        })
+        .where(eq(debtsTable.id, input.debtId))
+
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'payment_confirmed',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: {
+          debt_id: input.debtId,
+          amount_cents: input.amountCents,
+          balance_after_cents: balanceCents,
+        },
+      })
+    })
+  }
+
+  /** A statement balance the user read off, rather than a payment they made. */
+  async updateDebtBalance(input: { debtId: Id; balanceCents: Cents }): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(debtsTable)
+        .where(and(eq(debtsTable.id, input.debtId), eq(debtsTable.householdId, this.householdId)))
+      if (!row) throw new EngineError('No such debt in this household')
+
+      await tx
+        .update(debtsTable)
+        .set({
+          balanceCents: input.balanceCents,
+          balanceAsOf: today,
+          state: input.balanceCents === 0 ? 'paid_off' : 'open',
+        })
+        .where(eq(debtsTable.id, input.debtId))
+
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'debt_balance_updated',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { debt_id: input.debtId, balance_cents: input.balanceCents, as_of: today },
+      })
+    })
+  }
+
+  async priorityWeight(): Promise<number> {
+    return this.getSetting<number>('priority_weights', DEFAULT_PRIORITY_WEIGHT)
+  }
+
+  async promoLeadWeeks(): Promise<number> {
+    return this.getSetting<number>('promo_lead_weeks', DEFAULT_PROMO_LEAD_WEEKS)
+  }
+
+  /** The payoff order, with the running trade-off at each rung (PRD §7). */
+  async debtLadder(weightOverride?: number): Promise<LadderRung[]> {
+    const [debts, weight, promoLeadWeeks] = await Promise.all([
+      this.listDebts(),
+      weightOverride !== undefined ? Promise.resolve(weightOverride) : this.priorityWeight(),
+      this.promoLeadWeeks(),
+    ])
+    return snowballLadder(scoreDebts({ debts, today: this.today(), weight, promoLeadWeeks }))
+  }
+
+  /** Where a specific amount should go (PRD §7). */
+  async optimiseLumpSum(amountCents: Cents, weightOverride?: number): Promise<OptimizerResult> {
+    const [debts, weight, promoLeadWeeks] = await Promise.all([
+      this.listDebts(),
+      weightOverride !== undefined ? Promise.resolve(weightOverride) : this.priorityWeight(),
+      this.promoLeadWeeks(),
+    ])
+    return optimiseLumpSum({
+      debts,
+      amountCents,
+      today: this.today(),
+      weight,
+      promoLeadWeeks,
+    })
+  }
+
+  /** Debts whose promotional rate is close enough to worry about (PRD §8). */
+  async promoWarnings(): Promise<
+    { debt: Debt; untilDate: CivilDate; monthlyToClearCents: Cents }[]
+  > {
+    const [debts, leadWeeks] = await Promise.all([this.listDebts(), this.promoLeadWeeks()])
+    const today = this.today()
+    return debts
+      .filter((debt) => debt.state === 'open')
+      .flatMap((debt) => {
+        const warning = promoExpiryWarning(debt, today, leadWeeks)
+        return warning ? [{ debt, ...warning }] : []
+      })
   }
 
   /** Settings are versioned by effective_from; a change adds a row, never edits one. */
@@ -703,6 +917,23 @@ function toPackage(r: typeof packagesTable.$inferSelect): Package {
     detail: r.detail,
     createdAt: r.createdAt as CivilDate,
     committedAt: (r.committedAt as CivilDate | null) ?? null,
+  }
+}
+
+function toDebt(r: typeof debtsTable.$inferSelect): Debt {
+  return {
+    id: r.id,
+    householdId: r.householdId,
+    name: r.name,
+    category: r.category,
+    balanceCents: r.balanceCents,
+    balanceAsOf: r.balanceAsOf as CivilDate,
+    aprBasisPoints: r.aprBasisPoints,
+    promoRules: (r.promoRules as PromoRule[]) ?? [],
+    minPaymentRule: r.minPaymentRule as MinPaymentRule,
+    creditLimitCents: r.creditLimitCents,
+    fixedPayment: r.fixedPayment,
+    state: r.state,
   }
 }
 

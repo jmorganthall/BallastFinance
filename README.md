@@ -9,16 +9,19 @@ layer — the part that lives in a spreadsheet today.
 
 ## Status
 
-**Phase A is built and verified.** Schema, auth, reserve accounts, the package builder via
-the intake contract, the accrual derivations, and the Home/This Week screen all work
-end to end against a live PostgreSQL 16.
+**All four build phases are implemented**, with 182 tests passing against a live
+PostgreSQL 16.
 
 | Phase | Contents | Status |
 | --- | --- | --- |
-| A | Schema, auth + household, reserve accounts, package builder, accrual derivations, Home/This Week | **Done** |
-| B | Check-ins, drift, close-out, instructions, n8n notifications, weekly digest | Next |
-| C | Simulate → commit, what-if overlay, Allocate screen | Not started |
-| D | Debt inventory, scoring + slider, ladder, projections, lump-sum optimizer | Not started |
+| A | Schema, auth + household, reserve accounts, package builder, accrual derivations, Home/This Week | Built |
+| B | Check-ins, drift, close-out, instructions, n8n notifications, weekly digest | Built |
+| C | Simulate → commit, what-if overlay, Allocate screen | Built |
+| D | Debt inventory, scoring + slider, ladder, projections, lump-sum optimizer | Built |
+
+What remains is verification against reality rather than more building: the sheet-parity
+test against the real eight debts, Shelby completing a check-in unaided from her phone,
+and a tested database restore. Those are in the PRD's acceptance criteria (§12).
 
 See [running it](docs/running-it.md) to get it going.
 

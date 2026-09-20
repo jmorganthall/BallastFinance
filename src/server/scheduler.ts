@@ -12,7 +12,12 @@
 import cron, { type ScheduledTask } from 'node-cron'
 import { db } from '@/db/client'
 import { households } from '@/db/schema'
-import { buildCheckInNudge, buildDueDatePrompts, buildWeeklyDigest } from '@/server/digest'
+import {
+  buildCheckInNudge,
+  buildDueDatePrompts,
+  buildPromoWarnings,
+  buildWeeklyDigest,
+} from '@/server/digest'
 import { sendNotification } from '@/server/notifications'
 
 const TIMEZONE = process.env.HOUSEHOLD_TIMEZONE ?? 'America/Chicago'
@@ -25,6 +30,7 @@ const TIMEZONE = process.env.HOUSEHOLD_TIMEZONE ?? 'America/Chicago'
 const WEEKLY_DIGEST_CRON = process.env.DIGEST_CRON ?? '0 8 * * 6'
 const DUE_PROMPT_CRON = process.env.DUE_PROMPT_CRON ?? '0 9 * * 6'
 const CHECK_IN_NUDGE_CRON = process.env.CHECK_IN_NUDGE_CRON ?? '0 17 * * 0'
+const PROMO_WARNING_CRON = process.env.PROMO_WARNING_CRON ?? '0 10 * * 1'
 
 const tasks: ScheduledTask[] = []
 
@@ -80,6 +86,18 @@ export function startScheduler(): void {
   schedule(DUE_PROMPT_CRON, 'due-date-prompts', async () => {
     await forEachHousehold('due-date-prompts', async (householdId, timezone) => {
       for (const payload of await buildDueDatePrompts({
+        householdId,
+        baseUrl: baseUrl(),
+        timezone,
+      })) {
+        await sendNotification(payload)
+      }
+    })
+  })
+
+  schedule(PROMO_WARNING_CRON, 'promo-expiry-warnings', async () => {
+    await forEachHousehold('promo-expiry-warnings', async (householdId, timezone) => {
+      for (const payload of await buildPromoWarnings({
         householdId,
         baseUrl: baseUrl(),
         timezone,
