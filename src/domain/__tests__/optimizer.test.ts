@@ -132,6 +132,10 @@ describe('a partial payment still frees cash when the minimum follows the balanc
     expect(only!.monthlyFreedCents).toBe(4039)
     expect(result.monthlyFreedCents).toBe(4039)
     expect(only!.reason).toContain('Its minimum drops from $200.00 to $159.61 a month.')
+    // It shrinks, so it has an end, however far off: the long view exists.
+    expect(only!.lifetimeInterestAvoidedCents).not.toBeNull()
+    expect(only!.lifetimeInterestAvoidedCents!).toBeGreaterThan(result.interestAvoidedCents)
+    expect(result.lifetimeInterestAvoidedCents).toBe(only!.lifetimeInterestAvoidedCents)
   })
 
   it('frees nothing while a floor is what sets the minimum', () => {

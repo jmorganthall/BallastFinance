@@ -253,22 +253,17 @@ export default async function CheckInPage({
                           </p>
                         )}
 
+                        {/* The alternative to counting it toward plans: share the whole
+                            extra out. Whatever the plans cannot use is still extra at the
+                            next check-in, and this option is offered again then. */}
                         <Link
                           href={`/allocate?from=${view.account.id}&floor=${encodeURIComponent(
-                            formatCents(
-                              counted.assignments.length > 0 ? counted.leftoverCents : shortfall,
-                            ).replace('$', '').replace(/,/g, ''),
+                            formatCents(shortfall).replace('$', '').replace(/,/g, ''),
                           )}`}
-                          className={`flex items-center justify-between gap-3 rounded-xl bg-[var(--color-surface)] p-3 text-sm ${
-                            counted.assignments.length > 0 && counted.leftoverCents === 0
-                              ? 'text-[var(--color-ink-soft)]'
-                              : ''
-                          }`}
+                          className="flex items-center justify-between gap-3 rounded-xl bg-[var(--color-surface)] p-3 text-sm"
                         >
                           <span>
-                            Share{' '}
-                            {formatCents(counted.assignments.length > 0 ? counted.leftoverCents : shortfall)}{' '}
-                            out instead
+                            Share {formatCents(shortfall)} out instead
                             <span className="block text-xs text-[var(--color-ink-soft)]">
                               Runs it through Share out: debts, fun money, savings, by your rules.
                             </span>

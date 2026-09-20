@@ -346,7 +346,22 @@ export interface Projection {
   totalInterestCents: Cents
 }
 
-const MAX_MONTHS = 600 // 50 years; past that it is "never" for a household's purposes
+/**
+ * How far a projection is willing to look. A percent-of-balance minimum shrinks
+ * with the balance, so a card can take centuries to clear at its minimum and
+ * still, truthfully, have an end -- and the interest over that life is a
+ * finite figure worth knowing. The cap is for the balance that never shrinks
+ * at all, which the loop also catches early; past it, "never" is the honest
+ * word.
+ */
+const MAX_MONTHS = 12_000
+
+/**
+ * A card asks for the whole balance once it is under its floor, about $25.
+ * Below that, a projection that stalls (a percent-of-balance minimum rounding
+ * to the same cent as the interest) is rounding, not a debt.
+ */
+const POCKET_CHANGE_CENTS = 2500
 
 /**
  * Months to clear one debt, simulated month by month rather than solved in
@@ -383,7 +398,12 @@ export function projectPayoff(args: {
     const payment = Math.min(balance, minimumPaymentCents(working) + extra)
 
     // A payment that does not cover the interest never clears the balance.
+    // Except at pocket change, where the last payment takes the lot: a debt
+    // that got there shrank from real money, so it is paid off.
     if (payment <= charged && extra === 0) {
+      if (balance <= POCKET_CHANGE_CENTS) {
+        return { months: month, payoffDate: addMonths(args.today, month), totalInterestCents: interest }
+      }
       return { months: null, payoffDate: null, totalInterestCents: interest }
     }
 
