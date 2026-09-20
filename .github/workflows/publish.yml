@@ -69,10 +69,11 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          # arm64 covers Raspberry Pi and Apple Silicon; it is emulated here, so
-          # it is the slow half of this job. The registry cache makes repeat
-          # builds bearable.
-          platforms: linux/amd64,linux/arm64
+          # amd64 only. arm64 has to be emulated under QEMU on these runners,
+          # which took the build from a few minutes to twenty-odd -- not worth it
+          # for a target that is an Unraid box. Add linux/arm64 back here if this
+          # ever needs to run on a Raspberry Pi or Apple Silicon.
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

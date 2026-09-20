@@ -62,9 +62,12 @@ Write a `.env` beside it with `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `AUTH_SECR
 docker compose -f docker-compose.ghcr.yml up -d
 ```
 
-Images are `ghcr.io/jmorganthall/ballastfinance`, built for `linux/amd64` and
-`linux/arm64`. Set `BALLAST_IMAGE` to pin a version tag — `latest` follows the default
-branch and will change under you.
+Images are `ghcr.io/jmorganthall/ballastfinance`, built for `linux/amd64`. Set
+`BALLAST_IMAGE` to pin a version tag — `latest` follows `main` and will change under you.
+
+On arm64 (Raspberry Pi, Apple Silicon) use the quick start instead, which builds locally.
+Publishing an arm64 image means emulating it on the runner, which costs twenty minutes a
+build for a target this does not currently have.
 
 </details>
 
