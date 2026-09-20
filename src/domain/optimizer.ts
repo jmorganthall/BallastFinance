@@ -23,7 +23,7 @@ import {
   DEFAULT_PROMO_LEAD_WEEKS,
   effectiveAprBasisPoints,
   interestOverNextYearCents,
-  minimumPaymentCents,
+  monthlyPaymentCents,
   projectPayoff,
   type Debt,
 } from './debt'
@@ -123,7 +123,7 @@ export function optimiseLumpSum(args: {
   const rows = open.map((debt) => ({
     debt,
     apr: effectiveAprBasisPoints(debt, args.today, leadWeeks),
-    minimum: minimumPaymentCents(debt),
+    minimum: monthlyPaymentCents(debt),
     yearInterest: interestOverNextYearCents(debt, args.today, leadWeeks),
     urgent: promoUrgent(debt, args.today, leadWeeks),
   }))
@@ -222,8 +222,9 @@ export function optimiseLumpSum(args: {
       const life = lifetime(target.debt, remaining)
       // A percent-of-balance minimum follows the balance down, so even a
       // payment that clears nothing can free real cash each month. A set
-      // payment (or a floor that is what sets the minimum) does not move.
-      const minimumAfter = minimumPaymentCents({
+      // payment (or a floor that is what sets the minimum, or a planned
+      // payment above the minimum) does not move.
+      const minimumAfter = monthlyPaymentCents({
         ...target.debt,
         balanceCents: target.debt.balanceCents - remaining,
       })

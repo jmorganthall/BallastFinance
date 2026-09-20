@@ -44,6 +44,13 @@ export interface Debt {
   minPaymentRule: MinPaymentRule
   creditLimitCents?: Cents | null
   /**
+   * What the household actually pays each month, when that is more than the
+   * lender's minimum. Null or absent means the minimum. This is the number
+   * that says whether a deal-rate balance is on track: a card the family
+   * clears at $400 a month is not a cliff just because its minimum is $30.
+   */
+  plannedPaymentCents?: Cents | null
+  /**
    * Listed in the PRD's data model, read by nothing. The form no longer asks
    * for it: a set-amount minimum already says the payment never changes, and
    * asking twice looked like two different questions. Stays false.
@@ -99,12 +106,19 @@ export function validateDebtInputs(input: {
   balanceCents: Cents
   aprBasisPoints: number
   minPaymentRule: MinPaymentRule
+  plannedPaymentCents?: Cents | null
 }): void {
   if (!Number.isFinite(input.balanceCents) || input.balanceCents < 0) {
     throw new DebtDataError('A debt balance must be zero or more.')
   }
   if (!Number.isFinite(input.aprBasisPoints) || input.aprBasisPoints < 0) {
     throw new DebtDataError('An interest rate cannot be negative.')
+  }
+  if (
+    input.plannedPaymentCents != null &&
+    (!Number.isFinite(input.plannedPaymentCents) || input.plannedPaymentCents < 0)
+  ) {
+    throw new DebtDataError('What you pay each month cannot be negative.')
   }
 
   const rule = input.minPaymentRule
@@ -164,6 +178,18 @@ export function minimumPaymentCents(debt: Debt): Cents {
   }
 }
 
+/**
+ * What actually goes at this debt each month: the household's planned
+ * payment when it has one, else the lender's minimum, never more than the
+ * balance. Every projection and every "is it on track" test uses this, so a
+ * family paying well above the minimum is judged on what it does, not on
+ * what the card would let it get away with.
+ */
+export function monthlyPaymentCents(debt: Debt): Cents {
+  const planned = Math.max(0, debt.plannedPaymentCents ?? 0)
+  return Math.min(debt.balanceCents, Math.max(minimumPaymentCents(debt), planned))
+}
+
 interface Tranche {
   amountCents: Cents
   rateBasisPoints: number
@@ -179,7 +205,7 @@ interface Tranche {
  * spreadsheet could not see, because a 0% APR scores zero long-term today.
  */
 function tranchesFor(debt: Debt, today: CivilDate, leadWeeks: number): Tranche[] {
-  const minimum = minimumPaymentCents(debt)
+  const payment = monthlyPaymentCents(debt)
   const tranches: Tranche[] = []
   let unallocated = debt.balanceCents
 
@@ -194,7 +220,7 @@ function tranchesFor(debt: Debt, today: CivilDate, leadWeeks: number): Tranche[]
     if (amountCents <= 0) continue
 
     const monthsLeft = monthsBetween(today, rule.untilDate)
-    const clearable = monthsLeft * minimum >= amountCents
+    const clearable = monthsLeft * payment >= amountCents
 
     let rateBasisPoints: number
     if (!clearable) {
@@ -265,6 +291,8 @@ export interface DebtScore {
   debt: Debt
   effectiveAprBasisPoints: number
   minimumPaymentCents: Cents
+  /** What goes at it each month: the planned payment, else the minimum. */
+  paymentPerMonthCents: Cents
   /** Avoided-interest weight, normalised against the worst rate in the inventory. */
   longTerm: number
   /** Cash freed per dollar paid off, normalised against the best ratio. */
@@ -295,10 +323,11 @@ export function scoreDebts(args: {
     debt,
     effectiveAprBasisPoints: effectiveAprBasisPoints(debt, args.today, leadWeeks),
     minimumPaymentCents: minimumPaymentCents(debt),
+    paymentPerMonthCents: monthlyPaymentCents(debt),
   }))
 
   const maxApr = Math.max(...rows.map((r) => r.effectiveAprBasisPoints))
-  const ratios = rows.map((r) => r.minimumPaymentCents / r.debt.balanceCents)
+  const ratios = rows.map((r) => r.paymentPerMonthCents / r.debt.balanceCents)
   const maxRatio = Math.max(...ratios)
 
   return rows
@@ -329,7 +358,7 @@ export function snowballLadder(scores: readonly DebtScore[]): LadderRung[] {
   let freed = 0
   return scores.map((score, index) => {
     cost += score.debt.balanceCents
-    freed += score.minimumPaymentCents
+    freed += score.paymentPerMonthCents
     return {
       ...score,
       rank: index + 1,
@@ -395,7 +424,7 @@ export function projectPayoff(args: {
     balance += charged
 
     const working: Debt = { ...debt, balanceCents: balance }
-    const payment = Math.min(balance, minimumPaymentCents(working) + extra)
+    const payment = Math.min(balance, monthlyPaymentCents(working) + extra)
 
     // A payment that does not cover the interest never clears the balance.
     // Except at pocket change, where the last payment takes the lot: a debt
@@ -432,7 +461,7 @@ export function interestOverNextYearCents(debt: Debt, today: CivilDate, leadWeek
     const charged = Math.round(balance * monthlyRate)
     interest += charged
     balance += charged
-    balance -= Math.min(balance, minimumPaymentCents({ ...debt, balanceCents: balance }))
+    balance -= Math.min(balance, monthlyPaymentCents({ ...debt, balanceCents: balance }))
   }
   return interest
 }

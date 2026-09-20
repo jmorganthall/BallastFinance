@@ -1,0 +1,1 @@
+ALTER TABLE "debts" ADD COLUMN "planned_payment_cents" bigint;

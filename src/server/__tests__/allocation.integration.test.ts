@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
 import { Engine } from '@/server/engine'
+import { INTAKE_CONTRACT_VERSION } from '@/domain'
 
 const url = process.env.DATABASE_URL
 const describeDb = url ? describe : describe.skip
@@ -38,6 +39,8 @@ describeDb('allocation runs', () => {
 
   afterAll(async () => {
     if (householdId) {
+      await db.delete(schema.lineItems).where(eq(schema.lineItems.householdId, householdId))
+      await db.delete(schema.packages).where(eq(schema.packages.householdId, householdId))
       await db
         .delete(schema.reserveAccounts)
         .where(eq(schema.reserveAccounts.householdId, householdId))
@@ -115,5 +118,47 @@ describeDb('allocation runs', () => {
     expect(plan.netCents).toBe(0)
     expect(instructionIds).toHaveLength(0)
     expect(await engine.outstandingInstructions()).toHaveLength(before)
+  })
+
+  it('covers what is short first, off the top, and splits the rest', async () => {
+    // A plan in Long Term Savings that should hold $400 by now, with $100
+    // actually there: $300 behind. Cover it, then share the rest by the rules.
+    const [account] = await engine.listReserveAccounts()
+    const created = await engine.createPackageFromIntake({
+      contract_version: INTAKE_CONTRACT_VERSION,
+      package: { name: 'Roof fund' },
+      line_items: [{ label: 'Roof', unit_amount: '4000', due_date: '2027-09-18', reserve_account: account!.id }],
+    })
+    if (!created.ok) throw new Error(JSON.stringify(created.problems))
+    await engine.commitPackage(created.packageId, { openingCents: 40000 })
+    await engine.confirmBalance({ reserveAccountId: account!.id, amountCents: 10000 })
+
+    const short = await engine.shortfalls()
+    expect(short).toEqual([
+      expect.objectContaining({ kind: 'plan', targetId: account!.id, shortCents: 30000 }),
+    ])
+
+    const cover = await engine.chosenShortfalls([`plan:${account!.id}`, 'plan:not-a-real-one'])
+    expect(cover).toHaveLength(1)
+
+    const before = (await engine.outstandingInstructions()).length
+    const { plan, instructionIds } = await engine.runAllocation({ floorCents: 100000, cover })
+    expect(plan.netCents).toBe(65000)
+    expect(plan.topUpCents).toBe(30000)
+    expect(plan.splitCents).toBe(35000)
+    expect(plan.shares.reduce((sum, s) => sum + s.amountCents, 0)).toBe(35000)
+
+    const outstanding = await engine.outstandingInstructions()
+    expect(outstanding.length - before).toBe(instructionIds.length)
+    const topUp = outstanding.find(
+      (i) => i.type === 'one_time_move' && i.targetId === account!.id && i.amountCents === 30000,
+    )
+    expect(topUp).toBeDefined()
+    expect(topUp!.note).toContain('behind')
+
+    // Not enough to cover it all: it takes what there is, and nothing is split.
+    const partial = await engine.previewAllocation(50000, undefined, cover)
+    expect(partial.topUps[0]!.amountCents).toBe(15000)
+    expect(partial.splitCents).toBe(0)
   })
 })

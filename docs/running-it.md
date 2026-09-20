@@ -120,12 +120,14 @@ What it keeps, and what it drops:
 | Tab | Kept (the raw inputs) | Dropped (the sheet worked these out) |
 | --- | --- | --- |
 | Expenses | Account, Expense, Due Every, Next Due, Reserved Now, Amount | In Simplifi, Bracket, Monthly, Weekly |
-| Loans | Loan, Category, APR, %, $, Balance, Limit, As of (Monthly only when % and $ are blank) | Freed Up, Principal/Month, Int/Month, Interest at Min Pmt, Months @ Min, Util, Fixed Pmt., Long Term, Short Term, Priority |
+| Loans | Loan, Category, APR, %, $, Monthly (what you actually pay), Balance, Limit, As of | Freed Up, Principal/Month, Int/Month, Interest at Min Pmt, Months @ Min, Util, Fixed Pmt., Long Term, Short Term, Priority |
 
 Each expense row becomes a live plan of its own, saving from today, with "Reserved
 Now" counted as already set aside so the weekly amount is right from the first
 week. A recurring row whose Next Due has passed rolls to its next occurrence. Each
-loan row becomes a debt with its balance dated "As of". Anything wrong afterwards
+loan row becomes a debt with its balance dated "As of", and its Monthly kept as what
+you actually pay when that is more than the minimum -- that is what decides whether
+a 0% balance is on track to clear before the rate ends. Anything wrong afterwards
 is changed on the plan's or the debt's own screen.
 
 "Due Every" is read as a number of days (the sheet's 7, 14, 90, 183, 365, 730,

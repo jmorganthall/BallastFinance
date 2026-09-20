@@ -78,6 +78,7 @@ export default async function DebtsPage({
       listedRate:
         rung.effectiveAprBasisPoints !== rung.debt.aprBasisPoints ? rate(rung.debt.aprBasisPoints) : null,
       minimumCents: rung.minimumPaymentCents,
+      paymentCents: rung.paymentPerMonthCents,
       payoffDate: projection.payoffDate,
       cumulativeCostCents: rung.cumulativeCostCents,
       cumulativeFreedCents: rung.cumulativeFreedPerMonthCents,

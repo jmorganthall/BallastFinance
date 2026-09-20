@@ -379,7 +379,14 @@ export async function runAllocationAction(formData: FormData): Promise<void> {
   // When this is the extra a check-in found in a reserve account, the run
   // also asks for it to be moved out of there.
   const from = String(formData.get('from') ?? '').trim()
-  await engine.runAllocation({ floorCents, ...(from ? { sourceAccountId: from } : {}) })
+  // The first step: which shortfalls to cover. The form names them; the
+  // amounts are worked out again here from what is actually short.
+  const cover = await engine.chosenShortfalls(formData.getAll('fill').map(String))
+  await engine.runAllocation({
+    floorCents,
+    cover,
+    ...(from ? { sourceAccountId: from } : {}),
+  })
   revalidatePath('/')
   revalidatePath('/allocate')
   revalidatePath('/check-in')

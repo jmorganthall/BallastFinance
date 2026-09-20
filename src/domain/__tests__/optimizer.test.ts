@@ -212,6 +212,46 @@ describe('promo urgency overrides the ranking', () => {
   })
 })
 
+describe('a deal that is on track is left alone', () => {
+  it('sends the remainder to the card that actually costs something', () => {
+    // $5,000 at 0% until next September, minimum $50 -- but paid at $500 a
+    // month, which clears it in time. Every dollar put there avoids nothing.
+    const debts = [
+      debt({
+        id: 'deal',
+        name: 'Balance transfer',
+        balanceCents: 500000,
+        aprBasisPoints: 3049,
+        minPaymentRule: { type: 'fixed', amountCents: 5000 },
+        plannedPaymentCents: 50000,
+        promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-09-19' }],
+      }),
+      debt({ id: 'card', name: 'Rewards card', balanceCents: 700000, aprBasisPoints: 2049 }),
+    ]
+    const result = optimiseLumpSum({ debts, amountCents: 201959, today: TODAY })
+    expect(result.allocations).toHaveLength(1)
+    expect(result.allocations[0]!.debtName).toBe('Rewards card')
+    expect(result.allocations[0]!.reason).toContain('20.49%')
+  })
+
+  it('still goes at the deal when the household is NOT on track to clear it', () => {
+    const debts = [
+      debt({
+        id: 'deal',
+        name: 'Balance transfer',
+        balanceCents: 500000,
+        aprBasisPoints: 3049,
+        minPaymentRule: { type: 'fixed', amountCents: 5000 },
+        promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-09-19' }],
+      }),
+      debt({ id: 'card', name: 'Rewards card', balanceCents: 700000, aprBasisPoints: 2049 }),
+    ]
+    const result = optimiseLumpSum({ debts, amountCents: 201959, today: TODAY })
+    expect(result.allocations[0]!.debtName).toBe('Balance transfer')
+    expect(result.allocations[0]!.reason).toContain('30.49%')
+  })
+})
+
 describe('splitting beats concentrating when it can', () => {
   it('clears two small debts rather than denting one big one', () => {
     const debts = [

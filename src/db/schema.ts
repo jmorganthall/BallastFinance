@@ -237,6 +237,13 @@ export const debts = pgTable(
     /** {type: 'fixed'|'percent'|'percent_with_floor', value, floor_cents?} */
     minPaymentRule: jsonb('min_payment_rule').notNull(),
     creditLimitCents: cents('credit_limit_cents'),
+    /**
+     * What the household actually pays each month, when that is more than
+     * the card's minimum. Null means "just the minimum". A stored fact about
+     * the household, not the lender: it is what decides whether a deal-rate
+     * balance is on track to clear before its rate ends.
+     */
+    plannedPaymentCents: cents('planned_payment_cents'),
     fixedPayment: boolean('fixed_payment').notNull().default(false),
     state: debtStateEnum('state').notNull().default('open'),
   },

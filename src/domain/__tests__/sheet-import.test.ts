@@ -113,12 +113,16 @@ describe('reading the sheet', () => {
       balanceAsOf: '2026-08-01',
       aprBasisPoints: 2049,
       minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 3000 },
+      // Monthly $72 against a $30 floor: what they actually pay is kept.
+      plannedPaymentCents: 7200,
       creditLimitCents: 1500000,
     })
     // No % or $: the Monthly figure is the set payment, and it says so.
     expect(loan).toMatchObject({
       category: 'consumer',
       minPaymentRule: { type: 'fixed', amountCents: 52633 },
+      // Monthly IS the minimum here, so there is nothing extra to keep.
+      plannedPaymentCents: null,
       creditLimitCents: null,
       balanceAsOf: '2026-09-01',
     })
@@ -126,6 +130,7 @@ describe('reading the sheet', () => {
     expect(auto).toMatchObject({
       category: 'auto',
       minPaymentRule: { type: 'fixed', amountCents: 41200 },
+      plannedPaymentCents: null,
       balanceAsOf: null,
     })
     expect(auto!.notes).toContain('No "As of" date; today will be used.')

@@ -21,6 +21,8 @@ export interface DebtFormValues {
   balance: string
   apr: string
   credit_limit: string
+  /** What the household actually pays each month, blank for "just the minimum". */
+  monthly_payment: string
   min_type: string
   min_amount: string
   min_percent: string
@@ -45,6 +47,7 @@ export interface DebtInput {
   minPaymentRule: MinPaymentRule
   promoRules: PromoRule[]
   creditLimitCents: Cents | null
+  plannedPaymentCents: Cents | null
 }
 
 export const EMPTY_DEBT_FORM: DebtFormValues = {
@@ -53,6 +56,7 @@ export const EMPTY_DEBT_FORM: DebtFormValues = {
   balance: '',
   apr: '',
   credit_limit: '',
+  monthly_payment: '',
   min_type: 'fixed',
   min_amount: '',
   min_percent: '',
@@ -94,6 +98,14 @@ export function parseDebtForm(values: DebtFormValues): DebtFormResult {
     problem('credit_limit', 'That did not look like an amount. Leave it blank if there is none.')
   } else if (creditLimitCents !== null && creditLimitCents < 0) {
     problem('credit_limit', 'A credit limit cannot be negative.')
+  }
+
+  const monthlyRaw = values.monthly_payment.trim()
+  const plannedPaymentCents = monthlyRaw === '' ? null : parseAmountOrNull(monthlyRaw)
+  if (monthlyRaw !== '' && plannedPaymentCents === null) {
+    problem('monthly_payment', 'That did not look like an amount. Leave it blank if you just pay the minimum.')
+  } else if (plannedPaymentCents !== null && plannedPaymentCents < 0) {
+    problem('monthly_payment', 'What you pay each month cannot be negative.')
   }
 
   let minPaymentRule: MinPaymentRule | null = null
@@ -165,6 +177,8 @@ export function parseDebtForm(values: DebtFormValues): DebtFormResult {
       minPaymentRule: minPaymentRule!,
       promoRules,
       creditLimitCents,
+      // Zero means the same as blank: nothing beyond the minimum.
+      plannedPaymentCents: plannedPaymentCents ? plannedPaymentCents : null,
     },
   }
 }
@@ -178,6 +192,7 @@ export function debtFormValuesOf(debt: {
   minPaymentRule: MinPaymentRule
   promoRules: readonly PromoRule[]
   creditLimitCents?: Cents | null
+  plannedPaymentCents?: Cents | null
 }): DebtFormValues {
   const dollars = (cents: Cents) => (cents / 100).toFixed(2)
   const percent = (basisPoints: number) => (basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
@@ -189,6 +204,7 @@ export function debtFormValuesOf(debt: {
     balance: dollars(debt.balanceCents),
     apr: percent(debt.aprBasisPoints),
     credit_limit: debt.creditLimitCents ? dollars(debt.creditLimitCents) : '',
+    monthly_payment: debt.plannedPaymentCents ? dollars(debt.plannedPaymentCents) : '',
     min_type: rule.type,
     min_amount: rule.type === 'fixed' ? dollars(rule.amountCents) : '',
     min_percent: rule.type === 'fixed' ? '' : percent(rule.basisPoints),
@@ -212,6 +228,7 @@ export function debtFormValuesFrom(get: (name: string) => unknown): DebtFormValu
     balance: text('balance'),
     apr: text('apr'),
     credit_limit: text('credit_limit'),
+    monthly_payment: text('monthly_payment'),
     min_type: text('min_type') || 'fixed',
     min_amount: text('min_amount'),
     min_percent: text('min_percent'),
