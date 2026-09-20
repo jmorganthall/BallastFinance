@@ -100,3 +100,85 @@ export async function createReserveAccountAction(formData: FormData): Promise<vo
   revalidatePath('/packages/new')
   revalidatePath('/')
 }
+
+// ---------------------------------------------------------------- Phase B
+
+/**
+ * A check-in (PRD §5, capability 3). The user confirms what each account
+ * actually holds; drift is the difference from what the plan says should be
+ * there. Accepting a catch-up issues an instruction, and only confirming that
+ * instruction changes the weekly number.
+ */
+export async function confirmBalancesAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const accounts = await engine.listReserveAccounts()
+
+  for (const account of accounts) {
+    const raw = String(formData.get(`balance_${account.id}`) ?? '').trim()
+    if (raw === '') continue
+    try {
+      const { parseAmountToCents } = await import('@/domain')
+      await engine.confirmBalance({
+        reserveAccountId: account.id,
+        amountCents: parseAmountToCents(raw),
+      })
+    } catch {
+      // A field the user left as junk is skipped rather than failing the whole
+      // check-in; the others still record.
+    }
+  }
+
+  revalidatePath('/')
+  revalidatePath('/check-in')
+  redirect('/check-in?done=1')
+}
+
+export async function acceptCatchUpAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const accountId = String(formData.get('reserve_account_id'))
+  const accountName = String(formData.get('account_name'))
+  const amountCents = Number(formData.get('amount_cents'))
+  const kind = String(formData.get('kind'))
+  const endsOn = String(formData.get('ends_on') ?? '')
+
+  if (!Number.isFinite(amountCents) || amountCents <= 0) return
+
+  await engine.issueInstruction({
+    type: kind === 'rate_bump' ? 'rate_bump' : 'one_time_move',
+    amountCents,
+    targetId: accountId,
+    targetLabel: accountName,
+    ...(kind === 'rate_bump' && endsOn ? { endsOn } : {}),
+  })
+
+  revalidatePath('/')
+  revalidatePath('/check-in')
+  redirect('/')
+}
+
+export async function confirmInstructionAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  await engine.confirmInstruction({ instructionId: String(formData.get('instruction_id')) })
+  revalidatePath('/')
+}
+
+export async function confirmSpendAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const lineItemId = String(formData.get('line_item_id'))
+  const raw = String(formData.get('actual_amount') ?? '').trim()
+  const planned = Number(formData.get('planned_cents'))
+
+  let actualAmountCents = planned
+  if (raw !== '') {
+    try {
+      const { parseAmountToCents } = await import('@/domain')
+      actualAmountCents = parseAmountToCents(raw)
+    } catch {
+      actualAmountCents = planned
+    }
+  }
+
+  await engine.confirmSpend({ lineItemId, actualAmountCents })
+  revalidatePath('/')
+  revalidatePath('/packages')
+}

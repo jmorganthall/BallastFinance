@@ -19,8 +19,11 @@ import {
   reserveAccounts as reserveAccountsTable,
   settings as settingsTable,
 } from '@/db/schema'
+import { randomUUID } from 'node:crypto'
 import {
   accountViews,
+  closeOutPrompts,
+  outstandingInstructions,
   packageViews,
   todayIn,
   validateIntake,
@@ -37,6 +40,13 @@ import {
   type PackageView,
   type ReserveAccount,
   type WhatIfLine,
+  type Cents,
+  type CloseOutPrompt,
+  type ConfirmedInstruction,
+  type DriftAdjustment,
+  type InstructionType,
+  type IssuedInstruction,
+  type OutstandingInstruction,
 } from '@/domain'
 
 export class EngineError extends Error {}
@@ -50,6 +60,12 @@ export interface EngineContext {
   actorUserId: Id | null
   timezone?: string
   db?: Db
+  /**
+   * Override "today". The derivation layer already takes today as a parameter;
+   * this carries that property up to the engine, so a scheduled job, a backfill
+   * or a test can be fully deterministic instead of depending on the wall clock.
+   */
+  today?: CivilDate
 }
 
 export class Engine {
@@ -57,17 +73,19 @@ export class Engine {
   private readonly householdId: Id
   private readonly actorUserId: Id | null
   private readonly timezone: string
+  private readonly pinnedToday: CivilDate | undefined
 
   constructor(context: EngineContext) {
     this.db = context.db ?? defaultDb
     this.householdId = context.householdId
     this.actorUserId = context.actorUserId
     this.timezone = context.timezone ?? 'America/Chicago'
+    this.pinnedToday = context.today
   }
 
   /** Today in the household's timezone. The single source of "now". */
   today(): CivilDate {
-    return todayIn(this.timezone)
+    return this.pinnedToday ?? todayIn(this.timezone)
   }
 
   // ---------------------------------------------------------------- reserve accounts
@@ -300,13 +318,14 @@ export class Engine {
 
   /** Load every fact the derivation module needs, in one place. */
   async derivationInput(): Promise<DerivationInput> {
-    const [accounts, packages, lineItems, changes] = await Promise.all([
+    const [accounts, packages, lineItems, changes, driftAdjustments] = await Promise.all([
       this.listReserveAccounts(),
       this.listPackages(),
       this.listLineItems(),
       this.listLineItemChanges(),
+      this.acceptedDriftAdjustments(),
     ])
-    return { today: this.today(), accounts, packages, lineItems, changes }
+    return { today: this.today(), accounts, packages, lineItems, changes, driftAdjustments }
   }
 
   /** Home / This Week: the per-account numbers to move (PRD §9). */
@@ -331,6 +350,223 @@ export class Engine {
       .where(and(eq(settingsTable.householdId, this.householdId), eq(settingsTable.key, key)))
     const latest = rows.sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? 1 : -1))[0]
     return latest ? (latest.value as T) : fallback
+  }
+
+  // ---------------------------------------------------------------- check-ins and drift
+
+  /**
+   * Record a confirmed balance for an account (PRD §5, capability 3). This is
+   * how the system learns an actual; the source column marks it as manual entry,
+   * which is v1's only implementation of that interface.
+   */
+  async confirmBalance(input: { reserveAccountId: Id; amountCents: Cents }): Promise<void> {
+    await this.db.insert(events).values({
+      householdId: this.householdId,
+      kind: 'balance_confirmed',
+      occurredAt: this.today(),
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload: {
+        reserve_account_id: input.reserveAccountId,
+        amount_cents: input.amountCents,
+      },
+    })
+  }
+
+  /** The most recent confirmed balance per account, for showing drift since. */
+  async latestConfirmedBalances(): Promise<Map<Id, { amountCents: Cents; on: CivilDate }>> {
+    const rows = await this.db
+      .select()
+      .from(events)
+      .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'balance_confirmed')))
+
+    const latest = new Map<Id, { amountCents: Cents; on: CivilDate }>()
+    for (const row of rows) {
+      const payload = row.payload as { reserve_account_id: Id; amount_cents: Cents }
+      const on = row.occurredAt as CivilDate
+      const current = latest.get(payload.reserve_account_id)
+      if (!current || current.on <= on) {
+        latest.set(payload.reserve_account_id, { amountCents: payload.amount_cents, on })
+      }
+    }
+    return latest
+  }
+
+  /**
+   * Accepted rate bumps, as account-level catch-up components. Only a CONFIRMED
+   * instruction counts: an offer the user never acted on must not inflate the
+   * weekly number.
+   */
+  async acceptedDriftAdjustments(): Promise<DriftAdjustment[]> {
+    const [issued, confirmed] = await Promise.all([
+      this.listIssuedInstructions(),
+      this.listConfirmedInstructions(),
+    ])
+    const confirmedIds = new Set(confirmed.map((c) => c.instructionId))
+
+    return issued
+      .filter((i) => i.type === 'rate_bump' && confirmedIds.has(i.instructionId) && i.endsOn)
+      .map((i) => ({
+        id: i.instructionId,
+        reserveAccountId: i.targetId,
+        amountCents: i.amountCents,
+        startDate: i.issuedOn,
+        endDate: i.endsOn!,
+      }))
+  }
+
+  // ---------------------------------------------------------------- close-out
+
+  /** Passed due dates awaiting "did this get spent?" (PRD §5, capability 4). */
+  async closeOutPrompts(): Promise<CloseOutPrompt[]> {
+    const [lineItems, packages] = await Promise.all([this.listLineItems(), this.listPackages()])
+    const byId = new Map(packages.map((p) => [p.id, p]))
+    return closeOutPrompts({
+      lineItems,
+      today: this.today(),
+      isLive: (item) => byId.get(item.packageId)?.state === 'active',
+    })
+  }
+
+  /**
+   * Confirm a line item's money was spent. The actual amount may differ from the
+   * plan, and the difference is recorded rather than discarded -- it is either
+   * money still sitting in the account or money that came from elsewhere.
+   */
+  async confirmSpend(input: { lineItemId: Id; actualAmountCents: Cents }): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(lineItemsTable)
+        .where(
+          and(
+            eq(lineItemsTable.id, input.lineItemId),
+            eq(lineItemsTable.householdId, this.householdId),
+          ),
+        )
+      if (!row) throw new EngineError('No such line item in this household')
+      if (row.state === 'retired') throw new EngineError('That one is already closed out')
+
+      await tx
+        .update(lineItemsTable)
+        .set({ state: 'retired' })
+        .where(eq(lineItemsTable.id, input.lineItemId))
+
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'spend_confirmed',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: {
+          line_item_id: input.lineItemId,
+          planned_cents: row.unitAmountCents * row.quantity,
+          actual_amount_cents: input.actualAmountCents,
+        },
+      })
+    })
+  }
+
+  // ---------------------------------------------------------------- instructions
+
+  async issueInstruction(input: {
+    type: InstructionType
+    amountCents: Cents
+    targetId: Id
+    targetLabel: string
+    note?: string
+    endsOn?: CivilDate
+  }): Promise<Id> {
+    const instructionId = randomUUID()
+    await this.db.insert(events).values({
+      householdId: this.householdId,
+      kind: 'instruction_issued',
+      occurredAt: this.today(),
+      actorUserId: this.actorUserId,
+      payload: {
+        instruction_id: instructionId,
+        type: input.type,
+        amount_cents: input.amountCents,
+        target_id: input.targetId,
+        target_label: input.targetLabel,
+        note: input.note ?? null,
+        ends_on: input.endsOn ?? null,
+      },
+    })
+    return instructionId
+  }
+
+  async confirmInstruction(input: {
+    instructionId: Id
+    actualAmountCents?: Cents
+  }): Promise<void> {
+    await this.db.insert(events).values({
+      householdId: this.householdId,
+      kind: 'instruction_confirmed',
+      occurredAt: this.today(),
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload: {
+        instruction_id: input.instructionId,
+        actual_amount_cents: input.actualAmountCents ?? null,
+      },
+    })
+  }
+
+  async listIssuedInstructions(): Promise<IssuedInstruction[]> {
+    const rows = await this.db
+      .select()
+      .from(events)
+      .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_issued')))
+
+    return rows.map((row) => {
+      const p = row.payload as {
+        instruction_id: Id
+        type: InstructionType
+        amount_cents: Cents
+        target_id: Id
+        target_label: string
+        note: string | null
+        ends_on: CivilDate | null
+      }
+      return {
+        instructionId: p.instruction_id,
+        type: p.type,
+        issuedOn: row.occurredAt as CivilDate,
+        amountCents: p.amount_cents,
+        targetId: p.target_id,
+        targetLabel: p.target_label,
+        note: p.note ?? undefined,
+        endsOn: p.ends_on ?? undefined,
+      }
+    })
+  }
+
+  async listConfirmedInstructions(): Promise<ConfirmedInstruction[]> {
+    const rows = await this.db
+      .select()
+      .from(events)
+      .where(
+        and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_confirmed')),
+      )
+
+    return rows.map((row) => {
+      const p = row.payload as { instruction_id: Id; actual_amount_cents: Cents | null }
+      return {
+        instructionId: p.instruction_id,
+        confirmedOn: row.occurredAt as CivilDate,
+        actualAmountCents: p.actual_amount_cents ?? undefined,
+      }
+    })
+  }
+
+  async outstandingInstructions(): Promise<OutstandingInstruction[]> {
+    const [issued, confirmed] = await Promise.all([
+      this.listIssuedInstructions(),
+      this.listConfirmedInstructions(),
+    ])
+    return outstandingInstructions({ issued, confirmed, today: this.today() })
   }
 
   /** Settings are versioned by effective_from; a change adds a row, never edits one. */

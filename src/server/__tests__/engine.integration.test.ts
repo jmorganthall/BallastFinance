@@ -40,9 +40,7 @@ describeDb('engine against a live database', () => {
       .returning()
     householdId = household!.id
 
-    engine = new Engine({ householdId, actorUserId: null, db })
-    // Pin the clock.
-    Object.defineProperty(engine, 'today', { value: () => TODAY })
+    engine = new Engine({ householdId, actorUserId: null, db, today: TODAY })
 
     annualId = (await engine.createReserveAccount({
       name: 'Annual Expenses',

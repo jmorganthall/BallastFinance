@@ -11,13 +11,18 @@ import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, Money, PageHeader, Pill } from '@/components/ui'
 import { WeeklyNumber } from '@/components/weekly-number'
-import { formatCents, respreadEquivalentPerWeekCents } from '@/domain'
+import { formatCents, instructionSentence, respreadEquivalentPerWeekCents } from '@/domain'
+import { confirmInstructionAction, confirmSpendAction } from '@/server/actions'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ThisWeekPage() {
   const { engine, viewer } = await requireEngine()
-  const accounts = await engine.accountViews()
+  const [accounts, outstanding, closeOuts] = await Promise.all([
+    engine.accountViews(),
+    engine.outstandingInstructions(),
+    engine.closeOutPrompts(),
+  ])
   const today = engine.today()
 
   const withWork = accounts.filter((a) => a.weekly.totalPerWeekCents !== 0)
@@ -32,6 +37,95 @@ export default async function ThisWeekPage() {
         title="This week"
         subtitle={`Hi ${firstName} — here is what to move, as of ${today}.`}
       />
+
+      {/*
+        * Confirmations are the product's heartbeat (PRD §9): always one tap plus
+        * an optional amount edit, never a form. They come first because an
+        * unconfirmed ask is the only thing that can silently rot.
+        */}
+      {closeOuts.length > 0 ? (
+        <section className="mb-5">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            Did this get spent?
+          </h2>
+          <ul className="space-y-3">
+            {closeOuts.map((prompt) => (
+              <li key={prompt.lineItemId}>
+                <Card className="border-[var(--color-behind)]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{prompt.label}</p>
+                      <p className="mt-0.5 text-sm text-[var(--color-ink-soft)]">
+                        Was due {prompt.dueDate}
+                        {prompt.daysOverdue > 0 ? ` — ${prompt.daysOverdue} days ago` : ''}
+                      </p>
+                    </div>
+                    <Pill tone="behind">Needs an answer</Pill>
+                  </div>
+
+                  <form action={confirmSpendAction} className="mt-3 flex items-end gap-2">
+                    <input type="hidden" name="line_item_id" value={prompt.lineItemId} />
+                    <input type="hidden" name="planned_cents" value={prompt.plannedCents} />
+                    <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+                      How much actually went out
+                      <input
+                        name="actual_amount"
+                        inputMode="decimal"
+                        defaultValue={formatCents(prompt.plannedCents).replace('$', '').replace(/,/g, '')}
+                        className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+                    >
+                      Yes, spent
+                    </button>
+                  </form>
+                  <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                    Until you answer, this money stays counted in your totals.
+                  </p>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {outstanding.length > 0 ? (
+        <section className="mb-5">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            To do
+          </h2>
+          <ul className="space-y-3">
+            {outstanding.map((instruction) => (
+              <li key={instruction.instructionId}>
+                <Card>
+                  <p className="text-sm">{instructionSentence(instruction)}</p>
+                  <form action={confirmInstructionAction} className="mt-3">
+                    <input
+                      type="hidden"
+                      name="instruction_id"
+                      value={instruction.instructionId}
+                    />
+                    <button
+                      type="submit"
+                      className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+                    >
+                      Done
+                    </button>
+                  </form>
+                  {instruction.ageInDays > 6 ? (
+                    <p className="mt-2 text-xs text-[var(--color-behind)]">
+                      Asked {instruction.ageInDays} days ago.
+                    </p>
+                  ) : null}
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {withWork.length === 0 ? (
         <Empty title="Nothing to move this week.">

@@ -3,6 +3,7 @@ import { requireViewer } from '@/server/session'
 
 const TABS = [
   { href: '/', label: 'This week' },
+  { href: '/check-in', label: 'Check in' },
   { href: '/packages', label: 'Plans' },
 ]
 
