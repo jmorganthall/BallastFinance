@@ -7,7 +7,7 @@
  */
 
 import { requireEngine } from '@/server/session'
-import { Card, Hint, Money, PageHeader } from '@/components/ui'
+import { Card, Hint, Money, PageHeader, Pill } from '@/components/ui'
 import {
   createReserveAccountAction,
   saveAllocationRulesAction,
@@ -34,7 +34,7 @@ export default async function SettingsPage({
     engine.allocationRules(),
     engine.bufferCents(),
     engine.priorityWeight(),
-    engine.listReserveAccounts(),
+    engine.reserveAccountsForViewer(),
     engine.getSetting<number>('check_in_nudge_weeks', 2),
     engine.promoLeadWeeks(),
     engine.getSetting<Record<string, boolean>>('notification_prefs', {}),
@@ -186,14 +186,27 @@ export default async function SettingsPage({
         {accounts.length > 0 ? (
           <ul className="mb-4 space-y-2 text-sm">
             {accounts.map((account) => (
-              <li key={account.id} className="flex justify-between gap-3">
-                <span className="font-medium">{account.name}</span>
-                <span className="text-[var(--color-ink-soft)]">{account.institutionLabel}</span>
+              <li key={account.id} className="flex items-start justify-between gap-3">
+                <span>
+                  <span className="font-medium">{account.name}</span>
+                  <span className="block text-xs text-[var(--color-ink-soft)]">
+                    {account.institutionLabel}
+                  </span>
+                </span>
+                {account.scope === 'individual' ? (
+                  <Pill tone={account.writable ? 'accent' : 'neutral'}>
+                    {account.writable ? 'Yours' : 'Theirs'}
+                  </Pill>
+                ) : (
+                  <Pill tone="neutral">Shared</Pill>
+                )}
               </li>
             ))}
           </ul>
         ) : (
-          <p className="mb-4 text-sm text-[var(--color-ink-soft)]">None yet.</p>
+          <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
+            None yet. Add the savings accounts you actually have at your bank.
+          </p>
         )}
 
         <form action={createReserveAccountAction} className="space-y-3 border-t border-[var(--color-line)] pt-4">
@@ -203,7 +216,19 @@ export default async function SettingsPage({
           </label>
           <label className="block text-sm font-medium">
             What it is called at the bank
-            <input name="institution_label" placeholder="Capital One 360 — Gifts &amp; Giving" className={field} />
+            <input name="institution_label" placeholder="Capital One 360 — Gifts" className={field} />
+          </label>
+          <label className="block text-sm font-medium">
+            Who manages it
+            <select name="scope" className={field} defaultValue="household">
+              <option value="household">Both of us</option>
+              <option value="individual">Just me</option>
+            </select>
+            <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+              Either way you both see it and its balance, so the household totals stay right.
+              &ldquo;Just me&rdquo; means only you can rename it, plan against it, or confirm what
+              it holds.
+            </span>
           </label>
           <button
             type="submit"

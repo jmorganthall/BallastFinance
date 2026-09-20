@@ -11,8 +11,8 @@ import {
 } from '../src/domain/index'
 
 const TODAY = '2026-09-19'
-const annual = { id: 'a1', householdId: 'h', name: 'Annual Expenses', institutionLabel: '', active: true }
-const longTerm = { id: 'a2', householdId: 'h', name: 'Long Term Savings', institutionLabel: '', active: true }
+const annual = { id: 'a1', householdId: 'h', name: 'Annual Expenses', institutionLabel: '', scope: 'household' as const, ownerUserId: null, active: true }
+const longTerm = { id: 'a2', householdId: 'h', name: 'Long Term Savings', institutionLabel: '', scope: 'household' as const, ownerUserId: null, active: true }
 
 const items: LineItem[] = [
   { id: 'i1', packageId: 'p1', label: 'Park tickets', unitAmountCents: 60000, quantity: 3, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing' },

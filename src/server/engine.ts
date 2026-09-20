@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto'
 import {
   accountViews,
   accrualCurve,
+  canWriteAccount,
   closeOutPrompts,
   DEFAULT_ALLOCATION_RULES,
   DEFAULT_BUFFER_CENTS,
@@ -50,6 +51,7 @@ import {
   type LineItemSnapshot,
   type Package,
   type PackageView,
+  type AccountScope,
   type ReserveAccount,
   type WhatIfLine,
   type Cents,
@@ -116,35 +118,61 @@ export class Engine {
       .select()
       .from(reserveAccountsTable)
       .where(eq(reserveAccountsTable.householdId, this.householdId))
-    return rows.map((r) => ({
-      id: r.id,
-      householdId: r.householdId,
-      name: r.name,
-      institutionLabel: r.institutionLabel,
-      active: r.active,
-    }))
+    return rows.map(toReserveAccount)
   }
 
+  /**
+   * Create a reserve account. An individual account belongs to whoever creates
+   * it: you cannot hand one to your spouse, because the point of the scope is
+   * that its owner controls it.
+   */
   async createReserveAccount(input: {
     name: string
     institutionLabel: string
+    scope?: AccountScope
   }): Promise<ReserveAccount> {
+    const scope: AccountScope = input.scope ?? 'household'
+    if (scope === 'individual' && !this.actorUserId) {
+      throw new EngineError('An individual account needs a signed-in owner')
+    }
+
     const [row] = await this.db
       .insert(reserveAccountsTable)
       .values({
         householdId: this.householdId,
         name: input.name.trim(),
         institutionLabel: input.institutionLabel.trim(),
+        scope,
+        ownerUserId: scope === 'individual' ? this.actorUserId : null,
       })
       .returning()
     if (!row) throw new EngineError('Could not create the reserve account')
-    return {
-      id: row.id,
-      householdId: row.householdId,
-      name: row.name,
-      institutionLabel: row.institutionLabel,
-      active: row.active,
+    return toReserveAccount(row)
+  }
+
+  /**
+   * Every account this household has, and whether the current viewer may write
+   * to each. Both spouses see the whole list; the flag drives what the UI
+   * offers rather than what it shows.
+   */
+  async reserveAccountsForViewer(): Promise<(ReserveAccount & { writable: boolean })[]> {
+    const accounts = await this.listReserveAccounts()
+    return accounts.map((account) => ({
+      ...account,
+      writable: canWriteAccount(account, this.actorUserId),
+    }))
+  }
+
+  /** Throws unless the viewer may write to this account. */
+  private async assertCanWriteAccount(accountId: Id): Promise<ReserveAccount> {
+    const account = (await this.listReserveAccounts()).find((a) => a.id === accountId)
+    if (!account) throw new EngineError('No such reserve account in this household')
+    if (!canWriteAccount(account, this.actorUserId)) {
+      throw new EngineError(
+        `"${account.name}" belongs to someone else in the household. Only its owner can change it.`,
+      )
     }
+    return account
   }
 
   // ---------------------------------------------------------------- packages
@@ -160,7 +188,12 @@ export class Engine {
       this.listPackages(),
     ])
 
-    const result = validateIntake(raw, { today, accounts, packages: existing })
+    const result = validateIntake(raw, {
+      today,
+      accounts,
+      packages: existing,
+      actorUserId: this.actorUserId,
+    })
     if (!result.ok) return { ok: false, problems: result.problems }
 
     const packageId = await this.db.transaction(async (tx) => {
@@ -265,6 +298,12 @@ export class Engine {
           and(eq(lineItemsTable.id, lineItemId), eq(lineItemsTable.householdId, this.householdId)),
         )
       if (!row) throw new EngineError('No such line item in this household')
+
+      // Moving an item into an account you do not own is a write to that
+      // account's plan, so it needs the same permission as funding it.
+      if (patch.reserveAccountId && patch.reserveAccountId !== row.reserveAccountId) {
+        await this.assertCanWriteAccount(patch.reserveAccountId)
+      }
 
       const before: LineItemSnapshot = {
         unitAmountCents: row.unitAmountCents,
@@ -441,6 +480,8 @@ export class Engine {
    * which is v1's only implementation of that interface.
    */
   async confirmBalance(input: { reserveAccountId: Id; amountCents: Cents }): Promise<void> {
+    await this.assertCanWriteAccount(input.reserveAccountId)
+
     await this.db.insert(events).values({
       householdId: this.householdId,
       kind: 'balance_confirmed',
@@ -985,6 +1026,18 @@ function toPackage(r: typeof packagesTable.$inferSelect): Package {
     detail: r.detail,
     createdAt: r.createdAt as CivilDate,
     committedAt: (r.committedAt as CivilDate | null) ?? null,
+  }
+}
+
+function toReserveAccount(r: typeof reserveAccountsTable.$inferSelect): ReserveAccount {
+  return {
+    id: r.id,
+    householdId: r.householdId,
+    name: r.name,
+    institutionLabel: r.institutionLabel,
+    scope: r.scope,
+    ownerUserId: r.ownerUserId,
+    active: r.active,
   }
 }
 

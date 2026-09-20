@@ -15,6 +15,9 @@ import { createPackageAction, type FormState } from '@/server/actions'
 interface AccountOption {
   id: string
   name: string
+  /** Accounts belonging to the other spouse are shown but cannot be chosen. */
+  writable: boolean
+  scope: 'household' | 'individual'
 }
 
 interface Row {
@@ -37,7 +40,8 @@ const blankRow = (account: string): Row => ({
 })
 
 export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
-  const first = accounts[0]?.id ?? ''
+  // Default to something the user can actually submit.
+  const first = accounts.find((a) => a.writable)?.id ?? accounts[0]?.id ?? ''
   const [rows, setRows] = useState<Row[]>([blankRow(first)])
   const [state, formAction, pending] = useActionState<FormState, FormData>(createPackageAction, {
     problems: [],
@@ -166,8 +170,9 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
                   className={field}
                 >
                   {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
+                    <option key={a.id} value={a.id} disabled={!a.writable}>
                       {a.name}
+                      {a.scope === 'individual' ? (a.writable ? ' (yours)' : ' — theirs') : ''}
                     </option>
                   ))}
                 </select>

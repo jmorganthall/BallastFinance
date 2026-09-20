@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function NewPackagePage() {
   const { engine } = await requireEngine()
-  const accounts = await engine.listReserveAccounts()
+  const accounts = await engine.reserveAccountsForViewer()
 
   if (accounts.length === 0) {
     return (
@@ -34,6 +34,9 @@ export default async function NewPackagePage() {
             >
               Add it
             </button>
+            <p className="text-xs text-[var(--color-ink-soft)]">
+              This one is shared. Settings can add an account only you manage.
+            </p>
           </form>
         </Empty>
       </>
@@ -46,7 +49,14 @@ export default async function NewPackagePage() {
         title="Start a plan"
         subtitle="List what it costs and when you need each part. Ballast works out the weekly amount."
       />
-      <PackageBuilder accounts={accounts.map((a) => ({ id: a.id, name: a.name }))} />
+      <PackageBuilder
+        accounts={accounts.map((a) => ({
+          id: a.id,
+          name: a.name,
+          writable: a.writable,
+          scope: a.scope,
+        }))}
+      />
       <p className="mt-6 text-center text-sm">
         <Link href="/packages" className="text-[var(--color-accent)] underline">
           Back to plans

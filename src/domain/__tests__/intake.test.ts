@@ -7,6 +7,8 @@ const annual: ReserveAccount = {
   householdId: 'hh-1',
   name: 'Annual Expenses',
   institutionLabel: 'Capital One 360 — Annual Expenses',
+  scope: 'household',
+  ownerUserId: null,
   active: true,
 }
 

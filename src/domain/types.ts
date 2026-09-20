@@ -15,12 +15,34 @@ export type Id = string
 export type PackageState = 'simulated' | 'active' | 'retired'
 export type LineItemState = 'planned' | 'accruing' | 'due' | 'retired'
 
+export type AccountScope = 'household' | 'individual'
+
 export interface ReserveAccount {
   id: Id
   householdId: Id
   name: string
   institutionLabel: string
+  /** 'individual' restricts WRITES to the owner. Reads are never restricted. */
+  scope: AccountScope
+  ownerUserId: Id | null
   active: boolean
+}
+
+/**
+ * May this user write to this account (PRD §2)?
+ *
+ * Reads are deliberately absent from this question. Both spouses see every
+ * account and every balance, so a household total is never a partial picture
+ * and a check-in never silently omits money. What an individual scope buys is
+ * that only its owner can rename it, fund a new line item from it, or confirm
+ * its balance.
+ */
+export function canWriteAccount(
+  account: Pick<ReserveAccount, 'scope' | 'ownerUserId'>,
+  userId: Id | null,
+): boolean {
+  if (account.scope === 'household') return true
+  return userId !== null && account.ownerUserId === userId
 }
 
 export interface Package {

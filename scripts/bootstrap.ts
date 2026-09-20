@@ -129,6 +129,10 @@ async function main(): Promise<void> {
     const result = await seedHousehold(db, {
       householdName: process.env.SEED_HOUSEHOLD_NAME || undefined,
       allowedEmails,
+      accounts: (process.env.SEED_RESERVE_ACCOUNTS ?? '')
+        .split(',')
+        .map((a) => a.trim())
+        .filter(Boolean),
       log,
     })
 

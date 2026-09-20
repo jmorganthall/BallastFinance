@@ -67,11 +67,18 @@ principles, and they are non-negotiable.
   later gets copied into a deployment.
 - **Nothing is done until a human confirms it.** An issued instruction the user
   ignored must never change a weekly number or a balance.
+- **Account scope restricts writes, never reads.** Both spouses see every
+  reserve account and every balance, so a household total is never a partial
+  picture. An `individual` account can only be renamed, funded, or
+  balance-confirmed by its owner (`canWriteAccount` in `src/domain/types.ts`).
+  There is deliberately no `canReadAccount`.
+- **Nothing is seeded but the household and the allowlist.** Account names
+  belong to a family's real bank, not to the software.
 
 ## Working on it
 
 ```bash
-npm test            # 191 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 212 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

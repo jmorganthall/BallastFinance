@@ -15,7 +15,7 @@
 import { z } from 'zod'
 import { assertCivilDate, compareDates, type CivilDate } from './dates'
 import { parseAmountToCents, type Cents } from './money'
-import type { Id, Package, PackageState, ReserveAccount } from './types'
+import { canWriteAccount, type Id, type Package, type PackageState, type ReserveAccount } from './types'
 
 /** Bump only for a breaking change. Unknown versions are rejected loudly (PRD §4). */
 export const INTAKE_CONTRACT_VERSION = '1'
@@ -77,6 +77,12 @@ export interface IntakeContext {
   accounts: readonly ReserveAccount[]
   /** Existing packages, to enforce name uniqueness among non-retired ones. */
   packages: readonly Pick<Package, 'name' | 'state'>[]
+  /**
+   * Who is submitting. Needed because an individual-scoped account may only be
+   * funded by its owner (PRD §2). Null means no signed-in actor, which can
+   * still target household accounts.
+   */
+  actorUserId?: Id | null
 }
 
 function resolveAccount(ref: string, accounts: readonly ReserveAccount[]): ReserveAccount | null {
@@ -173,9 +179,16 @@ export function validateIntake(raw: unknown, context: IntakeContext): IntakeResu
         path: at('reserve_account'),
         message: `No reserve account matches "${item.reserve_account}".`,
       })
+    } else if (!canWriteAccount(account, context.actorUserId ?? null)) {
+      // Rejected at intake rather than at commit: discovering you cannot fund a
+      // plan only after building it is the worst moment to find out.
+      problems.push({
+        path: at('reserve_account'),
+        message: `"${account.name}" belongs to someone else in the household. Ask them to add this, or choose a shared account.`,
+      })
     }
 
-    if (dueDate && account && unitAmountCents > 0) {
+    if (dueDate && account && unitAmountCents > 0 && canWriteAccount(account, context.actorUserId ?? null)) {
       lineItems.push({
         label: item.label,
         unitAmountCents,

@@ -16,6 +16,7 @@ import { relations, sql } from 'drizzle-orm'
 import {
   bigint,
   boolean,
+  check,
   date,
   index,
   jsonb,
@@ -37,6 +38,12 @@ export const lineItemStateEnum = pgEnum('line_item_state', [
   'due',
   'retired',
 ])
+/**
+ * Who may write to a reserve account. Reads are unrestricted within the
+ * household either way (PRD §2): this is ownership, not secrecy.
+ */
+export const accountScopeEnum = pgEnum('account_scope', ['household', 'individual'])
+
 export const debtCategoryEnum = pgEnum('debt_category', ['consumer', 'auto', 'mortgage'])
 export const debtStateEnum = pgEnum('debt_state', ['open', 'paid_off'])
 
@@ -120,12 +127,22 @@ export const reserveAccounts = pgTable(
       .references(() => households.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     institutionLabel: text('institution_label').notNull(),
+    scope: accountScopeEnum('scope').notNull().default('household'),
+    /** Set only for an individual account; that user alone may write to it. */
+    ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'restrict' }),
     active: boolean('active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index('reserve_accounts_household_idx').on(t.householdId),
     uniqueIndex('reserve_accounts_name_idx').on(t.householdId, t.name),
+    // An individual account without an owner has nobody who can write to it;
+    // a household account with one implies a restriction that is not enforced.
+    // Both are silently wrong, so the database refuses them.
+    check(
+      'reserve_accounts_owner_matches_scope',
+      sql`(${t.scope} = 'individual') = (${t.ownerUserId} is not null)`,
+    ),
   ],
 )
 

@@ -14,13 +14,21 @@ import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '../src/db/schema'
 
-export const DEFAULT_HOUSEHOLD = 'Morganthall'
-export const DEFAULT_ACCOUNTS = [
-  'Annual Expenses',
-  'Gifts & Giving',
-  'Long Term Savings',
-  '911 Fund',
-]
+export const DEFAULT_HOUSEHOLD = 'Household'
+
+/**
+ * No accounts are seeded.
+ *
+ * Account names are a property of a family's real bank, not of the software.
+ * Shipping "Annual Expenses" and "911 Fund" as defaults meant every new install
+ * started with one particular family's setup already in it, and the first thing
+ * a new user saw was a list they had to work out how to undo. Settings creates
+ * them, and the package builder points you there when there are none.
+ *
+ * SEED_RESERVE_ACCOUNTS (comma separated) still seeds them for anyone who wants
+ * a scripted install.
+ */
+export const DEFAULT_ACCOUNTS: string[] = []
 
 type Db = ReturnType<typeof drizzle<typeof schema>>
 
@@ -81,7 +89,7 @@ export async function seedHousehold(
       })
       .onConflictDoNothing()
   }
-  log(`${accounts.length} reserve accounts present`)
+  if (accounts.length > 0) log(`${accounts.length} reserve accounts present`)
 
   return {
     householdId: household.id,
@@ -100,7 +108,12 @@ async function main(): Promise<void> {
   const db = drizzle(client, { schema })
 
   const result = await seedHousehold(db, {
+    householdName: process.env.SEED_HOUSEHOLD_NAME || undefined,
     allowedEmails: (process.env.SEED_ALLOWED_EMAILS ?? '').split(','),
+    accounts: (process.env.SEED_RESERVE_ACCOUNTS ?? '')
+      .split(',')
+      .map((a) => a.trim())
+      .filter(Boolean),
     log: (m) => console.log(m),
   })
 

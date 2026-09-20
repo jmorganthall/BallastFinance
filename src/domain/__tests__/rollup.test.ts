@@ -17,6 +17,8 @@ const annual: ReserveAccount = {
   householdId: 'hh-1',
   name: 'Annual Expenses',
   institutionLabel: 'Capital One 360 — Annual Expenses',
+  scope: 'household',
+  ownerUserId: null,
   active: true,
 }
 const longTerm: ReserveAccount = {
@@ -24,6 +26,8 @@ const longTerm: ReserveAccount = {
   householdId: 'hh-1',
   name: 'Long Term Savings',
   institutionLabel: 'Capital One 360 — Long Term Savings',
+  scope: 'household',
+  ownerUserId: null,
   active: true,
 }
 

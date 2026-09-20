@@ -91,13 +91,21 @@ export async function createReserveAccountAction(formData: FormData): Promise<vo
   const { engine } = await requireEngine()
   const name = String(formData.get('name') ?? '').trim()
   const institutionLabel = String(formData.get('institution_label') ?? '').trim()
+  const scope = formData.get('scope') === 'individual' ? 'individual' : 'household'
+
   if (name) {
-    await engine.createReserveAccount({
-      name,
-      institutionLabel: institutionLabel || `Capital One 360 — ${name}`,
-    })
+    try {
+      await engine.createReserveAccount({
+        name,
+        institutionLabel: institutionLabel || name,
+        scope,
+      })
+    } catch (error) {
+      redirect(`/settings?error=${encodeURIComponent((error as Error).message)}`)
+    }
   }
   revalidatePath('/packages/new')
+  revalidatePath('/settings')
   revalidatePath('/')
 }
 
