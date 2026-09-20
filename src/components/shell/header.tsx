@@ -16,7 +16,7 @@ export function AppHeader({ viewer }: { viewer: Viewer }) {
       {/* Full width, no centred cap: the person is always at the far right edge. */}
       <div className="flex h-14 w-full items-center gap-3 px-4">
         <Link href="/" className="flex items-center gap-2 md:hidden" aria-label="Ballast home">
-          <Image src="/logo-mark.png" alt="" width={32} height={32} priority className="h-8 w-auto" />
+          <Image src="/logo-mark.png" alt="" width={32} height={32} priority className="h-8 w-8 shrink-0" />
           <span className="text-lg font-semibold tracking-tight">Ballast</span>
         </Link>
         <div className="hidden md:block">
