@@ -32,6 +32,7 @@ import {
   DEFAULT_BUFFER_CENTS,
   DEFAULT_PRIORITY_WEIGHT,
   DEFAULT_PROMO_LEAD_WEEKS,
+  INTAKE_CONTRACT_VERSION,
   optimiseLumpSum,
   planAllocation,
   promoExpiryWarning,
@@ -75,6 +76,8 @@ import {
   type OptimizerResult,
   type PromoRule,
   type CurvePoint,
+  type SheetImport,
+  type SheetProblem,
 } from '@/domain'
 
 export class EngineError extends Error {}
@@ -1130,6 +1133,89 @@ export class Engine {
     })
 
     return { plan, instructionIds }
+  }
+
+  // ---------------------------------------------------------------- spreadsheet import (temporary)
+
+  /**
+   * Create what a parsed spreadsheet describes: missing accounts, one plan per
+   * expense row committed with its "reserved now" as the opening balance, and
+   * the debts with their dated balances. Every row goes through the same
+   * paths a person would use by hand -- the intake contract, commit, createDebt
+   * -- so nothing the importer makes is a special case. Rows the engine
+   * refuses are reported by their sheet line and the rest still land.
+   */
+  async importSheet(parsed: SheetImport): Promise<{
+    accountsCreated: string[]
+    plansCreated: string[]
+    debtsCreated: string[]
+    problems: SheetProblem[]
+  }> {
+    const problems: SheetProblem[] = [...parsed.problems]
+    const accountsCreated: string[] = []
+    const plansCreated: string[] = []
+    const debtsCreated: string[] = []
+
+    for (const name of parsed.accountsToCreate) {
+      const exists = (await this.listReserveAccounts()).some(
+        (a) => a.name.toLowerCase() === name.toLowerCase(),
+      )
+      if (exists) continue
+      await this.createReserveAccount({ name, institutionLabel: name })
+      accountsCreated.push(name)
+    }
+
+    for (const expense of parsed.expenses) {
+      const account = (await this.listReserveAccounts()).find(
+        (a) => a.name.toLowerCase() === expense.account.toLowerCase(),
+      )
+      if (!account) {
+        problems.push({ row: expense.row, message: `No account called "${expense.account}".` })
+        continue
+      }
+      const created = await this.createPackageFromIntake({
+        contract_version: INTAKE_CONTRACT_VERSION,
+        package: { name: expense.label, module: 'sheet' },
+        line_items: [
+          {
+            label: expense.label,
+            unit_amount: expense.amountCents / 100,
+            quantity: 1,
+            due_date: expense.dueDate,
+            reserve_account: account.id,
+            recurrence: expense.recurrence,
+          },
+        ],
+      })
+      if (!created.ok) {
+        problems.push({
+          row: expense.row,
+          message: `${expense.label}: ${created.problems.map((p) => p.message).join(' ')}`,
+        })
+        continue
+      }
+      await this.commitPackage(created.packageId, { openingCents: expense.openingCents })
+      plansCreated.push(expense.label)
+    }
+
+    for (const debt of parsed.debts) {
+      try {
+        await this.createDebt({
+          name: debt.name,
+          category: debt.category,
+          balanceCents: debt.balanceCents,
+          aprBasisPoints: debt.aprBasisPoints,
+          minPaymentRule: debt.minPaymentRule,
+          creditLimitCents: debt.creditLimitCents,
+          ...(debt.balanceAsOf ? { balanceAsOf: debt.balanceAsOf } : {}),
+        })
+        debtsCreated.push(debt.name)
+      } catch (error) {
+        problems.push({ row: debt.row, message: `${debt.name}: ${(error as Error).message}` })
+      }
+    }
+
+    return { accountsCreated, plansCreated, debtsCreated, problems: problems.sort((a, b) => a.row - b.row) }
   }
 
   // ---------------------------------------------------------------- debts

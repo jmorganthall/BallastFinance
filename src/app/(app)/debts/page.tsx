@@ -17,8 +17,15 @@ import {
   setPriorityWeightAction,
   updateDebtBalanceAction,
 } from '@/server/actions'
-import { balanceFreshness, formatCents, parseAmountToCents, projectPayoff } from '@/domain'
+import {
+  balanceFreshness,
+  debtFormValuesOf,
+  formatCents,
+  parseAmountToCents,
+  projectPayoff,
+} from '@/domain'
 import { PayoffImpact } from '@/components/payoff-impact'
+import { DebtEditor } from './debt-editor'
 import { DebtForm } from './debt-form'
 
 const smallField =
@@ -282,6 +289,13 @@ export default async function DebtsPage({
                           Update
                         </button>
                       </form>
+                    </div>
+
+                    <div className="mt-3 border-t border-[var(--color-line)] pt-3">
+                      <DebtEditor
+                        debt={{ id: rung.debt.id, name: rung.debt.name }}
+                        initial={debtFormValuesOf(rung.debt)}
+                      />
                     </div>
                   </Card>
                 </li>
