@@ -11,6 +11,7 @@ import { notFound } from 'next/navigation'
 import { requireEngine } from '@/server/session'
 import { Card, Hint, Money, PageHeader, Pill } from '@/components/ui'
 import { WeeklyNumber } from '@/components/weekly-number'
+import { AccrualChart } from '@/components/accrual-chart'
 import { commitPackageAction, updateDueDateAction, updateQuantityAction } from '@/server/actions'
 import { formatCents } from '@/domain'
 
@@ -29,6 +30,7 @@ export default async function PackageDetailPage({
 
   const isDraft = view.package.state === 'simulated'
   const whatIf = isDraft ? await engine.whatIf(id) : []
+  const curve = isDraft ? null : await engine.packageCurve(id)
   const accounts = await engine.listReserveAccounts()
   const accountName = (accountId: string) =>
     accounts.find((a) => a.id === accountId)?.name ?? 'Unknown account'
@@ -98,6 +100,18 @@ export default async function PackageDetailPage({
           </div>
         )}
       </Card>
+
+      {curve ? (
+        <Card className="mb-4">
+          <h2 className="mb-3 text-sm font-semibold">How the money builds up</h2>
+          <AccrualChart
+            points={curve.points}
+            confirmed={curve.confirmed}
+            today={engine.today()}
+            targetCents={curve.targetCents}
+          />
+        </Card>
+      ) : null}
 
       <h2 className="mb-3 mt-6 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
         What it is made of

@@ -23,6 +23,7 @@ import {
 import { randomUUID } from 'node:crypto'
 import {
   accountViews,
+  accrualCurve,
   closeOutPrompts,
   DEFAULT_ALLOCATION_RULES,
   DEFAULT_BUFFER_CENTS,
@@ -66,6 +67,7 @@ import {
   type MinPaymentRule,
   type OptimizerResult,
   type PromoRule,
+  type CurvePoint,
 } from '@/domain'
 
 export class EngineError extends Error {}
@@ -358,6 +360,66 @@ export class Engine {
 
   async whatIf(packageId: Id): Promise<WhatIfLine[]> {
     return whatIfCommit(await this.derivationInput(), packageId)
+  }
+
+  /**
+   * The should-have-saved curve for one package, plus the balances actually
+   * confirmed along the way (PRD §5, capability 6).
+   */
+  async packageCurve(packageId: Id): Promise<{
+    points: CurvePoint[]
+    confirmed: { date: CivilDate; cents: Cents }[]
+    targetCents: Cents
+    from: CivilDate
+    to: CivilDate
+  } | null> {
+    const view = (await this.packageViews()).find((v) => v.package.id === packageId)
+    if (!view) return null
+
+    const live = view.items.filter((i) => i.lineItem.state !== 'retired')
+    if (live.length === 0) return null
+
+    const from = view.package.committedAt ?? view.package.createdAt
+    const to = live.map((i) => i.lineItem.dueDate).sort().at(-1)!
+    const targetCents = view.totalCents
+
+    const points = accrualCurve({
+      components: live.flatMap((i) => i.components),
+      from,
+      to,
+      capCents: targetCents,
+    })
+
+    // Confirmed balances are per account, so a package-level comparison only
+    // makes sense where the package owns the whole account. Restricted to that
+    // case rather than showing a number that silently includes other plans.
+    const accountIds = new Set(live.map((i) => i.lineItem.reserveAccountId))
+    const confirmed: { date: CivilDate; cents: Cents }[] = []
+
+    if (accountIds.size === 1) {
+      const accountId = [...accountIds][0]!
+      const views = await this.accountViews()
+      const account = views.find((v) => v.account.id === accountId)
+      const ownsWholeAccount =
+        account !== undefined &&
+        account.items.every((i) => live.some((l) => l.lineItem.id === i.lineItem.id))
+
+      if (ownsWholeAccount) {
+        const rows = await this.db
+          .select()
+          .from(events)
+          .where(
+            and(eq(events.householdId, this.householdId), eq(events.kind, 'balance_confirmed')),
+          )
+        for (const row of rows) {
+          const payload = row.payload as { reserve_account_id: Id; amount_cents: Cents }
+          if (payload.reserve_account_id !== accountId) continue
+          confirmed.push({ date: row.occurredAt as CivilDate, cents: payload.amount_cents })
+        }
+      }
+    }
+
+    return { points, confirmed, targetCents, from, to }
   }
 
   // ---------------------------------------------------------------- settings

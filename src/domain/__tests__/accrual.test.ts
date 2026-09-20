@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  accrualCurve,
   componentDeliveredBy,
   componentRatePerWeekCents,
   componentsForLineItem,
@@ -389,3 +390,47 @@ function addDaysUTC(d: CivilDate, days: number): CivilDate {
   base.setUTCDate(base.getUTCDate() + days)
   return base.toISOString().slice(0, 10)
 }
+
+describe('the should-have-saved curve', () => {
+  const components = componentsForLineItem({ lineItem: item(), commitDate: COMMIT })
+
+  it('starts at zero and ends exactly on the total', () => {
+    const points = accrualCurve({ components, from: COMMIT, to: DUE, capCents: 60000 })
+    expect(points[0]).toEqual({ date: COMMIT, cents: 0 })
+    expect(points.at(-1)).toEqual({ date: DUE, cents: 60000 })
+  })
+
+  it('never goes down', () => {
+    const points = accrualCurve({ components, from: COMMIT, to: DUE, capCents: 60000 })
+    for (let i = 1; i < points.length; i += 1) {
+      expect(points[i]!.cents).toBeGreaterThanOrEqual(points[i - 1]!.cents)
+    }
+  })
+
+  it('samples one point per transfer week over a short horizon', () => {
+    const points = accrualCurve({ components, from: COMMIT, to: DUE, capCents: 60000 })
+    // 17 transfer weeks plus the starting point.
+    expect(points).toHaveLength(18)
+  })
+
+  it('thins the sampling over a long horizon rather than returning hundreds of points', () => {
+    const long = componentsForLineItem({
+      lineItem: item({ dueDate: '2031-09-19' }),
+      commitDate: COMMIT,
+    })
+    const points = accrualCurve({
+      components: long,
+      from: COMMIT,
+      to: '2031-09-19',
+      capCents: 60000,
+      maxPoints: 40,
+    })
+    expect(points.length).toBeLessThanOrEqual(42)
+    expect(points.at(-1)!.date).toBe('2031-09-19')
+    expect(points.at(-1)!.cents).toBe(60000)
+  })
+
+  it('degrades to a single point when there is no time to plot', () => {
+    expect(accrualCurve({ components, from: DUE, to: DUE, capCents: 60000 })).toHaveLength(1)
+  })
+})

@@ -7,6 +7,7 @@ const TABS = [
   { href: '/allocate', label: 'Share out' },
   { href: '/debts', label: 'Debts' },
   { href: '/packages', label: 'Plans' },
+  { href: '/settings', label: 'Settings' },
 ]
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -23,7 +24,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <li key={tab.href} className="flex-1">
               <Link
                 href={tab.href}
-                className="flex h-14 items-center justify-center text-sm font-medium"
+                className="flex h-14 items-center justify-center px-1 text-center text-xs font-medium sm:text-sm"
               >
                 {tab.label}
               </Link>

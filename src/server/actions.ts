@@ -288,3 +288,50 @@ export async function setPriorityWeightAction(formData: FormData): Promise<void>
   }
   revalidatePath('/debts')
 }
+
+// ---------------------------------------------------------------- settings
+
+export async function saveAllocationRulesAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { DEFAULT_ALLOCATION_RULES, validateRules, parseAmountToCents } = await import('@/domain')
+
+  const rules = DEFAULT_ALLOCATION_RULES.map((rule) => ({
+    ...rule,
+    percent: Number(formData.get(`percent_${rule.destination}`) ?? rule.percent),
+  }))
+
+  try {
+    validateRules(rules)
+  } catch (error) {
+    redirect(`/settings?error=${encodeURIComponent((error as Error).message)}`)
+  }
+
+  await engine.putSetting('allocation_split', rules)
+
+  const buffer = String(formData.get('buffer') ?? '').trim()
+  if (buffer) {
+    try {
+      await engine.putSetting('buffer_amount', parseAmountToCents(buffer))
+    } catch {
+      redirect('/settings?error=' + encodeURIComponent('That buffer did not look like an amount.'))
+    }
+  }
+
+  revalidatePath('/settings')
+  revalidatePath('/allocate')
+  redirect('/settings?saved=1')
+}
+
+export async function saveNudgeSettingsAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const weeks = Number(formData.get('check_in_nudge_weeks'))
+  if (Number.isInteger(weeks) && weeks >= 1 && weeks <= 12) {
+    await engine.putSetting('check_in_nudge_weeks', weeks)
+  }
+  const lead = Number(formData.get('promo_lead_weeks'))
+  if (Number.isInteger(lead) && lead >= 1 && lead <= 52) {
+    await engine.putSetting('promo_lead_weeks', lead)
+  }
+  revalidatePath('/settings')
+  redirect('/settings?saved=1')
+}

@@ -274,3 +274,59 @@ export function respreadEquivalentPerWeekCents(args: {
   if (args.remainingCents <= 0) return 0
   return ceilDiv(args.remainingCents, accrualWeeksBetween(args.asOf, args.dueDate))
 }
+
+export interface CurvePoint {
+  date: CivilDate
+  cents: Cents
+}
+
+/**
+ * The should-have-saved curve, sampled at the dates money actually moves.
+ *
+ * Sampled per transfer week rather than per day: the curve is a step function --
+ * nothing changes between Saturdays -- so daily sampling would invent smoothness
+ * the plan does not have and make the chart lie about when money appears.
+ */
+export function accrualCurve(args: {
+  components: readonly RateComponent[]
+  from: CivilDate
+  to: CivilDate
+  capCents?: Cents
+  /** Keep the point count sane over long horizons. */
+  maxPoints?: number
+}): CurvePoint[] {
+  const { components, from, to } = args
+  const totalWeeks = transferWeeksBetween(from, to)
+  if (totalWeeks <= 0) {
+    return [{ date: from, cents: 0 }]
+  }
+
+  const maxPoints = args.maxPoints ?? 60
+  const stride = Math.max(1, Math.ceil(totalWeeks / maxPoints))
+
+  const points: CurvePoint[] = []
+  const value = (at: CivilDate) =>
+    args.capCents !== undefined
+      ? shouldHaveSavedForItem(components, at, args.capCents)
+      : shouldHaveSaved(components, at)
+
+  points.push({ date: from, cents: value(from) })
+
+  for (let week = stride; week <= totalWeeks; week += stride) {
+    const date = advanceWeeks(from, week)
+    points.push({ date, cents: value(date) })
+  }
+
+  // Always land exactly on the end date, whatever the stride did.
+  const last = points.at(-1)
+  if (!last || last.date !== to) points.push({ date: to, cents: value(to) })
+
+  return points
+}
+
+/** The date `weeks` transfer-weeks after `from`. */
+function advanceWeeks(from: CivilDate, weeks: number): CivilDate {
+  const base = new Date(`${from}T00:00:00Z`)
+  base.setUTCDate(base.getUTCDate() + weeks * 7)
+  return base.toISOString().slice(0, 10)
+}
