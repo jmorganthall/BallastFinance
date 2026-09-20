@@ -36,3 +36,6 @@ Thumbs.db
 
 # Local Postgres data if run outside Docker volumes
 pgdata/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
