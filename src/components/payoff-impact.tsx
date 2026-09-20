@@ -15,8 +15,33 @@ function joinNames(names: readonly string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
 }
 
+/**
+ * The line under "Freed up each month": where that cash comes from. A cleared
+ * debt frees its whole minimum; a card whose minimum is a share of the balance
+ * frees a little even when it is only dented; a set payment frees nothing
+ * until the debt is gone.
+ */
+function freedSentence(cleared: readonly string[], eased: readonly string[]): string {
+  const paidOff =
+    cleared.length > 0
+      ? `once ${joinNames(cleared)} ${cleared.length === 1 ? 'is' : 'are'} paid off`
+      : ''
+  const smaller =
+    eased.length > 0
+      ? `the minimum on ${joinNames(eased)} ${eased.length === 1 ? 'falls' : 'fall'} with the balance`
+      : ''
+  if (paidOff && smaller) return `${paidOff}, and ${smaller}`
+  if (paidOff) return paidOff
+  if (smaller) return smaller
+  return 'nothing is paid off outright, and a set payment stays the same until it is'
+}
+
 export function PayoffImpact({ result }: { result: OptimizerResult }) {
   const cleared = result.allocations.filter((a) => a.clearsIt).map((a) => a.debtName)
+  // Not paid off, but its minimum follows its balance down, so it still frees cash.
+  const eased = result.allocations
+    .filter((a) => !a.clearsIt && a.monthlyFreedCents > 0)
+    .map((a) => a.debtName)
   const lifetime = result.lifetimeInterestAvoidedCents
 
   return (
@@ -27,9 +52,7 @@ export function PayoffImpact({ result }: { result: OptimizerResult }) {
           {formatCents(result.monthlyFreedCents)}
         </dd>
         <dd className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
-          {cleared.length > 0
-            ? `once ${joinNames(cleared)} ${cleared.length === 1 ? 'is' : 'are'} paid off`
-            : 'nothing is paid off outright, so the payments stay as they are for now'}
+          {freedSentence(cleared, eased)}
         </dd>
       </div>
 

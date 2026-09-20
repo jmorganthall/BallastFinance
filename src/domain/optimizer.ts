@@ -37,7 +37,17 @@ export interface OptimizerAllocation {
   amountCents: Cents
   /** True when this payment clears the debt outright. */
   clearsIt: boolean
+  /**
+   * The monthly obligation this payment removes. Clearing a debt frees its
+   * whole minimum. A partial payment frees whatever a percent-of-balance
+   * minimum falls by, because a smaller balance means a smaller minimum next
+   * month; a set payment stays what it is until the debt is gone, so a partial
+   * payment at one frees nothing.
+   */
   monthlyFreedCents: Cents
+  /** The minimum this month, and what it becomes after the payment (zero when cleared). */
+  minimumBeforeCents: Cents
+  minimumAfterCents: Cents
   /**
    * Interest this payment stops from ever being charged, over the rest of the
    * debt's life at its minimum. Null when the debt would never be paid off at
@@ -53,7 +63,11 @@ export interface OptimizerResult {
   amountCents: Cents
   allocations: OptimizerAllocation[]
   unallocatedCents: Cents
-  /** Headline one: monthly obligation removed. */
+  /**
+   * Headline one: monthly obligation removed -- the minimums of anything
+   * cleared, plus how far a percent-of-balance minimum falls on a partial
+   * payment.
+   */
   monthlyFreedCents: Cents
   /** Headline two: interest this avoids over the next twelve months. Always known. */
   interestAvoidedCents: Cents
@@ -166,6 +180,8 @@ export function optimiseLumpSum(args: {
       amountCents: candidate.debt.balanceCents,
       clearsIt: true,
       monthlyFreedCents: candidate.minimum,
+      minimumBeforeCents: candidate.minimum,
+      minimumAfterCents: 0,
       lifetimeInterestAvoidedCents: life.interest,
       monthsSooner: life.months,
       reason: 'Its promotional rate is about to end — clearing it now beats paying interest on it later.',
@@ -188,6 +204,8 @@ export function optimiseLumpSum(args: {
       amountCents: candidate.debt.balanceCents,
       clearsIt: true,
       monthlyFreedCents: candidate.minimum,
+      minimumBeforeCents: candidate.minimum,
+      minimumAfterCents: 0,
       lifetimeInterestAvoidedCents: life.interest,
       monthsSooner: life.months,
       reason: `Paying it off completely frees ${formatCents(candidate.minimum)} a month.`,
@@ -202,6 +220,18 @@ export function optimiseLumpSum(args: {
 
     if (target) {
       const life = lifetime(target.debt, remaining)
+      // A percent-of-balance minimum follows the balance down, so even a
+      // payment that clears nothing can free real cash each month. A set
+      // payment (or a floor that is what sets the minimum) does not move.
+      const minimumAfter = minimumPaymentCents({
+        ...target.debt,
+        balanceCents: target.debt.balanceCents - remaining,
+      })
+      const freed = target.minimum - minimumAfter
+      const drops =
+        freed > 0
+          ? ` Its minimum drops from ${formatCents(target.minimum)} to ${formatCents(minimumAfter)} a month.`
+          : ''
       const sooner =
         life.months !== null && life.months > 0
           ? ` Gone ${life.months === 1 ? 'a month' : `${life.months} months`} sooner.`
@@ -211,10 +241,12 @@ export function optimiseLumpSum(args: {
         debtName: target.debt.name,
         amountCents: remaining,
         clearsIt: false,
-        monthlyFreedCents: 0,
+        monthlyFreedCents: freed,
+        minimumBeforeCents: target.minimum,
+        minimumAfterCents: minimumAfter,
         lifetimeInterestAvoidedCents: life.interest,
         monthsSooner: life.months,
-        reason: `It is the most expensive debt left at ${(target.apr / 100).toFixed(2)}%, so every dollar here avoids the most interest.${sooner}`,
+        reason: `It is the most expensive debt left at ${(target.apr / 100).toFixed(2)}%, so every dollar here avoids the most interest.${drops}${sooner}`,
       })
       remaining = 0
     }
