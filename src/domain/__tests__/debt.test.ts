@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DebtDataError,
   DEFAULT_PROMO_LEAD_WEEKS,
   effectiveAprBasisPoints,
   interestOverNextYearCents,
@@ -8,6 +9,7 @@ import {
   promoExpiryWarning,
   scoreDebts,
   snowballLadder,
+  validateDebtRates,
   type Debt,
 } from '../debt'
 
@@ -287,5 +289,45 @@ describe('interest over the coming year', () => {
     const interest = interestOverNextYearCents(d, TODAY)
     expect(interest).toBeGreaterThan(80000)
     expect(interest).toBeLessThan(130000)
+  })
+})
+
+describe('guarding against the one data-entry mistake that breaks everything', () => {
+  it('accepts a real promotional rate', () => {
+    expect(() =>
+      validateDebtRates({
+        aprBasisPoints: 2499,
+        promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-01-01' }],
+      }),
+    ).not.toThrow()
+  })
+
+  it('refuses a 0% promo entered against a 0% standard rate', () => {
+    // This silently disables the promo cliff: with nothing to revert to, the
+    // debt never climbs the ladder and the household is told it is fine.
+    expect(() =>
+      validateDebtRates({
+        aprBasisPoints: 0,
+        promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-01-01' }],
+      }),
+    ).toThrow(DebtDataError)
+  })
+
+  it('refuses a promo rate above the rate it reverts to', () => {
+    expect(() =>
+      validateDebtRates({
+        aprBasisPoints: 999,
+        promoRules: [{ rateBasisPoints: 1999, appliesTo: 'full', untilDate: '2027-01-01' }],
+      }),
+    ).toThrow(/not lower than/)
+  })
+
+  it('says which field to fix', () => {
+    expect(() =>
+      validateDebtRates({
+        aprBasisPoints: 0,
+        promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-01-01' }],
+      }),
+    ).toThrow(/interest rate field/)
   })
 })

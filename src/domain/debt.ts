@@ -47,6 +47,30 @@ export interface Debt {
   state: DebtState
 }
 
+export class DebtDataError extends Error {}
+
+/**
+ * A promo rate that is not actually cheaper than the rate it reverts to is a
+ * data-entry mistake, and a costly one: it silently disables the whole
+ * promo-cliff mechanism, which exists precisely to raise this debt's priority
+ * before interest lands. Caught at the point of entry rather than showing a
+ * confident, wrong payoff order.
+ */
+export function validateDebtRates(input: {
+  aprBasisPoints: number
+  promoRules: readonly PromoRule[]
+}): void {
+  for (const rule of input.promoRules) {
+    if (rule.rateBasisPoints >= input.aprBasisPoints) {
+      throw new DebtDataError(
+        `A promotional rate of ${(rule.rateBasisPoints / 100).toFixed(2)}% is not lower than the ` +
+          `normal rate of ${(input.aprBasisPoints / 100).toFixed(2)}%. Put the rate the debt goes ` +
+          `back to in the interest rate field, not the promotional one.`,
+      )
+    }
+  }
+}
+
 export const DEFAULT_PRIORITY_WEIGHT = 0.7 // 70% long-term (PRD D5)
 export const DEFAULT_PROMO_LEAD_WEEKS = 8
 

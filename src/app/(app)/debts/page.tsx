@@ -24,9 +24,9 @@ export const dynamic = 'force-dynamic'
 export default async function DebtsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ w?: string; amount?: string }>
+  searchParams: Promise<{ w?: string; amount?: string; error?: string }>
 }) {
-  const { w, amount } = await searchParams
+  const { w, amount, error } = await searchParams
   const { engine } = await requireEngine()
 
   const standingWeight = await engine.priorityWeight()
@@ -278,6 +278,11 @@ export default async function DebtsPage({
       <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
         Add a debt
       </h2>
+      {error ? (
+        <p className="mb-3 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
+          {error}
+        </p>
+      ) : null}
       <DebtForm action={createDebtAction} />
     </>
   )

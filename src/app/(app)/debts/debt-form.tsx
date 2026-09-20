@@ -38,6 +38,9 @@ export function DebtForm({ action }: { action: (formData: FormData) => void }) {
         <label className="block text-sm font-medium">
           Interest rate (%)
           <input name="apr" inputMode="decimal" required placeholder="24.99" className={field} />
+          <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+            The normal rate. If it is on a 0% deal, put the rate it goes back to here.
+          </span>
         </label>
         <label className="block text-sm font-medium">
           Credit limit (optional)
@@ -90,16 +93,23 @@ export function DebtForm({ action }: { action: (formData: FormData) => void }) {
       </label>
 
       {hasPromo ? (
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block text-sm font-medium">
-            Promotional rate (%)
-            <input name="promo_rate" inputMode="decimal" placeholder="0" className={field} />
-          </label>
-          <label className="block text-sm font-medium">
-            Until
-            <input name="promo_until" type="date" className={field} />
-          </label>
-        </div>
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block text-sm font-medium">
+              Promotional rate (%)
+              <input name="promo_rate" inputMode="decimal" placeholder="0" className={field} />
+            </label>
+            <label className="block text-sm font-medium">
+              Until
+              <input name="promo_until" type="date" required className={field} />
+            </label>
+          </div>
+          <p className="rounded-lg bg-[var(--color-surface)] p-3 text-xs text-[var(--color-ink-soft)]">
+            Make sure the interest rate above is the one it reverts to, not 0. Ballast uses that
+            to work out whether you can clear the balance before the deal ends — and to start
+            pushing this debt up the list in time if you cannot.
+          </p>
+        </>
       ) : null}
 
       <label className="flex items-center gap-2 text-sm font-medium">

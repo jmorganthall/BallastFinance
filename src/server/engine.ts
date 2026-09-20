@@ -32,6 +32,7 @@ import {
   planAllocation,
   promoExpiryWarning,
   scoreDebts,
+  validateDebtRates,
   snowballLadder,
   outstandingInstructions,
   packageViews,
@@ -754,6 +755,11 @@ export class Engine {
     creditLimitCents?: Cents | null
     fixedPayment?: boolean
   }): Promise<Debt> {
+    validateDebtRates({
+      aprBasisPoints: input.aprBasisPoints,
+      promoRules: input.promoRules ?? [],
+    })
+
     const [row] = await this.db
       .insert(debtsTable)
       .values({

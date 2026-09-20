@@ -244,16 +244,26 @@ export async function createDebtAction(formData: FormData): Promise<void> {
 
   const limit = String(formData.get('credit_limit') ?? '').trim()
 
-  await engine.createDebt({
-    name,
-    category: (String(formData.get('category') ?? 'consumer') as 'consumer' | 'auto' | 'mortgage'),
-    balanceCents,
-    aprBasisPoints,
-    minPaymentRule,
-    promoRules,
-    creditLimitCents: limit ? parseAmountToCents(limit) : null,
-    fixedPayment: formData.get('fixed_payment') === 'on',
-  })
+  try {
+    await engine.createDebt({
+      name,
+      category: (String(formData.get('category') ?? 'consumer') as 'consumer' | 'auto' | 'mortgage'),
+      balanceCents,
+      aprBasisPoints,
+      minPaymentRule,
+      promoRules,
+      creditLimitCents: limit ? parseAmountToCents(limit) : null,
+      fixedPayment: formData.get('fixed_payment') === 'on',
+    })
+  } catch (error) {
+    // A rejected debt comes back as a readable message on the page rather than
+    // a crash; the rate guard exists to be seen, not to break the form.
+    const { DebtDataError } = await import('@/domain')
+    if (error instanceof DebtDataError) {
+      redirect(`/debts?error=${encodeURIComponent(error.message)}`)
+    }
+    throw error
+  }
 
   revalidatePath('/debts')
 }
