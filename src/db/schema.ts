@@ -70,6 +70,15 @@ export const eventKindEnum = pgEnum('event_kind', [
   'allocation_entered',
   'instruction_issued',
   'instruction_confirmed',
+  // Editing (migration 0004). Each is the audit trail for a row change that
+  // the accrual math or a person may later need to explain.
+  'line_item_added',
+  'line_item_retired',
+  'package_retired',
+  'debt_updated',
+  'debt_removed',
+  /** A check-in counted money already in the account toward its plans (PRD §5). */
+  'opening_recorded',
 ])
 
 /**

@@ -15,6 +15,7 @@
 import { z } from 'zod'
 import { assertCivilDate, compareDates, type CivilDate } from './dates'
 import { parseAmountToCents, type Cents } from './money'
+import { RECURRENCES, rollToFuture, type Recurrence } from './recurrence'
 import { canWriteAccount, type Id, type Package, type PackageState, type ReserveAccount } from './types'
 
 /** Bump only for a breaking change. Unknown versions are rejected loudly (PRD §4). */
@@ -30,6 +31,11 @@ const intakeLineItemSchema = z.object({
   due_date: z.string(),
   /** An account id, or a ReserveAccount name matched exactly. */
   reserve_account: z.string().trim().min(1),
+  /**
+   * How often it comes round (PRD D8, superseded). Additive to the contract:
+   * a producer that does not send it gets a one-off, exactly as before.
+   */
+  recurrence: z.enum(RECURRENCES as [Recurrence, ...Recurrence[]]).default('none'),
 })
 
 const intakePackageSchema = z.object({
@@ -58,6 +64,7 @@ export interface NormalisedLineItem {
   quantity: number
   dueDate: CivilDate
   reserveAccountId: Id
+  recurrence: Recurrence
 }
 
 export interface NormalisedIntake {
@@ -158,8 +165,11 @@ export function validateIntake(raw: unknown, context: IntakeContext): IntakeResu
     let dueDate: CivilDate | null = null
     try {
       assertCivilDate(item.due_date)
-      dueDate = item.due_date
-      // D8: dated one-shot items only, and the date has to still be ahead of us.
+      // A recurring item entered with a past date means "the last one was
+      // then": roll it to the next occurrence rather than refusing it. A
+      // one-off still has to be ahead of us -- a package plans for what is
+      // still to come.
+      dueDate = rollToFuture(item.due_date, item.recurrence, context.today)
       if (compareDates(dueDate, context.today) <= 0) {
         problems.push({
           path: at('due_date'),
@@ -195,6 +205,7 @@ export function validateIntake(raw: unknown, context: IntakeContext): IntakeResu
         quantity: item.quantity,
         dueDate,
         reserveAccountId: account.id,
+        recurrence: item.recurrence,
       })
     }
   })

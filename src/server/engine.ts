@@ -24,8 +24,10 @@ import { randomUUID } from 'node:crypto'
 import {
   accountViews,
   accrualCurve,
+  apportion,
   canWriteAccount,
   closeOutPrompts,
+  rollToFuture,
   DEFAULT_ALLOCATION_RULES,
   DEFAULT_BUFFER_CENTS,
   DEFAULT_PRIORITY_WEIGHT,
@@ -49,7 +51,9 @@ import {
   type IntakeProblem,
   type LineItem,
   type LineItemChange,
+  type LineItemCycle,
   type LineItemSnapshot,
+  type Recurrence,
   type Package,
   type PackageView,
   type AccountScope,
@@ -76,7 +80,7 @@ import {
 export class EngineError extends Error {}
 
 export type CreatePackageResult =
-  | { ok: true; packageId: Id }
+  | { ok: true; packageId: Id; lineItemIds: Id[] }
   | { ok: false; problems: IntakeProblem[] }
 
 export interface EngineContext {
@@ -197,7 +201,7 @@ export class Engine {
     })
     if (!result.ok) return { ok: false, problems: result.problems }
 
-    const packageId = await this.db.transaction(async (tx) => {
+    const created = await this.db.transaction(async (tx) => {
       const [pkg] = await tx
         .insert(packagesTable)
         .values({
@@ -212,32 +216,42 @@ export class Engine {
         .returning({ id: packagesTable.id })
       if (!pkg) throw new EngineError('Could not create the package')
 
-      await tx.insert(lineItemsTable).values(
-        result.value.lineItems.map((item) => ({
-          householdId: this.householdId,
-          packageId: pkg.id,
-          label: item.label,
-          unitAmountCents: item.unitAmountCents,
-          quantity: item.quantity,
-          dueDate: item.dueDate,
-          reserveAccountId: item.reserveAccountId,
-          state: 'planned' as const,
-        })),
-      )
+      const items = await tx
+        .insert(lineItemsTable)
+        .values(
+          result.value.lineItems.map((item) => ({
+            householdId: this.householdId,
+            packageId: pkg.id,
+            label: item.label,
+            unitAmountCents: item.unitAmountCents,
+            quantity: item.quantity,
+            dueDate: item.dueDate,
+            reserveAccountId: item.reserveAccountId,
+            recurrence: item.recurrence,
+            state: 'planned' as const,
+          })),
+        )
+        .returning({ id: lineItemsTable.id })
 
-      return pkg.id
+      return { packageId: pkg.id, lineItemIds: items.map((i) => i.id) }
     })
 
-    return { ok: true, packageId }
+    return { ok: true, ...created }
   }
 
   /**
-   * Commit: state becomes active, committed_at is today, $0 is reserved, and
-   * base accrual components start from here (PRD §5). One tap, and the only
-   * moment a draft starts costing real weekly money.
+   * Commit: state becomes active, committed_at is today, and base accrual
+   * components start from here (PRD §5). One tap plus one optional number:
+   * how much is already set aside for this. A declared opening balance is
+   * split across the parts in proportion to their cost (largest remainder, so
+   * the parts add up to exactly what was declared) and recorded on the commit
+   * event, which is where the accrual math reads it from. It reduces what the
+   * base components have to cover, so the weekly figure is right from the
+   * first week rather than over-collecting for money the household already has.
    */
-  async commitPackage(packageId: Id): Promise<void> {
+  async commitPackage(packageId: Id, options: { openingCents?: Cents } = {}): Promise<void> {
     const today = this.today()
+    const openingCents = Math.max(0, options.openingCents ?? 0)
 
     await this.db.transaction(async (tx) => {
       const [pkg] = await tx
@@ -249,6 +263,11 @@ export class Engine {
       if (pkg.state === 'active') throw new EngineError(`"${pkg.name}" is already committed`)
       if (pkg.state === 'retired') throw new EngineError(`"${pkg.name}" is retired`)
 
+      const items = await tx
+        .select()
+        .from(lineItemsTable)
+        .where(and(eq(lineItemsTable.packageId, packageId), eq(lineItemsTable.state, 'planned')))
+
       await tx
         .update(packagesTable)
         .set({ state: 'active', committedAt: today })
@@ -259,12 +278,27 @@ export class Engine {
         .set({ state: 'accruing' })
         .where(and(eq(lineItemsTable.packageId, packageId), eq(lineItemsTable.state, 'planned')))
 
+      const shares =
+        openingCents > 0 && items.length > 0
+          ? apportion(
+              openingCents,
+              items.map((i) => i.unitAmountCents * i.quantity),
+            )
+          : items.map(() => 0)
+
       await tx.insert(events).values({
         householdId: this.householdId,
         kind: 'package_committed',
         occurredAt: today,
         actorUserId: this.actorUserId,
-        payload: { package_id: packageId },
+        payload: {
+          package_id: packageId,
+          opening_cents: openingCents,
+          openings: items.map((item, index) => ({
+            line_item_id: item.id,
+            amount_cents: shares[index] ?? 0,
+          })),
+        },
       })
     })
   }
@@ -277,6 +311,53 @@ export class Engine {
     return rows.map(toPackage)
   }
 
+  async renamePackage(packageId: Id, name: string): Promise<void> {
+    const trimmed = name.trim()
+    if (!trimmed) throw new EngineError('A plan needs a name')
+    const existing = await this.listPackages()
+    const target = existing.find((p) => p.id === packageId)
+    if (!target) throw new EngineError('No such package in this household')
+    const clash = existing.some(
+      (p) => p.id !== packageId && p.state !== 'retired' && p.name.toLowerCase() === trimmed.toLowerCase(),
+    )
+    if (clash) throw new EngineError(`There is already a plan called "${trimmed}".`)
+    await this.db
+      .update(packagesTable)
+      .set({ name: trimmed })
+      .where(and(eq(packagesTable.id, packageId), eq(packagesTable.householdId, this.householdId)))
+  }
+
+  /**
+   * Stop a plan. The package and every live part retire together; nothing is
+   * deleted, so the history of what was planned and what was set aside for it
+   * stays readable. Money already in the account is the account's business
+   * and shows up as extra at the next check-in.
+   */
+  async retirePackage(packageId: Id): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const [pkg] = await tx
+        .select()
+        .from(packagesTable)
+        .where(and(eq(packagesTable.id, packageId), eq(packagesTable.householdId, this.householdId)))
+      if (!pkg) throw new EngineError('No such package in this household')
+      if (pkg.state === 'retired') return
+
+      await tx.update(packagesTable).set({ state: 'retired' }).where(eq(packagesTable.id, packageId))
+      await tx
+        .update(lineItemsTable)
+        .set({ state: 'retired' })
+        .where(eq(lineItemsTable.packageId, packageId))
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'package_retired',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        payload: { package_id: packageId, was: pkg.state },
+      })
+    })
+  }
+
   // ---------------------------------------------------------------- line items
 
   /**
@@ -287,7 +368,9 @@ export class Engine {
    */
   async updateLineItem(
     lineItemId: Id,
-    patch: Partial<Pick<LineItem, 'label' | 'unitAmountCents' | 'quantity' | 'dueDate' | 'reserveAccountId'>>,
+    patch: Partial<
+      Pick<LineItem, 'label' | 'unitAmountCents' | 'quantity' | 'dueDate' | 'reserveAccountId' | 'recurrence'>
+    >,
   ): Promise<void> {
     const today = this.today()
 
@@ -343,12 +426,175 @@ export class Engine {
     })
   }
 
+  /**
+   * Add a part to an existing plan. In a draft it is just another planned row;
+   * in a live plan it starts accruing today, and the event that records the
+   * addition is what tells the accrual math not to backdate it to the commit.
+   */
+  async addLineItem(
+    packageId: Id,
+    item: {
+      label: string
+      unitAmountCents: Cents
+      quantity: number
+      dueDate: CivilDate
+      reserveAccountId: Id
+      recurrence?: Recurrence
+    },
+  ): Promise<Id> {
+    const today = this.today()
+    const label = item.label.trim()
+    if (!label) throw new EngineError('Every part needs a name')
+    if (!Number.isInteger(item.quantity) || item.quantity < 1) {
+      throw new EngineError('How many must be a whole number, at least one')
+    }
+    if (item.unitAmountCents <= 0) throw new EngineError('The cost must be more than zero')
+    await this.assertCanWriteAccount(item.reserveAccountId)
+
+    return this.db.transaction(async (tx) => {
+      const [pkg] = await tx
+        .select()
+        .from(packagesTable)
+        .where(and(eq(packagesTable.id, packageId), eq(packagesTable.householdId, this.householdId)))
+      if (!pkg) throw new EngineError('No such package in this household')
+      if (pkg.state === 'retired') throw new EngineError(`"${pkg.name}" is finished`)
+
+      const recurrence = item.recurrence ?? 'none'
+      const dueDate = rollToFuture(item.dueDate, recurrence, today)
+      if (dueDate <= today) throw new EngineError('The date has to be ahead of us')
+
+      const [row] = await tx
+        .insert(lineItemsTable)
+        .values({
+          householdId: this.householdId,
+          packageId,
+          label,
+          unitAmountCents: item.unitAmountCents,
+          quantity: item.quantity,
+          dueDate,
+          reserveAccountId: item.reserveAccountId,
+          recurrence,
+          state: pkg.state === 'active' ? 'accruing' : 'planned',
+        })
+        .returning({ id: lineItemsTable.id })
+      if (!row) throw new EngineError('Could not add the part')
+
+      if (pkg.state === 'active') {
+        await tx.insert(events).values({
+          householdId: this.householdId,
+          kind: 'line_item_added',
+          occurredAt: today,
+          actorUserId: this.actorUserId,
+          payload: { line_item_id: row.id, package_id: packageId },
+        })
+      }
+      return row.id
+    })
+  }
+
+  /** Take a part out of a plan. Retired, not deleted: its history stays. */
+  async retireLineItem(lineItemId: Id): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(lineItemsTable)
+        .where(and(eq(lineItemsTable.id, lineItemId), eq(lineItemsTable.householdId, this.householdId)))
+      if (!row) throw new EngineError('No such line item in this household')
+      if (row.state === 'retired') return
+      await this.assertCanWriteAccount(row.reserveAccountId)
+
+      await tx.update(lineItemsTable).set({ state: 'retired' }).where(eq(lineItemsTable.id, lineItemId))
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'line_item_retired',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        payload: { line_item_id: lineItemId, package_id: row.packageId },
+      })
+    })
+  }
+
   async listLineItems(): Promise<LineItem[]> {
     const rows = await this.db
       .select()
       .from(lineItemsTable)
       .where(eq(lineItemsTable.householdId, this.householdId))
     return rows.map(toLineItem)
+  }
+
+  /**
+   * Every cycle start the accrual math needs (PRD §5): the commit, with the
+   * opening balance declared then; a part added to a live plan; a recurring
+   * part confirmed spent and rolled forward, which starts again at $0; and a
+   * check-in that counted money already in the account toward a part.
+   */
+  async listCycleStarts(): Promise<LineItemCycle[]> {
+    const rows = await this.db
+      .select()
+      .from(events)
+      .where(eq(events.householdId, this.householdId))
+
+    const cycles: LineItemCycle[] = []
+    for (const row of rows) {
+      const on = row.occurredAt as CivilDate
+      const p = row.payload as Record<string, unknown>
+      switch (row.kind) {
+        case 'package_committed':
+          for (const o of (p.openings as { line_item_id: Id; amount_cents: Cents }[] | undefined) ?? []) {
+            if (o.amount_cents > 0) {
+              cycles.push({ lineItemId: o.line_item_id, startDate: on, openingCents: o.amount_cents })
+            }
+          }
+          break
+        case 'line_item_added':
+          cycles.push({ lineItemId: p.line_item_id as Id, startDate: on, openingCents: 0 })
+          break
+        case 'spend_confirmed':
+          if (p.rolled_to) cycles.push({ lineItemId: p.line_item_id as Id, startDate: on, openingCents: 0 })
+          break
+        case 'opening_recorded':
+          cycles.push({
+            lineItemId: p.line_item_id as Id,
+            startDate: on,
+            openingCents: p.opening_cents as Cents,
+          })
+          break
+        default:
+          break
+      }
+    }
+    return cycles
+  }
+
+  /**
+   * A check-in found more in an account than its plans had accrued, and the
+   * person chose to count the extra toward those plans. Each part's new
+   * opening balance is a fact about today, recorded as such; the accrual math
+   * starts a fresh cycle from it. No money moves, so nothing needs confirming.
+   */
+  async recordOpeningBalances(
+    items: readonly { lineItemId: Id; openingCents: Cents }[],
+  ): Promise<void> {
+    const today = this.today()
+    const lineItems = await this.listLineItems()
+    for (const entry of items) {
+      const item = lineItems.find((li) => li.id === entry.lineItemId)
+      if (!item) throw new EngineError('No such line item in this household')
+      if (entry.openingCents < 0) throw new EngineError('An opening balance cannot be negative')
+      await this.assertCanWriteAccount(item.reserveAccountId)
+    }
+    if (items.length === 0) return
+    await this.db.insert(events).values(
+      items.map((entry) => ({
+        householdId: this.householdId,
+        kind: 'opening_recorded' as const,
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        source: 'manual' as const,
+        payload: { line_item_id: entry.lineItemId, opening_cents: entry.openingCents },
+      })),
+    )
   }
 
   /** Every recorded plan change, in the shape the accrual math consumes. */
@@ -379,14 +625,24 @@ export class Engine {
 
   /** Load every fact the derivation module needs, in one place. */
   async derivationInput(): Promise<DerivationInput> {
-    const [accounts, packages, lineItems, changes, driftAdjustments] = await Promise.all([
-      this.listReserveAccounts(),
-      this.listPackages(),
-      this.listLineItems(),
-      this.listLineItemChanges(),
-      this.acceptedDriftAdjustments(),
-    ])
-    return { today: this.today(), accounts, packages, lineItems, changes, driftAdjustments }
+    const [accounts, packages, lineItems, changes, driftAdjustments, cycleStarts] =
+      await Promise.all([
+        this.listReserveAccounts(),
+        this.listPackages(),
+        this.listLineItems(),
+        this.listLineItemChanges(),
+        this.acceptedDriftAdjustments(),
+        this.listCycleStarts(),
+      ])
+    return {
+      today: this.today(),
+      accounts,
+      packages,
+      lineItems,
+      changes,
+      driftAdjustments,
+      cycleStarts,
+    }
   }
 
   /** Home / This Week: the per-account numbers to move (PRD §9). */
@@ -578,9 +834,17 @@ export class Engine {
       if (!row) throw new EngineError('No such line item in this household')
       if (row.state === 'retired') throw new EngineError('That one is already closed out')
 
+      // A one-off retires. A recurring part rolls its due date to the next
+      // occurrence in place and starts a fresh cycle from today at $0 saved
+      // (PRD D8, superseded); the settled cycle stays in the log.
+      const rolledTo =
+        row.recurrence !== 'none'
+          ? rollToFuture(row.dueDate as CivilDate, row.recurrence, today)
+          : null
+
       await tx
         .update(lineItemsTable)
-        .set({ state: 'retired' })
+        .set(rolledTo ? { dueDate: rolledTo, state: 'accruing' } : { state: 'retired' })
         .where(eq(lineItemsTable.id, input.lineItemId))
 
       await tx.insert(events).values({
@@ -591,6 +855,7 @@ export class Engine {
         source: 'manual',
         payload: {
           line_item_id: input.lineItemId,
+          rolled_to: rolledTo,
           planned_cents: row.unitAmountCents * row.quantity,
           actual_amount_cents: input.actualAmountCents,
         },
@@ -729,6 +994,13 @@ export class Engine {
   async runAllocation(input: {
     floorCents: Cents
     rules?: AllocationRule[]
+    /**
+     * When the money being shared out is the extra a check-in found sitting
+     * in a reserve account, name it: the run then also asks for that money
+     * to be moved out, so the to-do list says where it comes from as well as
+     * where it goes.
+     */
+    sourceAccountId?: Id
   }): Promise<{ plan: AllocationPlan; instructionIds: Id[] }> {
     const today = this.today()
     const plan = await this.previewAllocation(input.floorCents, input.rules)
@@ -737,6 +1009,20 @@ export class Engine {
 
     const accounts = await this.listReserveAccounts()
     const instructionIds: Id[] = []
+
+    if (input.sourceAccountId) {
+      const source = accounts.find((a) => a.id === input.sourceAccountId)
+      if (!source) throw new EngineError('No such reserve account in this household')
+      instructionIds.push(
+        await this.issueInstruction({
+          type: 'one_time_move_out',
+          amountCents: plan.netCents,
+          targetId: source.id,
+          targetLabel: source.name,
+          note: 'The extra a check-in found here, shared out below.',
+        }),
+      )
+    }
 
     for (const share of plan.shares) {
       if (share.amountCents <= 0) continue
@@ -864,6 +1150,8 @@ export class Engine {
     minPaymentRule: MinPaymentRule
     promoRules?: PromoRule[]
     creditLimitCents?: Cents | null
+    /** When the balance was last known to be right. Defaults to today. */
+    balanceAsOf?: CivilDate
   }): Promise<Debt> {
     validateDebtInputs({
       balanceCents: input.balanceCents,
@@ -882,7 +1170,7 @@ export class Engine {
         name: input.name.trim(),
         category: input.category,
         balanceCents: input.balanceCents,
-        balanceAsOf: this.today(),
+        balanceAsOf: input.balanceAsOf ?? this.today(),
         aprBasisPoints: input.aprBasisPoints,
         promoRules: input.promoRules ?? [],
         minPaymentRule: input.minPaymentRule,
@@ -892,6 +1180,119 @@ export class Engine {
       .returning()
     if (!row) throw new EngineError('Could not create the debt')
     return toDebt(row)
+  }
+
+  /**
+   * Correct a debt's terms: the name, kind, rate, minimum-payment rule, promo
+   * rules and limit. The balance has its own paths (a payment, or a statement
+   * balance), because a balance is a dated fact and these are terms. The
+   * change is recorded before and after, so a rate that later looks wrong can
+   * be traced to when it was typed.
+   */
+  async updateDebt(
+    debtId: Id,
+    patch: Partial<
+      Pick<Debt, 'name' | 'category' | 'aprBasisPoints' | 'minPaymentRule' | 'promoRules' | 'creditLimitCents'>
+    >,
+  ): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(debtsTable)
+        .where(and(eq(debtsTable.id, debtId), eq(debtsTable.householdId, this.householdId)))
+      if (!row) throw new EngineError('No such debt in this household')
+      const before = toDebt(row)
+      const after: Debt = {
+        ...before,
+        ...patch,
+        name: (patch.name ?? before.name).trim(),
+        promoRules: patch.promoRules ?? before.promoRules,
+        creditLimitCents: patch.creditLimitCents === undefined ? before.creditLimitCents : patch.creditLimitCents,
+      }
+      if (!after.name) throw new EngineError('A debt needs a name')
+
+      validateDebtInputs({
+        balanceCents: after.balanceCents,
+        aprBasisPoints: after.aprBasisPoints,
+        minPaymentRule: after.minPaymentRule,
+      })
+      validateDebtRates({ aprBasisPoints: after.aprBasisPoints, promoRules: after.promoRules })
+
+      await tx
+        .update(debtsTable)
+        .set({
+          name: after.name,
+          category: after.category,
+          aprBasisPoints: after.aprBasisPoints,
+          minPaymentRule: after.minPaymentRule,
+          promoRules: after.promoRules,
+          creditLimitCents: after.creditLimitCents ?? null,
+        })
+        .where(eq(debtsTable.id, debtId))
+
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'debt_updated',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: {
+          debt_id: debtId,
+          before: {
+            name: before.name,
+            category: before.category,
+            apr_basis_points: before.aprBasisPoints,
+            min_payment_rule: before.minPaymentRule,
+            promo_rules: before.promoRules,
+            credit_limit_cents: before.creditLimitCents ?? null,
+          },
+          after: {
+            name: after.name,
+            category: after.category,
+            apr_basis_points: after.aprBasisPoints,
+            min_payment_rule: after.minPaymentRule,
+            promo_rules: after.promoRules,
+            credit_limit_cents: after.creditLimitCents ?? null,
+          },
+        },
+      })
+    })
+  }
+
+  /**
+   * Remove a debt that should never have been entered. The row goes; what it
+   * said is kept on the event, so the ladder's history still makes sense.
+   */
+  async removeDebt(debtId: Id): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(debtsTable)
+        .where(and(eq(debtsTable.id, debtId), eq(debtsTable.householdId, this.householdId)))
+      if (!row) throw new EngineError('No such debt in this household')
+
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'debt_removed',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: {
+          debt_id: debtId,
+          name: row.name,
+          category: row.category,
+          balance_cents: row.balanceCents,
+          balance_as_of: row.balanceAsOf,
+          apr_basis_points: row.aprBasisPoints,
+          min_payment_rule: row.minPaymentRule,
+          promo_rules: row.promoRules,
+          credit_limit_cents: row.creditLimitCents,
+        },
+      })
+      await tx.delete(debtsTable).where(eq(debtsTable.id, debtId))
+    })
   }
 
   /**

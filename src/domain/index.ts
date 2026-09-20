@@ -7,6 +7,7 @@
  */
 export * from './dates'
 export * from './money'
+export * from './recurrence'
 export * from './types'
 export * from './accrual'
 export * from './rollup'

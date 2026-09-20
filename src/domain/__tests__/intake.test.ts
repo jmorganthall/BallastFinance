@@ -49,8 +49,38 @@ describe('a valid intake', () => {
         quantity: 3,
         dueDate: '2027-01-16',
         reserveAccountId: 'acct-annual',
+        recurrence: 'none',
       },
     ])
+  })
+
+  it('carries a recurrence when the producer sends one', () => {
+    const result = validateIntake(
+      intake({ line_items: [{ ...intake().line_items[0], recurrence: 'annual' }] }),
+      context,
+    )
+    expect(result.ok && result.value.lineItems[0]!.recurrence).toBe('annual')
+  })
+
+  it('rolls a recurring item entered with a past date to its next occurrence', () => {
+    // "The insurance renews every September; the last one was 2025." Not an
+    // error, a series -- the next one is the plan.
+    const result = validateIntake(
+      intake({
+        line_items: [{ ...intake().line_items[0], due_date: '2025-09-01', recurrence: 'annual' }],
+      }),
+      context,
+    )
+    expect(result.ok).toBe(true)
+    expect(result.ok && result.value.lineItems[0]!.dueDate).toBe('2027-09-01')
+  })
+
+  it('refuses an unknown recurrence rather than guessing', () => {
+    const result = validateIntake(
+      intake({ line_items: [{ ...intake().line_items[0], recurrence: 'fortnightly' }] }),
+      context,
+    )
+    expect(result.ok).toBe(false)
   })
 
   it('always lands in simulated state -- commit is a separate action', () => {

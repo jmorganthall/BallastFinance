@@ -29,6 +29,13 @@
       "when": 1789929918780,
       "tag": "0003_line_item_recurrence",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789933799683,
+      "tag": "0004_editing_events",
+      "breakpoints": true
     }
   ]
 }
