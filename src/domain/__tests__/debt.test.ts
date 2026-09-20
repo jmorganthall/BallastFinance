@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  BALANCE_STALE_AFTER_DAYS,
+  balanceFreshness,
   DebtDataError,
   DEFAULT_PROMO_LEAD_WEEKS,
   effectiveAprBasisPoints,
@@ -30,6 +32,32 @@ function debt(over: Partial<Debt> & Pick<Debt, 'id' | 'name'>): Debt {
     ...over,
   }
 }
+
+describe('how fresh a balance is', () => {
+  it('counts the days since the balance was last confirmed', () => {
+    expect(balanceFreshness(debt({ id: 'a', name: 'x', balanceAsOf: '2026-09-01' }), TODAY)).toEqual({
+      ageDays: 18,
+      stale: false,
+    })
+  })
+
+  it('turns stale the day after the statement-cycle allowance, not before', () => {
+    expect(BALANCE_STALE_AFTER_DAYS).toBe(31)
+    const onTheLine = debt({ id: 'a', name: 'x', balanceAsOf: '2026-08-19' }) // 31 days
+    const over = debt({ id: 'b', name: 'y', balanceAsOf: '2026-08-18' }) // 32 days
+    expect(balanceFreshness(onTheLine, TODAY).stale).toBe(false)
+    expect(balanceFreshness(over, TODAY)).toEqual({ ageDays: 32, stale: true })
+  })
+
+  it('never nags about a paid-off debt', () => {
+    const settled = debt({ id: 'a', name: 'x', balanceAsOf: '2025-01-01', balanceCents: 0, state: 'paid_off' })
+    expect(balanceFreshness(settled, TODAY).stale).toBe(false)
+  })
+
+  it('does not go negative when a balance is dated in the future', () => {
+    expect(balanceFreshness(debt({ id: 'a', name: 'x', balanceAsOf: '2026-09-25' }), TODAY).ageDays).toBe(0)
+  })
+})
 
 describe('minimum payments', () => {
   it('handles a fixed monthly amount', () => {

@@ -70,6 +70,28 @@ export function parseAmountOrNull(input: string | null | undefined): Cents | nul
   }
 }
 
+/**
+ * Parse a percentage a person typed ("24.99", "24.99%", " 2 ") into basis
+ * points, or null if it is not a percentage. Rates are basis points everywhere
+ * else (PRD §10), so this is the only place a rate touches a decimal string.
+ *
+ * Up to four decimal places are accepted (0.0625% is a real APR), and the
+ * result is rounded to the nearest basis point without a floating-point
+ * multiply: "20.49" becomes 2049 by string arithmetic, never 2048.9999.
+ */
+export function parsePercentOrNull(input: string | null | undefined): number | null {
+  if (input === null || input === undefined) return null
+  const cleaned = input.trim().replace(/[%\s,]/g, '')
+  if (!/^-?\d+(\.\d{1,4})?$/.test(cleaned)) return null
+  const negative = cleaned.startsWith('-')
+  const [whole = '0', frac = ''] = cleaned.replace('-', '').split('.')
+  // Basis points are the first two decimals; the rest decide the rounding.
+  const bp = Number(whole) * 100 + Number(frac.slice(0, 2).padEnd(2, '0'))
+  const rest = frac.slice(2).padEnd(2, '0')
+  const rounded = bp + (Number(rest) >= 50 ? 1 : 0)
+  return negative ? -rounded : rounded
+}
+
 /** "$1,234.56" — the canonical display form. */
 export function formatCents(cents: Cents): string {
   const negative = cents < 0

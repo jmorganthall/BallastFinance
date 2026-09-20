@@ -47,7 +47,7 @@ export default async function NewPackagePage() {
     <>
       <PageHeader
         title="Start a plan"
-        subtitle="List what it costs and when you need each part. Ballast works out the weekly amount."
+        subtitle="Say what it costs and when you need it. Ballast works out the weekly amount."
       />
       <PackageBuilder
         accounts={accounts.map((a) => ({

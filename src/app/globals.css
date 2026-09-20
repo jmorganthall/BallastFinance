@@ -43,8 +43,12 @@ html {
 
 body {
   background: var(--color-surface);
-  /* Room for the fixed bottom nav on a phone. */
-  padding-bottom: env(safe-area-inset-bottom);
+  /* The app shell pads for the fixed tab bar and the home indicator itself. */
+}
+
+/* The fields on a phone should not zoom the page when tapped: 16px and up. */
+input, select, textarea {
+  font-size: max(1rem, 16px);
 }
 
 /* Tap targets never below 44px, per the one-handed requirement. */

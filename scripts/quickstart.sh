@@ -128,6 +128,10 @@ fi
 
 say ""
 say "Building and starting…"
+# The revision being built, so the app can tell whether the published image
+# has moved on. Absent git (a downloaded tarball), the footer says so instead.
+GIT_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
+export GIT_SHA
 docker compose -f "$COMPOSE_FILE" up -d --build
 
 # shellcheck disable=SC1090

@@ -27,6 +27,12 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
+# The git revision this image was built from, so the running app can compare
+# itself with the published `latest` and say when a newer one exists. The
+# publish workflow passes it; a plain local build leaves it empty and the check
+# reports "unavailable" rather than guessing.
+ARG GIT_SHA=""
+ENV BALLAST_BUILD_SHA=$GIT_SHA
 
 RUN addgroup -g 1001 -S nodejs && adduser -S ballast -u 1001
 

@@ -8,17 +8,7 @@
  */
 
 import { formatCents, type WeeklyBreakdown } from '@/domain'
-import { Hint, Money } from './ui'
-
-function humanDate(iso: string): string {
-  const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: 'UTC',
-  })
-}
+import { Hint, humanDate, Money } from './ui'
 
 export function WeeklyNumber({
   weekly,

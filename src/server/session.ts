@@ -15,6 +15,8 @@ export interface Viewer {
   householdId: string
   email: string
   name: string | null
+  /** The identity provider's picture, for the header. Display only. */
+  image: string | null
 }
 
 export async function currentViewer(): Promise<Viewer | null> {
@@ -25,6 +27,7 @@ export async function currentViewer(): Promise<Viewer | null> {
     householdId: session.user.householdId,
     email: session.user.email ?? '',
     name: session.user.name ?? null,
+    image: session.user.image ?? null,
   }
 }
 

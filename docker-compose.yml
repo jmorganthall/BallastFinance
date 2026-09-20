@@ -34,7 +34,12 @@ services:
       - '5432'
 
   app:
-    build: .
+    build:
+      context: .
+      args:
+        # Lets the footer say which build this is and whether a newer image is
+        # published. Set it from git: GIT_SHA=$(git rev-parse HEAD) docker compose up -d --build
+        GIT_SHA: "${GIT_SHA:-}"
     restart: unless-stopped
     depends_on:
       db:
