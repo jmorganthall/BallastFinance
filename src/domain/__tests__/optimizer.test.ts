@@ -47,8 +47,11 @@ describe('knockouts first', () => {
 
   it('reports the monthly obligation it removes', () => {
     const result = optimiseLumpSum({ debts, amountCents: 107500, today: TODAY })
-    // Only the cleared debt frees its minimum; a partial payment frees nothing.
+    // Only the cleared debt frees its minimum: the big card has a set payment,
+    // so denting it frees nothing until it is gone.
     expect(result.monthlyFreedCents).toBe(4000)
+    expect(result.allocations[1]!.monthlyFreedCents).toBe(0)
+    expect(result.allocations[1]!.reason).not.toContain('minimum drops')
   })
 
   it('reports interest avoided over the next year', () => {
@@ -107,6 +110,54 @@ describe('knockouts first', () => {
     expect(result.why).toBe(
       'This clears Store card outright. The rest goes at Big card, the most expensive one left.',
     )
+  })
+})
+
+describe('a partial payment still frees cash when the minimum follows the balance', () => {
+  it('reports how far a percent-of-balance minimum falls', () => {
+    const card = debt({
+      id: 'pct',
+      name: 'Rewards card',
+      balanceCents: 1000000,
+      aprBasisPoints: 2049,
+      minPaymentRule: { type: 'percent', basisPoints: 200 },
+    })
+    const result = optimiseLumpSum({ debts: [card], amountCents: 201959, today: TODAY })
+    const [only] = result.allocations
+    expect(only!.clearsIt).toBe(false)
+    // 2% of $10,000.00 is $200.00. After the payment the balance is $7,980.41,
+    // and 2% of that is $159.6082, rounded up to $159.61.
+    expect(only!.minimumBeforeCents).toBe(20000)
+    expect(only!.minimumAfterCents).toBe(15961)
+    expect(only!.monthlyFreedCents).toBe(4039)
+    expect(result.monthlyFreedCents).toBe(4039)
+    expect(only!.reason).toContain('Its minimum drops from $200.00 to $159.61 a month.')
+  })
+
+  it('frees nothing while a floor is what sets the minimum', () => {
+    // 2% of $2,000 is $40, under the $50 floor; after paying $500 it is $30, still under.
+    const card = debt({
+      id: 'floored',
+      name: 'Floored card',
+      balanceCents: 200000,
+      minPaymentRule: { type: 'percent_with_floor', basisPoints: 200, floorCents: 5000 },
+    })
+    const result = optimiseLumpSum({ debts: [card], amountCents: 50000, today: TODAY })
+    expect(result.allocations[0]!.minimumBeforeCents).toBe(5000)
+    expect(result.allocations[0]!.minimumAfterCents).toBe(5000)
+    expect(result.monthlyFreedCents).toBe(0)
+    expect(result.allocations[0]!.reason).not.toContain('minimum drops')
+  })
+
+  it("adds a dented card's smaller minimum to what the knockouts free", () => {
+    const debts = [
+      debt({ id: 'small', name: 'Store card', balanceCents: 40000, aprBasisPoints: 2999, minPaymentRule: { type: 'fixed', amountCents: 4000 } }),
+      debt({ id: 'pct', name: 'Rewards card', balanceCents: 1000000, aprBasisPoints: 2049, minPaymentRule: { type: 'percent', basisPoints: 200 } }),
+    ]
+    const result = optimiseLumpSum({ debts, amountCents: 241959, today: TODAY })
+    // $400 clears the store card; the remaining $2,019.59 dents the rewards card.
+    expect(result.allocations.map((a) => a.amountCents)).toEqual([40000, 201959])
+    expect(result.monthlyFreedCents).toBe(4000 + 4039)
   })
 })
 
