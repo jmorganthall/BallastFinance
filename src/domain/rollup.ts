@@ -253,6 +253,79 @@ export function catchUpOptions(args: {
   ]
 }
 
+/**
+ * What to offer when a check-in finds the account AHEAD: holding more than the
+ * plan says it should. Two ways back on track, mirroring the catch-up pair:
+ * move the extra back out now, or ease off the weekly set-aside until the
+ * extra has been used up. Leaving it as a cushion is always the third choice,
+ * and needs no instruction.
+ */
+export interface AheadOption {
+  kind: 'one_time_out' | 'rate_cut'
+  /**
+   * The extra this option uses up. For a cut, the total the cut removes over
+   * its window: exactly perWeekCents × weeks, so what the bank is told and what
+   * the accrual math applies are the same number.
+   */
+  amountCents: Cents
+  perWeekCents?: Cents
+  weeks?: number
+  endDate?: CivilDate
+  /** The cut is the whole weekly set-aside: a pause, not a trim. */
+  pauses?: boolean
+  /** Extra this option does not use up, which simply stays as a cushion. */
+  leftoverCents?: Cents
+}
+
+export function aheadOptions(args: {
+  extraCents: Cents
+  /** The account's current weekly set-aside. A cut can never take more than this. */
+  weeklyCents: Cents
+  today: CivilDate
+  overWeeks: number
+  /** The longest a pause is ever offered for. */
+  maxWeeks?: number
+}): AheadOption[] {
+  const { extraCents, weeklyCents } = args
+  if (extraCents <= 0) return []
+
+  const options: AheadOption[] = [{ kind: 'one_time_out', amountCents: extraCents }]
+  // Nothing is being set aside, so there is nothing to ease off.
+  if (weeklyCents <= 0) return options
+
+  const overWeeks = Math.max(1, args.overWeeks)
+  const maxWeeks = Math.max(overWeeks, args.maxWeeks ?? 52)
+
+  let perWeekCents: Cents
+  let weeks: number
+  if (extraCents <= weeklyCents * overWeeks) {
+    // A trim over the usual window. Rounded DOWN, the opposite of an accrual:
+    // an under-cut leaves the account a few cents ahead, an over-cut would
+    // leave it behind, and the household rule is to err on having more.
+    weeks = overWeeks
+    perWeekCents = Math.floor(extraCents / weeks)
+  } else {
+    // More extra than the window can absorb: pause the set-aside entirely for
+    // as many whole weeks as the extra covers, up to a limit. Whole weeks
+    // only, so a pause is a real pause and never a transfer of a few cents.
+    weeks = Math.min(maxWeeks, Math.floor(extraCents / weeklyCents))
+    perWeekCents = weeklyCents
+  }
+  if (perWeekCents <= 0 || weeks <= 0) return options
+
+  const amountCents = perWeekCents * weeks
+  options.push({
+    kind: 'rate_cut',
+    amountCents,
+    perWeekCents,
+    weeks,
+    endDate: addWeeks(args.today, weeks),
+    pauses: perWeekCents === weeklyCents,
+    leftoverCents: extraCents - amountCents,
+  })
+  return options
+}
+
 function addWeeks(d: CivilDate, weeks: number): CivilDate {
   const base = new Date(`${d}T00:00:00Z`)
   base.setUTCDate(base.getUTCDate() + weeks * 7)

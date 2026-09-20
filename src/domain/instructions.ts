@@ -12,15 +12,19 @@
  * survives intact (D9).
  */
 
-import { compareDates, type CivilDate } from './dates'
-import { formatCents, type Cents } from './money'
+import { accrualWeeksBetween, compareDates, type CivilDate } from './dates'
+import { ceilDiv, formatCents, type Cents } from './money'
 import type { Id } from './types'
 
 export type InstructionType =
   | 'set_weekly_transfer'
   | 'one_time_move'
+  /** Money the account holds beyond the plan, moved back out. */
+  | 'one_time_move_out'
   /** A temporary addition to the weekly amount, ending on a chosen date. */
   | 'rate_bump'
+  /** A temporary reduction of the weekly amount, ending on a chosen date. */
+  | 'rate_cut'
   | 'debt_payment'
   | 'spend_confirmation'
 
@@ -92,6 +96,19 @@ function daysBetween(from: CivilDate, to: CivilDate): number {
   return Math.max(0, Math.round(compareDates(to, from)))
 }
 
+/**
+ * A dated bump or cut stores its TOTAL over the window (that is what the
+ * accrual math delivers), but a person sets a weekly figure. The same rounding
+ * as the weekly breakdown: a bump rounds up so it never under-funds, a cut
+ * rounds down so it never over-cuts.
+ */
+export function perWeekOf(instruction: IssuedInstruction): Cents {
+  const weeks = accrualWeeksBetween(instruction.issuedOn, instruction.endsOn ?? instruction.issuedOn)
+  return instruction.type === 'rate_cut'
+    ? -ceilDiv(-instruction.amountCents, weeks)
+    : ceilDiv(instruction.amountCents, weeks)
+}
+
 /** The sentence a human reads and acts on. Plain language (PRD §9). */
 export function instructionSentence(instruction: IssuedInstruction): string {
   switch (instruction.type) {
@@ -99,8 +116,12 @@ export function instructionSentence(instruction: IssuedInstruction): string {
       return `In Capital One 360, set the recurring transfer into ${instruction.targetLabel} to ${formatCents(instruction.amountCents)} per week.`
     case 'one_time_move':
       return `Move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel} once, to catch up.`
+    case 'one_time_move_out':
+      return `Move ${formatCents(instruction.amountCents)} out of ${instruction.targetLabel} once; it holds more than the plan needs.`
     case 'rate_bump':
-      return `Add ${formatCents(instruction.amountCents)} to the ${instruction.targetLabel} transfer until ${instruction.endsOn}, to catch up.`
+      return `Add ${formatCents(perWeekOf(instruction))} a week to the ${instruction.targetLabel} transfer until ${instruction.endsOn}, to catch up.`
+    case 'rate_cut':
+      return `Take ${formatCents(perWeekOf(instruction))} a week off the ${instruction.targetLabel} transfer until ${instruction.endsOn}; the extra you already hold covers it.`
     case 'debt_payment':
       return `Pay ${formatCents(instruction.amountCents)} toward ${instruction.targetLabel}.`
     case 'spend_confirmation':

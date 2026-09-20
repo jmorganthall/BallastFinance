@@ -516,9 +516,11 @@ export class Engine {
   }
 
   /**
-   * Accepted rate bumps, as account-level catch-up components. Only a CONFIRMED
-   * instruction counts: an offer the user never acted on must not inflate the
-   * weekly number.
+   * Accepted rate bumps and cuts, as account-level catch-up components. Only a
+   * CONFIRMED instruction counts: an offer the user never acted on must not
+   * move the weekly number in either direction. A cut is the same component
+   * with its sign flipped: the instruction stores a positive "take this much
+   * off", the accrual math sees a negative delivery.
    */
   async acceptedDriftAdjustments(): Promise<DriftAdjustment[]> {
     const [issued, confirmed] = await Promise.all([
@@ -528,11 +530,16 @@ export class Engine {
     const confirmedIds = new Set(confirmed.map((c) => c.instructionId))
 
     return issued
-      .filter((i) => i.type === 'rate_bump' && confirmedIds.has(i.instructionId) && i.endsOn)
+      .filter(
+        (i) =>
+          (i.type === 'rate_bump' || i.type === 'rate_cut') &&
+          confirmedIds.has(i.instructionId) &&
+          i.endsOn,
+      )
       .map((i) => ({
         id: i.instructionId,
         reserveAccountId: i.targetId,
-        amountCents: i.amountCents,
+        amountCents: i.type === 'rate_cut' ? -i.amountCents : i.amountCents,
         startDate: i.issuedOn,
         endDate: i.endsOn!,
       }))

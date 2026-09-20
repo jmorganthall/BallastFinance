@@ -9,7 +9,7 @@
 import { requireEngine } from '@/server/session'
 import { Card, Money, PageHeader, Pill } from '@/components/ui'
 import { acceptCatchUpAction, confirmBalancesAction } from '@/server/actions'
-import { catchUpOptions, computeDrift, formatCents } from '@/domain'
+import { aheadOptions, catchUpOptions, computeDrift, formatCents } from '@/domain'
 
 export const dynamic = 'force-dynamic'
 
@@ -109,9 +109,18 @@ export default async function CheckInPage({
 
               const drift = computeDrift({ account: view, confirmedCents: last.amountCents })
               const behind = drift.driftCents < 0
+              const ahead = drift.driftCents > 0
               const shortfall = Math.abs(drift.driftCents)
               const options = behind
                 ? catchUpOptions({ shortfallCents: shortfall, today, overWeeks: CATCH_UP_WEEKS })
+                : []
+              const easeOff = ahead
+                ? aheadOptions({
+                    extraCents: shortfall,
+                    weeklyCents: view.weekly.totalPerWeekCents,
+                    today,
+                    overWeeks: CATCH_UP_WEEKS,
+                  })
                 : []
 
               return (
@@ -170,10 +179,49 @@ export default async function CheckInPage({
                           </form>
                         ))}
                       </div>
-                    ) : drift.driftCents > 0 ? (
-                      <p className="mt-3 text-sm text-[var(--color-ink-soft)]">
-                        Nothing to do — the extra stays as a cushion.
-                      </p>
+                    ) : ahead ? (
+                      <div className="mt-4 space-y-2">
+                        <p className="text-sm text-[var(--color-ink-soft)]">
+                          {easeOff.length > 1
+                            ? 'Two ways to get back on track, or leave it and the extra stays as a cushion:'
+                            : 'Nothing is being set aside here yet, so there is one way to get back on track, or leave it and the extra stays as a cushion:'}
+                        </p>
+                        {easeOff.map((option) => (
+                          <form
+                            key={option.kind}
+                            action={acceptCatchUpAction}
+                            className="flex items-center justify-between gap-3 rounded-xl bg-[var(--color-surface)] p-3"
+                          >
+                            <input type="hidden" name="reserve_account_id" value={view.account.id} />
+                            <input type="hidden" name="account_name" value={view.account.name} />
+                            <input type="hidden" name="amount_cents" value={option.amountCents} />
+                            <input type="hidden" name="kind" value={option.kind} />
+                            {option.endDate ? (
+                              <input type="hidden" name="ends_on" value={option.endDate} />
+                            ) : null}
+
+                            <span className="text-sm">
+                              {option.kind === 'one_time_out'
+                                ? `Move ${formatCents(option.amountCents)} back out now`
+                                : option.pauses
+                                  ? `Pause the weekly set-aside until ${option.endDate}`
+                                  : `Set aside ${formatCents(option.perWeekCents ?? 0)}/week less until ${option.endDate}`}
+                              {option.leftoverCents ? (
+                                <span className="block text-xs text-[var(--color-ink-soft)]">
+                                  Uses up {formatCents(option.amountCents)}; the other{' '}
+                                  {formatCents(option.leftoverCents)} stays as a cushion.
+                                </span>
+                              ) : null}
+                            </span>
+                            <button
+                              type="submit"
+                              className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium"
+                            >
+                              Do this
+                            </button>
+                          </form>
+                        ))}
+                      </div>
                     ) : null}
                   </Card>
                 </li>

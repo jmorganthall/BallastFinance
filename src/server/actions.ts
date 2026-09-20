@@ -141,22 +141,39 @@ export async function confirmBalancesAction(formData: FormData): Promise<void> {
   redirect('/check-in?done=1')
 }
 
+/**
+ * Accept one of the check-in's offers: the two ways back on track when an
+ * account is behind, or the two when it is ahead. Each becomes an instruction,
+ * and nothing changes until a human confirms it was done.
+ */
+const DRIFT_OPTION_TYPES = {
+  one_time: 'one_time_move',
+  rate_bump: 'rate_bump',
+  one_time_out: 'one_time_move_out',
+  rate_cut: 'rate_cut',
+} as const
+
 export async function acceptCatchUpAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const accountId = String(formData.get('reserve_account_id'))
   const accountName = String(formData.get('account_name'))
   const amountCents = Number(formData.get('amount_cents'))
-  const kind = String(formData.get('kind'))
+  const kind = String(formData.get('kind')) as keyof typeof DRIFT_OPTION_TYPES
   const endsOn = String(formData.get('ends_on') ?? '')
 
+  const type = DRIFT_OPTION_TYPES[kind]
+  if (!type) return
   if (!Number.isFinite(amountCents) || amountCents <= 0) return
 
+  const dated = type === 'rate_bump' || type === 'rate_cut'
+  if (dated && !/^\d{4}-\d{2}-\d{2}$/.test(endsOn)) return
+
   await engine.issueInstruction({
-    type: kind === 'rate_bump' ? 'rate_bump' : 'one_time_move',
+    type,
     amountCents,
     targetId: accountId,
     targetLabel: accountName,
-    ...(kind === 'rate_bump' && endsOn ? { endsOn } : {}),
+    ...(dated ? { endsOn } : {}),
   })
 
   revalidatePath('/')

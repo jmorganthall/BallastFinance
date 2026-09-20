@@ -103,6 +103,27 @@ describe('outstanding instructions', () => {
       ),
     ).toBe('Did the Park tickets money get spent from your savings?')
   })
+
+  it('tells a person the weekly figure for a dated bump or cut, not the total', () => {
+    // Stored as the $190 total over 8 transfer weeks; the bank is set per week.
+    const dated = { issuedOn: '2026-11-21', endsOn: '2027-01-16', amountCents: 19000 }
+    expect(instructionSentence(issued({ instructionId: 'b', type: 'rate_bump', ...dated }))).toBe(
+      'Add $23.75 a week to the Annual Expenses transfer until 2027-01-16, to catch up.',
+    )
+    expect(instructionSentence(issued({ instructionId: 'c', type: 'rate_cut', ...dated }))).toBe(
+      'Take $23.75 a week off the Annual Expenses transfer until 2027-01-16; the extra you already hold covers it.',
+    )
+    // Rounding goes the safe way in each direction: a bump up, a cut down.
+    const odd = { issuedOn: '2026-11-21', endsOn: '2026-12-12', amountCents: 100 } // 3 weeks
+    expect(instructionSentence(issued({ instructionId: 'b2', type: 'rate_bump', ...odd }))).toContain('$0.34 a week')
+    expect(instructionSentence(issued({ instructionId: 'c2', type: 'rate_cut', ...odd }))).toContain('$0.33 a week')
+  })
+
+  it('reads a move-out as what it is', () => {
+    expect(
+      instructionSentence(issued({ instructionId: 'o', type: 'one_time_move_out', amountCents: 492510 })),
+    ).toBe('Move $4,925.10 out of Annual Expenses once; it holds more than the plan needs.')
+  })
 })
 
 describe('close-out', () => {

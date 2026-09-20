@@ -34,14 +34,23 @@ export function WeeklyNumber({
           <Hint detail="The steady part of your weekly set-aside: the plan as first committed. It stays put when things change.">
             <Money cents={weekly.ongoingPerWeekCents} /> ongoing
           </Hint>
-          {weekly.catchUp.map((group) => (
-            <span key={group.endDate}>
-              {' + '}
-              <Hint detail="Added when the plan changed. It stops on its own at the date shown, and the ongoing amount is what remains.">
-                <Money cents={group.perWeekCents} /> extra until {humanDate(group.endDate)}
-              </Hint>
-            </span>
-          ))}
+          {weekly.catchUp.map((group) =>
+            group.perWeekCents < 0 ? (
+              <span key={group.endDate}>
+                {' − '}
+                <Hint detail="Eased off because the account holds more than the plan needs. It stops on its own at the date shown, and the ongoing amount is what remains.">
+                  <Money cents={Math.abs(group.perWeekCents)} /> less until {humanDate(group.endDate)}
+                </Hint>
+              </span>
+            ) : (
+              <span key={group.endDate}>
+                {' + '}
+                <Hint detail="Added when the plan changed. It stops on its own at the date shown, and the ongoing amount is what remains.">
+                  <Money cents={group.perWeekCents} /> extra until {humanDate(group.endDate)}
+                </Hint>
+              </span>
+            ),
+          )}
         </p>
       ) : (
         <p className="mt-1 text-sm text-[var(--color-ink-soft)]">

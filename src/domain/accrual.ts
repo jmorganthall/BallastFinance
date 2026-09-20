@@ -263,7 +263,11 @@ export interface WeeklyBreakdown {
   totalPerWeekCents: Cents
   /** Base components: the stable, ongoing set-aside. */
   ongoingPerWeekCents: Cents
-  /** Catch-up components grouped by the date they stop, soonest first. */
+  /**
+   * Catch-up components grouped by the date they stop, soonest first. A
+   * negative group is an accepted cut: the account was ahead and is easing
+   * off until the extra is used up.
+   */
   catchUp: CatchUpGroup[]
 }
 
