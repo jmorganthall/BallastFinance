@@ -25,7 +25,10 @@ export default async function SignInPage({
         width={96}
         height={97}
         priority
-        className="h-20 w-auto"
+        // A column flex box stretches its children to full width; the mark
+        // would be pulled to the width of the page at a fixed height. It sits
+        // at its own size, so the proportions hold at every width.
+        className="h-20 w-20 self-start"
       />
       <h1 className="mt-4 text-4xl font-semibold tracking-tight">Ballast</h1>
       <p className="mt-2 text-[var(--color-ink-soft)]">
