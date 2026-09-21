@@ -10,14 +10,25 @@ import { Money, Pill } from '@/components/ui'
 import { PayoffImpact } from '@/components/payoff-impact'
 
 export function DebtShare({ optimised }: { optimised: OptimizerResult | null }) {
-  if (!optimised || optimised.allocations.length === 0) {
+  if (!optimised) return null
+  if (optimised.allocations.length === 0) {
+    // Nothing placed: either there are no debts, or every one is on a deal
+    // the household is on track to clear and paying early saves nothing.
+    // The optimizer says which; a plan with debts must never read as "none".
+    const noDebts = optimised.consideredDebts === 0
     return (
       <p className="mt-3 rounded-xl bg-[var(--color-surface)] p-3 text-sm text-[var(--color-ink-soft)]">
-        No debts recorded yet, so this has nowhere specific to go.{' '}
-        <Link href="/debts" className="underline">
-          Add your debts
-        </Link>{' '}
-        and Ballast will name which one to pay.
+        {noDebts ? (
+          <>
+            No debts recorded yet, so this has nowhere specific to go.{' '}
+            <Link href="/debts" className="underline">
+              Add your debts
+            </Link>{' '}
+            and Ballast will name which one to pay.
+          </>
+        ) : (
+          <>{optimised.why} You will be asked where it goes.</>
+        )}
       </p>
     )
   }
@@ -52,8 +63,8 @@ export function DebtShare({ optimised }: { optimised: OptimizerResult | null }) 
 
       {optimised.unallocatedCents > 0 ? (
         <p className="text-xs text-[var(--color-ink-soft)]">
-          <Money cents={optimised.unallocatedCents} /> is left over after clearing every debt —
-          you will be asked where it goes.
+          <Money cents={optimised.unallocatedCents} /> is left over — you will be asked where it
+          goes.
         </p>
       ) : null}
 

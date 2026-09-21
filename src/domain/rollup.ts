@@ -53,15 +53,25 @@ export interface DerivationInput {
 /**
  * The cycle an item is in today: the latest start on or before today. An
  * item with no recorded start is in its first cycle, from the commit, at $0.
+ *
+ * Two starts on the same day are decided by which was recorded later, not by
+ * the order they happened to be read in. A plan imported with its "reserved
+ * now" and counted toward at a check-in the same afternoon has exactly that
+ * tie, and the afternoon's figure is the one the person just confirmed.
  */
 export function currentCycle(
   lineItemId: Id,
   cycles: readonly LineItemCycle[],
   today: CivilDate,
 ): LineItemCycle | null {
-  return cycles
-    .filter((c) => c.lineItemId === lineItemId && compareDates(c.startDate, today) <= 0)
-    .sort((a, b) => compareDates(b.startDate, a.startDate))[0] ?? null
+  return (
+    cycles
+      .filter((c) => c.lineItemId === lineItemId && compareDates(c.startDate, today) <= 0)
+      .sort(
+        (a, b) =>
+          compareDates(b.startDate, a.startDate) || (b.recordedOrder ?? 0) - (a.recordedOrder ?? 0),
+      )[0] ?? null
+  )
 }
 
 export interface LineItemView {

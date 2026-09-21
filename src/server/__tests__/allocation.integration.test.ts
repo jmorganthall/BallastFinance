@@ -161,4 +161,75 @@ describeDb('allocation runs', () => {
     expect(partial.topUps[0]!.amountCents).toBe(15000)
     expect(partial.splitCents).toBe(0)
   })
+
+  describe('the order of operations, end to end (PRD §6)', () => {
+    it('covers a deal cliff once, then sends the debt share where it still costs something', async () => {
+      // The user's card and the next one down: $5,775.42 at 0% until 31 Mar
+      // 2028 at $303 a month leaves $321.42 for the full 30.49%; the other
+      // card is a plain 20.49%.
+      const shield = await engine.createDebt({
+        name: 'US Bank Shield 9795 (Balance Transfer)',
+        category: 'consumer',
+        balanceCents: 577542,
+        aprBasisPoints: 3049,
+        minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 30300 },
+        promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-03-31' }],
+      })
+      const altitude = await engine.createDebt({
+        name: 'Altitude Reserve',
+        category: 'consumer',
+        balanceCents: 719966,
+        aprBasisPoints: 2049,
+        minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 3000 },
+      })
+
+      const short = await engine.shortfalls()
+      const cliff = short.find((s) => s.kind === 'debt' && s.targetId === shield.id)
+      expect(cliff?.shortCents).toBe(32142)
+
+      const cover = await engine.chosenShortfalls([`debt:${shield.id}`])
+      const { plan, instructionIds } = await engine.runAllocation({ floorCents: 430000, cover })
+      expect(plan.topUpCents).toBe(32142)
+      expect(plan.splitCents).toBe(430000 - 35000 - 32142)
+
+      const mine = (await engine.outstandingInstructions()).filter((i) =>
+        instructionIds.includes(i.instructionId),
+      )
+      expect(mine).toHaveLength(instructionIds.length)
+      const toShield = mine.filter((i) => i.type === 'debt_payment' && i.targetId === shield.id)
+      const toAltitude = mine.filter((i) => i.type === 'debt_payment' && i.targetId === altitude.id)
+      // The cliff is covered exactly once, by the first step...
+      expect(toShield.map((i) => i.amountCents)).toEqual([32142])
+      // ...and the debt share, seeing the card as a deal again, goes to the
+      // card that actually costs something.
+      expect(toAltitude).toHaveLength(1)
+      expect(toAltitude[0]!.amountCents).toBe(plan.shares.find((s) => s.destination === 'debt')!.amountCents)
+
+      await engine.removeDebt(shield.id)
+      await engine.removeDebt(altitude.id)
+    })
+
+    it('reports the debt share as left over when every debt is a deal it is on track to clear', async () => {
+      const onTrack = await engine.createDebt({
+        name: 'Furniture deal',
+        category: 'consumer',
+        balanceCents: 240000,
+        aprBasisPoints: 2899,
+        minPaymentRule: { type: 'fixed', amountCents: 6000 },
+        plannedPaymentCents: 60000,
+        promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-03-01' }],
+      })
+      expect((await engine.shortfalls()).some((s) => s.targetId === onTrack.id)).toBe(false)
+
+      const { plan, instructionIds } = await engine.runAllocation({ floorCents: 100000, cover: [] })
+      const mine = (await engine.outstandingInstructions()).filter((i) =>
+        instructionIds.includes(i.instructionId),
+      )
+      expect(mine.some((i) => i.type === 'debt_payment')).toBe(false)
+      const leftOver = mine.find((i) => i.type === 'one_time_move' && i.targetId === 'debt')
+      expect(leftOver?.amountCents).toBe(plan.shares.find((s) => s.destination === 'debt')!.amountCents)
+      expect(leftOver?.note).toContain('on track to clear')
+      await engine.removeDebt(onTrack.id)
+    })
+  })
 })

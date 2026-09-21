@@ -610,12 +610,16 @@ export class Engine {
    * check-in that counted money already in the account toward a part.
    */
   async listCycleStarts(): Promise<LineItemCycle[]> {
+    // In the order they were recorded: a same-day tie between two starts is
+    // decided by that order, so it has to be the database's, not chance.
     const rows = await this.db
       .select()
       .from(events)
       .where(eq(events.householdId, this.householdId))
+      .orderBy(events.recordedAt, events.id)
 
     const cycles: LineItemCycle[] = []
+    const next = () => cycles.length
     for (const row of rows) {
       const on = row.occurredAt as CivilDate
       const p = row.payload as Record<string, unknown>
@@ -623,21 +627,29 @@ export class Engine {
         case 'package_committed':
           for (const o of (p.openings as { line_item_id: Id; amount_cents: Cents }[] | undefined) ?? []) {
             if (o.amount_cents > 0) {
-              cycles.push({ lineItemId: o.line_item_id, startDate: on, openingCents: o.amount_cents })
+              cycles.push({
+                lineItemId: o.line_item_id,
+                startDate: on,
+                openingCents: o.amount_cents,
+                recordedOrder: next(),
+              })
             }
           }
           break
         case 'line_item_added':
-          cycles.push({ lineItemId: p.line_item_id as Id, startDate: on, openingCents: 0 })
+          cycles.push({ lineItemId: p.line_item_id as Id, startDate: on, openingCents: 0, recordedOrder: next() })
           break
         case 'spend_confirmed':
-          if (p.rolled_to) cycles.push({ lineItemId: p.line_item_id as Id, startDate: on, openingCents: 0 })
+          if (p.rolled_to) {
+            cycles.push({ lineItemId: p.line_item_id as Id, startDate: on, openingCents: 0, recordedOrder: next() })
+          }
           break
         case 'opening_recorded':
           cycles.push({
             lineItemId: p.line_item_id as Id,
             startDate: on,
             openingCents: p.opening_cents as Cents,
+            recordedOrder: next(),
           })
           break
         default:
@@ -1212,9 +1224,11 @@ export class Engine {
         // (PRD §6 step 3) rather than leaving "put it at debt" for the user to
         // resolve. If there are no debts, it comes back with nothing and the
         // share is issued unassigned rather than silently dropped.
-        const optimised = await this.optimiseLumpSum(share.amountCents)
+        const optimised = await this.optimiseLumpSum(share.amountCents, undefined, {
+          lessPaid: debtTopUps(plan),
+        })
 
-        if (optimised.allocations.length === 0) {
+        if (optimised.consideredDebts === 0) {
           instructionIds.push(
             await this.issueInstruction({
               type: 'debt_payment',
@@ -1239,8 +1253,10 @@ export class Engine {
           )
         }
 
-        // Anything the optimizer could not place (every debt cleared) is still
-        // the household's money and must not vanish from the plan.
+        // Anything the optimizer could not place -- every debt cleared, or
+        // every debt left on a deal it is on track to clear -- is still the
+        // household's money and must not vanish from the plan. The optimizer
+        // says which, in its own words.
         if (optimised.unallocatedCents > 0) {
           instructionIds.push(
             await this.issueInstruction({
@@ -1248,7 +1264,7 @@ export class Engine {
               amountCents: optimised.unallocatedCents,
               targetId: 'debt',
               targetLabel: share.label,
-              note: 'Left over after clearing every debt — decide where this goes.',
+              note: `${optimised.why} Decide where this goes.`,
             }),
           )
         }
@@ -1643,14 +1659,30 @@ export class Engine {
   }
 
   /** Where a specific amount should go (PRD §7). */
-  async optimiseLumpSum(amountCents: Cents, weightOverride?: number): Promise<OptimizerResult> {
+  async optimiseLumpSum(
+    amountCents: Cents,
+    weightOverride?: number,
+    options: {
+      /**
+       * Payments already decided before this one, by debt id: the share-out's
+       * "cover what is short" step. The optimizer sees the debts as they will
+       * be after those (PRD §6, order of operations), so a cliff that step
+       * covered is a deal again here and attracts nothing more.
+       */
+      lessPaid?: Readonly<Record<Id, Cents>>
+    } = {},
+  ): Promise<OptimizerResult> {
     const [debts, weight, promoLeadWeeks] = await Promise.all([
       this.listDebts(),
       weightOverride !== undefined ? Promise.resolve(weightOverride) : this.priorityWeight(),
       this.promoLeadWeeks(),
     ])
+    const lessPaid = options.lessPaid ?? {}
     return optimiseLumpSum({
-      debts,
+      debts: debts.map((d) => ({
+        ...d,
+        balanceCents: Math.max(0, d.balanceCents - (lessPaid[d.id] ?? 0)),
+      })),
       amountCents,
       today: this.today(),
       weight,
@@ -1730,6 +1762,16 @@ function toDebt(r: typeof debtsTable.$inferSelect): Debt {
     fixedPayment: r.fixedPayment,
     state: r.state,
   }
+}
+
+/** The share-out's first step, as the debt step must see it: what is already going at each debt. */
+export function debtTopUps(plan: AllocationPlan): Record<Id, Cents> {
+  const paid: Record<Id, Cents> = {}
+  for (const t of plan.topUps) {
+    if (t.kind !== 'debt') continue
+    paid[t.targetId] = (paid[t.targetId] ?? 0) + t.amountCents
+  }
+  return paid
 }
 
 function toLineItem(r: typeof lineItemsTable.$inferSelect): LineItem {
