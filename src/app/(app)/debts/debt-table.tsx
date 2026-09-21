@@ -23,6 +23,7 @@ import {
   updateDebtBalanceAction,
 } from '@/server/actions'
 import { DebtForm } from './debt-form'
+import { DEFAULT_SORT, nextSort, sortDebtRows, type Sort, type SortKey } from './debt-sort'
 
 export interface DebtRow {
   id: string
@@ -35,6 +36,8 @@ export interface DebtRow {
   stale: boolean
   /** "20.49%", already formatted: what it really costs right now. */
   effectiveRate: string
+  /** The same rate as a number, so the Rate column can be sorted. */
+  effectiveAprBasisPoints: number
   /** The listed rate when a promo makes the effective one differ, else null. */
   listedRate: string | null
   minimumCents: number
@@ -57,19 +60,30 @@ const COLUMNS = 6
 
 export function DebtTable({ rows }: { rows: DebtRow[] }) {
   const [open, setOpen] = useState<Open>(null)
+  const [sort, setSort] = useState<Sort>(DEFAULT_SORT)
   const isOpen = (id: string) => open !== null && open.kind !== 'add' && open.id === id
+  const sorted = sortDebtRows(rows, sort)
+
+  const heading = (key: SortKey, label: string, extra = '') => (
+    <SortHeading
+      label={label}
+      className={`${th} ${extra}`}
+      active={sort.key === key ? sort.direction : null}
+      onClick={() => setSort(nextSort(sort, key))}
+    />
+  )
 
   return (
     <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--color-line)]">
-            <th className={`${th} w-8`}>#</th>
-            <th className={th}>Debt</th>
-            <th className={`${th} text-right`}>Balance</th>
-            <th className={`${th} hidden text-right sm:table-cell`}>Rate</th>
-            <th className={`${th} text-right`}>Per month</th>
-            <th className={`${th} hidden md:table-cell`}>Paid off by</th>
+            {heading('rank', '#', 'w-8')}
+            {heading('name', 'Debt')}
+            {heading('balance', 'Balance', 'text-right')}
+            {heading('rate', 'Rate', 'hidden text-right sm:table-cell')}
+            {heading('payment', 'Per month', 'text-right')}
+            {heading('payoff', 'Paid off by', 'hidden md:table-cell')}
             <th className={`${th} w-16`}>
               <span className="sr-only">Actions</span>
             </th>
@@ -83,7 +97,7 @@ export function DebtTable({ rows }: { rows: DebtRow[] }) {
               </td>
             </tr>
           ) : null}
-          {rows.map((row) => (
+          {sorted.map((row) => (
             <Row key={row.id} row={row} open={isOpen(row.id) ? (open as { kind: 'edit' | 'remove' }).kind : null} setOpen={setOpen} />
           ))}
         </tbody>
@@ -270,6 +284,44 @@ function Row({
         </tr>
       ) : null}
     </>
+  )
+}
+
+/**
+ * A column heading you can click to sort by. The whole cell is the button so
+ * it is easy to hit on a phone, and `aria-sort` tells a screen reader which
+ * way the table is ordered.
+ */
+function SortHeading({
+  label,
+  className,
+  active,
+  onClick,
+}: {
+  label: string
+  className: string
+  active: 'asc' | 'desc' | null
+  onClick: () => void
+}) {
+  const alignRight = className.includes('text-right')
+  return (
+    <th
+      className={className}
+      aria-sort={active === 'asc' ? 'ascending' : active === 'desc' ? 'descending' : 'none'}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className={`inline-flex min-h-9 items-center gap-1 uppercase ${alignRight ? 'w-full justify-end' : ''} ${
+          active ? 'text-[var(--color-ink)]' : ''
+        }`}
+      >
+        {label}
+        <span aria-hidden="true" className={`text-[10px] ${active ? '' : 'opacity-30'}`}>
+          {active === 'desc' ? '▼' : '▲'}
+        </span>
+      </button>
+    </th>
   )
 }
 
