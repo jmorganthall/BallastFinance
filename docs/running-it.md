@@ -93,7 +93,7 @@ toward your plans like any other extra.
 The footer of every page names the running build and, when the published image has
 moved on, says so. The published image carries the git revision it was built from; the
 running app compares its own against the `latest` tag on `ghcr.io` (four small anonymous
-requests, at most once every six hours, never on the page's critical path) and shows a
+requests, at most once an hour, never on the page's critical path) and shows a
 notice when they differ. Updating is what it always was: pull the image and restart.
 
 - `BALLAST_UPDATE_CHECK=off` skips the check, for a box with no outbound network or a
