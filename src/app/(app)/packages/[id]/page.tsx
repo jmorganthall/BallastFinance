@@ -11,7 +11,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { requireEngine } from '@/server/session'
-import { Card, Hint, humanDate, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Hint, humanDate, Money, Pill } from '@/components/ui'
+import { EditableTitle } from '@/components/editable-title'
 import { WeeklyNumber } from '@/components/weekly-number'
 import { AccrualChart } from '@/components/accrual-chart'
 import {
@@ -72,8 +73,11 @@ export default async function PackageDetailPage({
 
   return (
     <>
-      <PageHeader
-        title={view.package.name}
+      <EditableTitle
+        name={view.package.name}
+        packageId={view.package.id}
+        action={renamePackageAction}
+        canEdit={!isDone}
         subtitle={
           isDraft
             ? 'A draft. Nothing is being set aside yet.'
@@ -405,21 +409,8 @@ export default async function PackageDetailPage({
             The plan itself
           </h2>
           <Card>
-            <form action={renamePackageAction} className="flex items-end gap-2">
-              <input type="hidden" name="package_id" value={view.package.id} />
-              <label className="flex-1 text-sm font-medium">
-                What it is called
-                <input name="name" defaultValue={view.package.name} required className={field} />
-              </label>
-              <button
-                type="submit"
-                className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium"
-              >
-                Rename
-              </button>
-            </form>
-
-            <div className="mt-4 border-t border-[var(--color-line)] pt-4">
+            {/* Renaming lives beside the name at the top, where the name is. */}
+            <div>
               {confirm === 'stop' ? (
                 <div className="rounded-xl bg-[var(--color-behind-soft)] p-3">
                   <p className="text-sm font-medium text-[var(--color-behind)]">
