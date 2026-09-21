@@ -102,6 +102,13 @@ export interface LineItemChange {
  * Anything before the latest start is a settled cycle and does not touch the
  * current one's math.
  */
+/**
+ * What began a cycle: the plan's commit, a part added to a live plan, a
+ * recurring part confirmed spent and rolled forward, or a check-in that
+ * counted money toward the part (a reshuffle is the same kind of restatement).
+ */
+export type CycleOrigin = 'commit' | 'added' | 'rolled' | 'counted'
+
 export interface LineItemCycle {
   lineItemId: Id
   startDate: CivilDate
@@ -113,6 +120,12 @@ export interface LineItemCycle {
    * the truth, so the tie is broken by this, never by query order.
    */
   recordedOrder?: number
+  /**
+   * The pace a part is measured against runs from a real beginning -- a
+   * commit, an add, a roll -- never from a count, which only restates what
+   * was already there. Absent means unknown, which only the pace reads.
+   */
+  origin?: CycleOrigin
 }
 
 /**

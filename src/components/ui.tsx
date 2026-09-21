@@ -66,7 +66,7 @@ export function Pill({
   tone = 'neutral',
   children,
 }: {
-  tone?: 'neutral' | 'behind' | 'ahead' | 'accent'
+  tone?: 'neutral' | 'behind' | 'ahead' | 'accent' | 'caution'
   children: ReactNode
 }) {
   const tones = {
@@ -74,6 +74,7 @@ export function Pill({
     behind: 'bg-[var(--color-behind-soft)] text-[var(--color-behind)] border-transparent',
     ahead: 'bg-[var(--color-ahead-soft)] text-[var(--color-ahead)] border-transparent',
     accent: 'bg-[var(--color-accent-soft)] text-[var(--color-accent)] border-transparent',
+    caution: 'bg-[var(--color-caution-soft)] text-[var(--color-caution)] border-transparent',
   }
   return (
     <span

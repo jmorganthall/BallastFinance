@@ -10,6 +10,7 @@ import {
   weeklyBreakdown,
   type RateComponent,
   openingSinceLastOccurrence,
+  evenPaceCents,
 } from '../accrual'
 import { transferWeeksBetween, type CivilDate } from '../dates'
 import type { LineItem, LineItemChange, LineItemSnapshot } from '../types'
@@ -475,5 +476,28 @@ describe('what a recurring item would already have set aside', () => {
     })
     expect(suggestion!.cents).toBeLessThanOrEqual(9900)
     expect(suggestion!.cents).toBeGreaterThan(0)
+  })
+})
+
+describe('the even pace', () => {
+  it('is nothing before the window opens, everything once the date is here, and never more than the total', () => {
+    const window = { totalCents: 84400, fromDate: '2026-07-09', dueDate: '2027-01-09' } as const
+    expect(evenPaceCents({ ...window, today: '2026-07-09' })).toBe(0)
+    expect(evenPaceCents({ ...window, today: '2026-07-01' })).toBe(0)
+    expect(evenPaceCents({ ...window, today: '2027-01-09' })).toBe(84400)
+    expect(evenPaceCents({ ...window, today: '2027-03-01' })).toBe(84400)
+    expect(evenPaceCents({ ...window, totalCents: 0, today: '2026-09-19' })).toBe(0)
+  })
+
+  it('is the same arithmetic as the opening suggested for a repeating part', () => {
+    const suggestion = openingSinceLastOccurrence({
+      totalCents: 120000,
+      dueDate: '2027-02-15',
+      recurrence: { every: 1, unit: 'year' },
+      today: '2026-09-19',
+    })!
+    expect(
+      evenPaceCents({ totalCents: 120000, fromDate: suggestion.lastOccurrence, dueDate: '2027-02-15', today: '2026-09-19' }),
+    ).toBe(suggestion.cents)
   })
 })

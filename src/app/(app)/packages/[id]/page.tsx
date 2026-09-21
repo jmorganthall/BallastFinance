@@ -15,6 +15,7 @@ import { Card, Hint, humanDate, Money, Pill } from '@/components/ui'
 import { EditableTitle } from '@/components/editable-title'
 import { WeeklyNumber } from '@/components/weekly-number'
 import { AccrualChart } from '@/components/accrual-chart'
+import { ProgressBar } from '@/components/progress-bar'
 import {
   addLineItemAction,
   commitPackageAction,
@@ -63,6 +64,18 @@ export default async function PackageDetailPage({
 
   const live = view.items.filter((i) => i.lineItem.state !== 'retired')
   const retired = view.items.filter((i) => i.lineItem.state === 'retired')
+
+  // Whether the money counted in each account this plan draws on would sit
+  // differently if reshuffled; the line beside a part says so, and points at
+  // the check-in, where the reshuffle lives.
+  const spreads = new Map(
+    await Promise.all(
+      [...new Set(live.map((i) => i.lineItem.reserveAccountId))].map(
+        async (accountId) =>
+          [accountId, isDraft || isDone ? null : await engine.reshufflePreview(accountId)] as const,
+      ),
+    ),
+  )
 
   const accountOptions = accounts.map((a) => (
     <option key={a.id} value={a.id} disabled={!a.writable}>
@@ -196,9 +209,12 @@ export default async function PackageDetailPage({
         ) : !isDone ? (
           <div className="mt-4">
             <WeeklyNumber weekly={view.weekly} size="small" />
-            <p className="mt-3 text-sm text-[var(--color-ink-soft)]">
-              <Money cents={view.shouldHaveSavedCents} /> should be set aside for this so far.
-            </p>
+            <ProgressBar
+              className="mt-4"
+              totalCents={view.totalCents}
+              setAsideCents={view.shouldHaveSavedCents}
+              paceCents={view.paceCents}
+            />
           </div>
         ) : null}
       </Card>
@@ -220,7 +236,12 @@ export default async function PackageDetailPage({
       </h2>
 
       <ul className="space-y-3">
-        {live.map((item) => (
+        {live.map((item) => {
+          const spread = spreads.get(item.lineItem.reserveAccountId) ?? null
+          const spreadLine = spread?.lines.find((l) => l.lineItemId === item.lineItem.id) ?? null
+          const wouldMove =
+            spread !== null && spreadLine !== null && spreadLine.holdsAfterCents !== spreadLine.holdsNowCents
+          return (
           <li key={item.lineItem.id}>
             <Card>
               <div className="flex items-start justify-between gap-3">
@@ -245,11 +266,35 @@ export default async function PackageDetailPage({
               </p>
 
               {!isDraft && !isDone ? (
-                <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-                  <Money cents={item.shouldHaveSavedCents} /> set aside ·{' '}
-                  <Money cents={item.remainingCents} /> to go ·{' '}
-                  {formatCents(item.weekly.totalPerWeekCents)}/wk
-                </p>
+                <>
+                  <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                    <Money cents={item.shouldHaveSavedCents} /> set aside ·{' '}
+                    <Money cents={item.remainingCents} /> to go ·{' '}
+                    {formatCents(item.weekly.totalPerWeekCents)}/wk
+                  </p>
+                  <ProgressBar
+                    className="mt-3"
+                    totalCents={item.totalCents}
+                    setAsideCents={item.shouldHaveSavedCents}
+                    paceCents={item.paceCents}
+                    paceSince={item.paceSince}
+                    dueDate={item.lineItem.dueDate}
+                  />
+                  {wouldMove && spread && spreadLine ? (
+                    <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                      Reshuffled, this part would count <Money cents={spreadLine.holdsAfterCents} /> and
+                      the {spread.accountName} transfer would go from{' '}
+                      <Money cents={spread.perWeekNowCents} /> to <Money cents={spread.perWeekAfterCents} />{' '}
+                      a week.{' '}
+                      <Link
+                        href={`/check-in#spread-${spread.accountId}`}
+                        className="text-[var(--color-accent)] underline underline-offset-4"
+                      >
+                        Reshuffle {spread.accountName}
+                      </Link>
+                    </p>
+                  ) : null}
+                </>
               ) : null}
 
               {!isDone ? (
@@ -343,7 +388,8 @@ export default async function PackageDetailPage({
               ) : null}
             </Card>
           </li>
-        ))}
+          )
+        })}
       </ul>
 
       {!isDone ? (

@@ -32,6 +32,8 @@ import {
   formatCents,
   lineItemTotalCents,
   openingSinceLastOccurrence,
+  reshuffleAccount as planReshuffle,
+  type Reshuffle,
   recurrenceOf,
   rollToFuture,
   DEFAULT_ALLOCATION_RULES,
@@ -633,16 +635,29 @@ export class Engine {
                 startDate: on,
                 openingCents: o.amount_cents,
                 recordedOrder: next(),
+                origin: 'commit',
               })
             }
           }
           break
         case 'line_item_added':
-          cycles.push({ lineItemId: p.line_item_id as Id, startDate: on, openingCents: 0, recordedOrder: next() })
+          cycles.push({
+            lineItemId: p.line_item_id as Id,
+            startDate: on,
+            openingCents: 0,
+            recordedOrder: next(),
+            origin: 'added',
+          })
           break
         case 'spend_confirmed':
           if (p.rolled_to) {
-            cycles.push({ lineItemId: p.line_item_id as Id, startDate: on, openingCents: 0, recordedOrder: next() })
+            cycles.push({
+              lineItemId: p.line_item_id as Id,
+              startDate: on,
+              openingCents: 0,
+              recordedOrder: next(),
+              origin: 'rolled',
+            })
           }
           break
         case 'opening_recorded':
@@ -651,6 +666,7 @@ export class Engine {
             startDate: on,
             openingCents: p.opening_cents as Cents,
             recordedOrder: next(),
+            origin: 'counted',
           })
           break
         default:
@@ -688,6 +704,29 @@ export class Engine {
         payload: { line_item_id: entry.lineItemId, opening_cents: entry.openingCents },
       })),
     )
+  }
+
+  /**
+   * What re-spreading this account's counted money across its parts would
+   * change (PRD §6): every part up to its pace first, then the rest soonest
+   * due first. A preview; nothing is recorded.
+   */
+  async reshufflePreview(accountId: Id): Promise<Reshuffle | null> {
+    return planReshuffle(await this.derivationInput(), accountId)
+  }
+
+  /**
+   * Do it. Each part whose counted money changes gets that figure recorded
+   * as its opening today -- the same fact a check-in count records -- and
+   * the spread is worked out again here as it is recorded, so what lands is
+   * today's answer rather than a stale preview. The account's total is
+   * untouched, so nothing needs confirming.
+   */
+  async reshuffleAccount(accountId: Id): Promise<Reshuffle | null> {
+    const plan = await this.reshufflePreview(accountId)
+    if (!plan || plan.openings.length === 0) return plan
+    await this.recordOpeningBalances(plan.openings)
+    return plan
   }
 
   /** Every recorded plan change, in the shape the accrual math consumes. */

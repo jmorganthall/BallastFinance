@@ -88,6 +88,24 @@ shows the exact figure beside the rounded one. The little extra the rounding lea
 behind is deliberate and shows up as "ahead" at a check-in, where it is counted
 toward your plans like any other extra.
 
+### Where the money is counted
+
+What an account holds is counted toward its parts, and where it is counted sets each
+part's weekly figure. Every plan and every part shows a progress bar: how much is set
+aside against the total, with a tick at where the money should be by now had it been
+saved evenly since the part last came round (or since the plan started, for a one-off).
+Green past the tick is on track; yellow short of it is behind; a solid green bar is
+fully funded.
+
+Money can land on a part for reasons that have nothing to do with the weekly figure:
+the spreadsheet's Reserved Now, an opening typed at commit, an extra counted toward
+whichever parts came soonest. The check-in screen's "Where the money is counted" says,
+per account, whether a reshuffle would change anything, and a part that would move says
+so beside its bar. A reshuffle spreads the account's counted total again: every part up
+to where it should be by now, soonest due first, then whatever is left to the parts due
+soonest. It changes where money is counted, never how much: the account's total and its
+behind or ahead are the same afterwards, and nothing moves in the bank.
+
 ### Knowing when to update
 
 The footer of every page names the running build and, when the published image has
@@ -133,7 +151,9 @@ What it keeps, and what it drops:
 
 Each expense row becomes a live plan of its own, saving from today, with "Reserved
 Now" counted as already set aside so the weekly amount is right from the first
-week. A recurring row whose Next Due has passed rolls to its next occurrence. Each
+week. A recurring row whose Next Due has passed rolls to its next occurrence, and its
+Reserved Now still counts toward that next one (the import says so; a reshuffle at the
+check-in spreads it better if that is not right). Each
 loan row becomes a debt with its balance dated "As of", and its Monthly kept as what
 you actually pay when that is more than the minimum -- that is what decides whether
 a 0% balance is on track to clear before the rate ends. Anything wrong afterwards

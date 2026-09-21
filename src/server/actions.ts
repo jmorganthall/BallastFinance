@@ -238,6 +238,21 @@ export async function acceptOpeningsAction(formData: FormData): Promise<void> {
   redirect('/check-in?counted=1')
 }
 
+/**
+ * Re-spread what an account's plans count as held across its parts (PRD §6).
+ * Only the account is posted: the engine works the spread out again as it
+ * records it, so what lands is today's answer, never a stale preview.
+ */
+export async function reshuffleAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const accountId = String(formData.get('reserve_account_id') ?? '')
+  await engine.reshuffleAccount(accountId)
+  revalidatePath('/')
+  revalidatePath('/check-in')
+  revalidatePath('/packages')
+  redirect('/check-in?reshuffled=1')
+}
+
 export async function createReserveAccountAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const name = String(formData.get('name') ?? '').trim()
