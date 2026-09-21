@@ -157,7 +157,12 @@ export async function fetchLatestRevision(options: {
 
 // ---------------------------------------------------------------- the check
 
-const CHECK_EVERY_MS = 6 * 60 * 60 * 1000
+/**
+ * Once an hour. Four small anonymous requests, well inside the registry's
+ * limits, and the difference between a household that pulls the new image
+ * the evening it lands and one that reads "up to date" for most of a day.
+ */
+const CHECK_EVERY_MS = 60 * 60 * 1000
 /** How long a page render will wait on the registry before showing "unknown". */
 const RENDER_WAIT_MS = 3000
 const REQUEST_TIMEOUT_MS = 10_000
