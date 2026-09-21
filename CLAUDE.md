@@ -65,6 +65,11 @@ principles, and they are non-negotiable.
   open a connection or throw — `next build` collects page data without any
   credentials, and a placeholder URL in a Dockerfile is exactly the thing that
   later gets copied into a deployment.
+- **PRD §6 "Order of operations and cash flow" is binding.** Every step of a
+  share-out sees balances as they will be after the earlier steps, and every
+  figure that appears in more than one place has one definition in `src/domain`
+  (`monthlyPaymentCents`, `promoCliff`, `projectPayoff`). The effective APR is
+  for ranking only; never project with a blended rate.
 - **Nothing is done until a human confirms it.** An issued instruction the user
   ignored must never change a weekly number or a balance.
 - **Account scope restricts writes, never reads.** Both spouses see every
@@ -78,7 +83,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 342 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 357 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

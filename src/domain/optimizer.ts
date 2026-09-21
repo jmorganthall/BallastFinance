@@ -14,6 +14,15 @@
  * carrying weight (1 − w) plus its normalised rate carrying weight w. With the
  * slider hard over to "free up cash flow now" the ranking becomes pure cash
  * freed per dollar; hard over to "avoid the most interest" it becomes pure rate.
+ *
+ * Every step looks at the debts AS THEY WILL BE after the payments already
+ * decided, never at the balances it started with. That is what keeps a deal-
+ * rate card honest: its effective rate is the full rate only for the part the
+ * payments would leave when the deal ends (the cliff, PRD §7), so once that
+ * part is covered the rest of the card is a deal again, and the next dollar
+ * goes to whatever actually costs something. A deal the household is on track
+ * to clear attracts nothing: paying it early saves nothing, and saying so is
+ * better than pretending.
  */
 
 import { compareDates, monthsBetween, type CivilDate } from './dates'
@@ -25,6 +34,7 @@ import {
   interestOverNextYearCents,
   monthlyPaymentCents,
   projectPayoff,
+  promoCliff,
   type Debt,
 } from './debt'
 import type { Id } from './types'
@@ -50,8 +60,8 @@ export interface OptimizerAllocation {
   minimumAfterCents: Cents
   /**
    * Interest this payment stops from ever being charged, over the rest of the
-   * debt's life at its minimum. Null when the debt would never be paid off at
-   * its minimum, because then "the rest of its life" has no end.
+   * debt's life at its payments. Null when the debt would never be paid off,
+   * because then "the rest of its life" has no end.
    */
   lifetimeInterestAvoidedCents: Cents | null
   /** How many months sooner the debt is gone. Null when it never would be. */
@@ -61,24 +71,28 @@ export interface OptimizerAllocation {
 
 export interface OptimizerResult {
   amountCents: Cents
+  /**
+   * How many open debts were looked at. Zero is "no debts recorded"; a
+   * positive count with no allocations is "every debt is a deal it is on
+   * track to clear" -- two different things to tell a household.
+   */
+  consideredDebts: number
   allocations: OptimizerAllocation[]
   unallocatedCents: Cents
-  /**
-   * Headline one: monthly obligation removed -- the minimums of anything
-   * cleared, plus how far a percent-of-balance minimum falls on a partial
-   * payment.
-   */
+  /** Headline one: monthly obligation removed. */
   monthlyFreedCents: Cents
   /** Headline two: interest this avoids over the next twelve months. Always known. */
   interestAvoidedCents: Cents
   /**
    * Headline two, the long view: interest never paid over the life of every
-   * debt touched. Null when any of them would never be paid off at its
-   * minimum, in which case the twelve-month figure is the honest one.
+   * debt touched. Null when any of them would never be paid off, in which
+   * case the twelve-month figure is the honest one.
    */
   lifetimeInterestAvoidedCents: Cents | null
   why: string
 }
+
+const percent = (basisPoints: number) => (basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
 
 function normalise(values: number[]): number[] {
   const max = Math.max(...values, 0)
@@ -111,6 +125,7 @@ export function optimiseLumpSum(args: {
 
   const empty: OptimizerResult = {
     amountCents: args.amountCents,
+    consideredDebts: open.length,
     allocations: [],
     unallocatedCents: args.amountCents,
     monthlyFreedCents: 0,
@@ -120,166 +135,162 @@ export function optimiseLumpSum(args: {
   }
   if (open.length === 0 || args.amountCents <= 0) return empty
 
-  const rows = open.map((debt) => ({
-    debt,
-    apr: effectiveAprBasisPoints(debt, args.today, leadWeeks),
-    minimum: monthlyPaymentCents(debt),
-    yearInterest: interestOverNextYearCents(debt, args.today, leadWeeks),
-    urgent: promoUrgent(debt, args.today, leadWeeks),
-  }))
-
-  const normalisedApr = normalise(rows.map((r) => r.apr))
-  const normalisedFreed = normalise(rows.map((r) => r.minimum / r.debt.balanceCents))
-
-  const candidates = rows.map((row, index) => ({
-    ...row,
-    score: (1 - weight) * (normalisedFreed[index] ?? 0) + weight * (normalisedApr[index] ?? 0),
-  }))
-
-  let remaining = args.amountCents
-  const allocations: OptimizerAllocation[] = []
-  const used = new Set<Id>()
-
-  /**
-   * What paying `amountCents` at this debt does over the rest of its life:
-   * the interest that is never charged and the months knocked off, both
-   * against leaving it at its minimum. A debt that never clears at its
-   * minimum has no "rest of its life" to compare, so both come back null.
-   */
-  const lifetime = (debt: Debt, amountCents: Cents) => {
-    const before = projectPayoff({ debt, today: args.today, leadWeeks })
-    if (before.months === null) return { interest: null, months: null }
-    if (amountCents >= debt.balanceCents) {
-      return { interest: before.totalInterestCents, months: before.months }
-    }
-    const after = projectPayoff({
-      debt: { ...debt, balanceCents: debt.balanceCents - amountCents },
-      today: args.today,
-      leadWeeks,
-    })
-    if (after.months === null) return { interest: null, months: null }
-    return {
-      interest: before.totalInterestCents - after.totalInterestCents,
-      months: before.months - after.months,
-    }
+  // The debts as they will be after each decision so far.
+  const balance = new Map<Id, Cents>(open.map((d) => [d.id, d.balanceCents]))
+  const asNow = (d: Debt): Debt => ({ ...d, balanceCents: balance.get(d.id) ?? 0 })
+  const paid = new Map<Id, Cents>()
+  const reasons = new Map<Id, string[]>()
+  const touched: Debt[] = []
+  const pay = (d: Debt, cents: Cents, reason: string) => {
+    if (cents <= 0) return
+    balance.set(d.id, (balance.get(d.id) ?? 0) - cents)
+    if (!paid.has(d.id)) touched.push(d)
+    paid.set(d.id, (paid.get(d.id) ?? 0) + cents)
+    reasons.set(d.id, [...(reasons.get(d.id) ?? []), reason])
+    remaining -= cents
   }
+  let remaining = args.amountCents
 
   // 1. Promo cliffs this amount can actually clear, soonest deadline first.
-  const urgentClearable = candidates
-    .filter((c) => c.urgent && c.debt.balanceCents <= remaining)
-    .sort((a, b) => a.debt.balanceCents - b.debt.balanceCents)
-
-  for (const candidate of urgentClearable) {
-    if (candidate.debt.balanceCents > remaining) continue
-    remaining -= candidate.debt.balanceCents
-    used.add(candidate.debt.id)
-    const life = lifetime(candidate.debt, candidate.debt.balanceCents)
-    allocations.push({
-      debtId: candidate.debt.id,
-      debtName: candidate.debt.name,
-      amountCents: candidate.debt.balanceCents,
-      clearsIt: true,
-      monthlyFreedCents: candidate.minimum,
-      minimumBeforeCents: candidate.minimum,
-      minimumAfterCents: 0,
-      lifetimeInterestAvoidedCents: life.interest,
-      monthsSooner: life.months,
-      reason: 'Its promotional rate is about to end — clearing it now beats paying interest on it later.',
-    })
+  const urgentClearable = open
+    .filter((d) => promoUrgent(d, args.today, leadWeeks) && (balance.get(d.id) ?? 0) <= remaining)
+    .sort((a, b) => (balance.get(a.id) ?? 0) - (balance.get(b.id) ?? 0))
+  for (const d of urgentClearable) {
+    const owed = balance.get(d.id) ?? 0
+    if (owed <= 0 || owed > remaining) continue
+    pay(d, owed, 'Its promotional rate is about to end — clearing it now beats paying interest on it later.')
   }
 
   // 2. Knockouts: anything this amount can eliminate outright, best value first.
-  const knockouts = candidates
-    .filter((c) => !used.has(c.debt.id) && c.debt.balanceCents <= remaining)
-    .sort((a, b) => b.score - a.score || a.debt.balanceCents - b.debt.balanceCents)
-
-  for (const candidate of knockouts) {
-    if (candidate.debt.balanceCents > remaining) continue
-    remaining -= candidate.debt.balanceCents
-    used.add(candidate.debt.id)
-    const life = lifetime(candidate.debt, candidate.debt.balanceCents)
-    allocations.push({
-      debtId: candidate.debt.id,
-      debtName: candidate.debt.name,
-      amountCents: candidate.debt.balanceCents,
-      clearsIt: true,
-      monthlyFreedCents: candidate.minimum,
-      minimumBeforeCents: candidate.minimum,
-      minimumAfterCents: 0,
-      lifetimeInterestAvoidedCents: life.interest,
-      monthsSooner: life.months,
-      reason: `Paying it off completely frees ${formatCents(candidate.minimum)} a month.`,
-    })
-  }
-
-  // 3. Whatever is left goes at the most expensive remaining debt.
-  if (remaining > 0) {
-    const target = candidates
-      .filter((c) => !used.has(c.debt.id))
-      .sort((a, b) => b.apr - a.apr || b.score - a.score)[0]
-
-    if (target) {
-      const life = lifetime(target.debt, remaining)
-      // A percent-of-balance minimum follows the balance down, so even a
-      // payment that clears nothing can free real cash each month. A set
-      // payment (or a floor that is what sets the minimum, or a planned
-      // payment above the minimum) does not move.
-      const minimumAfter = monthlyPaymentCents({
-        ...target.debt,
-        balanceCents: target.debt.balanceCents - remaining,
-      })
-      const freed = target.minimum - minimumAfter
-      const drops =
-        freed > 0
-          ? ` Its minimum drops from ${formatCents(target.minimum)} to ${formatCents(minimumAfter)} a month.`
-          : ''
-      const sooner =
-        life.months !== null && life.months > 0
-          ? ` Gone ${life.months === 1 ? 'a month' : `${life.months} months`} sooner.`
-          : ''
-      allocations.push({
-        debtId: target.debt.id,
-        debtName: target.debt.name,
-        amountCents: remaining,
-        clearsIt: false,
-        monthlyFreedCents: freed,
-        minimumBeforeCents: target.minimum,
-        minimumAfterCents: minimumAfter,
-        lifetimeInterestAvoidedCents: life.interest,
-        monthsSooner: life.months,
-        reason: `It is the most expensive debt left at ${(target.apr / 100).toFixed(2)}%, so every dollar here avoids the most interest.${drops}${sooner}`,
-      })
-      remaining = 0
+  const scored = open.map((d) => {
+    const now = asNow(d)
+    return {
+      debt: d,
+      apr: effectiveAprBasisPoints(now, args.today, leadWeeks),
+      freedRatio: now.balanceCents > 0 ? monthlyPaymentCents(now) / now.balanceCents : 0,
     }
+  })
+  const normalisedApr = normalise(scored.map((r) => r.apr))
+  const normalisedFreed = normalise(scored.map((r) => r.freedRatio))
+  const score = new Map(
+    scored.map((r, i) => [r.debt.id, (1 - weight) * (normalisedFreed[i] ?? 0) + weight * (normalisedApr[i] ?? 0)]),
+  )
+  const knockouts = open
+    .filter((d) => !paid.has(d.id) && (balance.get(d.id) ?? 0) > 0 && (balance.get(d.id) ?? 0) <= remaining)
+    .sort(
+      (a, b) =>
+        (score.get(b.id) ?? 0) - (score.get(a.id) ?? 0) || (balance.get(a.id) ?? 0) - (balance.get(b.id) ?? 0),
+    )
+  for (const d of knockouts) {
+    const owed = balance.get(d.id) ?? 0
+    if (owed <= 0 || owed > remaining) continue
+    pay(d, owed, `Paying it off completely frees ${formatCents(monthlyPaymentCents(asNow(d)))} a month.`)
   }
+
+  // 3. Whatever is left goes at the most expensive debt still open -- judged
+  //    on what it will cost after the payments above. A deal-rate card is
+  //    expensive only for the part its payments would leave at the full rate,
+  //    so it takes that much and no more; once covered it is a deal again and
+  //    the next dollar moves on. A debt that costs nothing is not a target.
+  let unallocatedWhy: string | null = null
+  while (remaining > 0) {
+    const candidates = open
+      .map((d) => ({ debt: d, now: asNow(d) }))
+      .filter(({ now }) => now.balanceCents > 0)
+      .map((c) => ({ ...c, apr: effectiveAprBasisPoints(c.now, args.today, leadWeeks), cliff: promoCliff(c.now, args.today) }))
+      .filter((c) => c.apr > 0)
+      .sort((a, b) => b.apr - a.apr || (score.get(b.debt.id) ?? 0) - (score.get(a.debt.id) ?? 0))
+    const target = candidates[0]
+    if (!target) {
+      unallocatedWhy =
+        touched.length > 0
+          ? 'Every debt still open is on a deal it is on track to clear, so paying more now saves nothing.'
+          : 'Every debt is on a deal it is on track to clear, so paying it early saves nothing.'
+      break
+    }
+    const { debt, now, cliff } = target
+    if (cliff && cliff.shortCents > 0) {
+      const cents = Math.min(remaining, cliff.shortCents)
+      pay(
+        debt,
+        cents,
+        `Its ${percent(cliff.promoRateBasisPoints)}% deal ends ${cliff.untilDate}, and at ${formatCents(monthlyPaymentCents(now))} a month ${formatCents(cliff.shortCents)} would still be there at ${percent(debt.aprBasisPoints)}% after that. This ${cents >= cliff.shortCents ? 'covers it' : 'covers part of it'}.`,
+      )
+      continue
+    }
+    const cents = Math.min(remaining, now.balanceCents)
+    pay(
+      debt,
+      cents,
+      `It is the most expensive debt left at ${percent(target.apr)}%, so every dollar here avoids the most interest.`,
+    )
+  }
+
+  // What each payment does, judged once per debt on its whole amount.
+  const allocations: OptimizerAllocation[] = touched.map((debt) => {
+    const amountCents = paid.get(debt.id) ?? 0
+    const after: Debt = { ...debt, balanceCents: debt.balanceCents - amountCents }
+    const clearsIt = amountCents >= debt.balanceCents
+    const minimumBeforeCents = monthlyPaymentCents(debt)
+    const minimumAfterCents = clearsIt ? 0 : monthlyPaymentCents(after)
+    const before = projectPayoff({ debt, today: args.today, leadWeeks })
+    const then = clearsIt ? null : projectPayoff({ debt: after, today: args.today, leadWeeks })
+    const lifetime =
+      before.months === null
+        ? { interest: null, months: null }
+        : clearsIt
+          ? { interest: before.totalInterestCents, months: before.months }
+          : then!.months === null
+            ? { interest: null, months: null }
+            : {
+                interest: before.totalInterestCents - then!.totalInterestCents,
+                months: before.months - then!.months,
+              }
+    const drops =
+      !clearsIt && minimumBeforeCents - minimumAfterCents > 0
+        ? ` Its minimum drops from ${formatCents(minimumBeforeCents)} to ${formatCents(minimumAfterCents)} a month.`
+        : ''
+    const sooner =
+      !clearsIt && lifetime.months !== null && lifetime.months > 0
+        ? ` Gone ${lifetime.months === 1 ? 'a month' : `${lifetime.months} months`} sooner.`
+        : ''
+    return {
+      debtId: debt.id,
+      debtName: debt.name,
+      amountCents,
+      clearsIt,
+      monthlyFreedCents: minimumBeforeCents - minimumAfterCents,
+      minimumBeforeCents,
+      minimumAfterCents,
+      lifetimeInterestAvoidedCents: lifetime.interest,
+      monthsSooner: lifetime.months,
+      reason: `${(reasons.get(debt.id) ?? []).join(' ')}${drops}${sooner}`,
+    }
+  })
 
   const monthlyFreedCents = allocations.reduce((s, a) => s + a.monthlyFreedCents, 0)
 
   // The long view is only honest when every debt touched has an end.
-  const lifetimeInterestAvoidedCents = allocations.every(
-    (a) => a.lifetimeInterestAvoidedCents !== null,
-  )
+  const lifetimeInterestAvoidedCents = allocations.every((a) => a.lifetimeInterestAvoidedCents !== null)
     ? allocations.reduce((s, a) => s + (a.lifetimeInterestAvoidedCents ?? 0), 0)
     : null
 
-  // Interest avoided: the full next-twelve-months interest of anything cleared,
-  // plus a proportional share for a partial payment.
-  const interestAvoidedCents = allocations.reduce((sum, allocation) => {
-    const row = rows.find((r) => r.debt.id === allocation.debtId)
-    if (!row) return sum
-    if (allocation.clearsIt) return sum + row.yearInterest
-    const share = allocation.amountCents / row.debt.balanceCents
-    return sum + Math.round(row.yearInterest * share)
+  // The next twelve months, before and after, at the rates actually in force.
+  const interestAvoidedCents = touched.reduce((sum, debt) => {
+    const amountCents = paid.get(debt.id) ?? 0
+    const after: Debt = { ...debt, balanceCents: debt.balanceCents - amountCents }
+    return sum + interestOverNextYearCents(debt, args.today) - interestOverNextYearCents(after, args.today)
   }, 0)
 
   return {
     amountCents: args.amountCents,
+    consideredDebts: open.length,
     allocations,
     unallocatedCents: remaining,
     monthlyFreedCents,
     interestAvoidedCents,
     lifetimeInterestAvoidedCents,
-    why: buildWhy(allocations, remaining),
+    why: buildWhy(allocations, remaining, unallocatedWhy),
   }
 }
 
@@ -289,8 +300,16 @@ export function optimiseLumpSum(args: {
  * as figures beside it, so repeating them here would be reading the same
  * sentence twice.
  */
-function buildWhy(allocations: readonly OptimizerAllocation[], unallocatedCents: Cents): string {
-  if (allocations.length === 0) return 'There is nothing to pay off.'
+function buildWhy(
+  allocations: readonly OptimizerAllocation[],
+  unallocatedCents: Cents,
+  unallocatedWhy: string | null,
+): string {
+  if (allocations.length === 0) {
+    return unallocatedWhy
+      ? `${unallocatedWhy} ${formatCents(unallocatedCents)} is left over to put somewhere else.`
+      : 'There is nothing to pay off.'
+  }
 
   const cleared = allocations.filter((a) => a.clearsIt)
   const parts: string[] = []
@@ -303,20 +322,26 @@ function buildWhy(allocations: readonly OptimizerAllocation[], unallocatedCents:
     )
   }
 
-  const partial = allocations.find((a) => !a.clearsIt)
-  if (partial) {
+  const partial = allocations.filter((a) => !a.clearsIt)
+  if (partial.length === 1) {
     parts.push(
       cleared.length > 0
-        ? `The rest goes at ${partial.debtName}, the most expensive one left.`
-        : `It goes at ${partial.debtName}, the most expensive one.`,
+        ? `The rest goes at ${partial[0]!.debtName}, the most expensive one left.`
+        : `It goes at ${partial[0]!.debtName}, the most expensive one.`,
+    )
+  } else if (partial.length > 1) {
+    parts.push(
+      `${cleared.length > 0 ? 'The rest goes' : 'It goes'} at ${partial.slice(0, -1).map((a) => a.debtName).join(', ')} and ${partial.at(-1)!.debtName}, in the order they cost the most.`,
     )
   }
 
   if (unallocatedCents > 0) {
-    // Everything is cleared and money remains. Saying nothing would leave the
-    // household believing it was all spent.
+    // Money remains. Saying nothing would leave the household believing it
+    // was all spent.
     parts.push(
-      `That clears everything, and ${formatCents(unallocatedCents)} is left over to put somewhere else.`,
+      unallocatedWhy
+        ? `${unallocatedWhy} ${formatCents(unallocatedCents)} is left over to put somewhere else.`
+        : `That clears everything, and ${formatCents(unallocatedCents)} is left over to put somewhere else.`,
     )
   }
 

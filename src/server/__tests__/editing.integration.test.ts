@@ -328,4 +328,31 @@ describeDb('editing plans and debts', () => {
       expect((mine.payload as { opening_cents: number }).opening_cents).toBe(36000)
     })
   })
+
+  describe('counting toward a plan on the day it was committed', () => {
+    it('takes the counted figure over the same-day commit opening', async () => {
+      // The spreadsheet import commits every plan with its "reserved now"
+      // the same day the household then checks in and counts the extra
+      // toward it. Two cycle starts on one date: the later one is what the
+      // person just confirmed, and it must win.
+      const engine = new Engine({ householdId, actorUserId: null, db, today: '2026-09-19' })
+      const created = await engine.createPackageFromIntake({
+        contract_version: INTAKE_CONTRACT_VERSION,
+        package: { name: 'Same-day count' },
+        line_items: [
+          { label: 'Water filter', unit_amount: '45', due_date: '2026-10-05', reserve_account: accountId },
+        ],
+      })
+      if (!created.ok) throw new Error(JSON.stringify(created.problems))
+      await engine.commitPackage(created.packageId, { openingCents: 1837 })
+
+      const before = (await engine.packageViews()).find((v) => v.package.id === created.packageId)!
+      expect(before.items[0]!.shouldHaveSavedCents).toBe(1837)
+
+      await engine.recordOpeningBalances([{ lineItemId: created.lineItemIds[0]!, openingCents: 4500 }])
+      const after = (await engine.packageViews()).find((v) => v.package.id === created.packageId)!
+      expect(after.items[0]!.shouldHaveSavedCents).toBe(4500)
+      expect(after.weekly.totalPerWeekCents).toBe(0)
+    })
+  })
 })

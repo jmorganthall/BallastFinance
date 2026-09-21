@@ -106,6 +106,13 @@ export interface LineItemCycle {
   lineItemId: Id
   startDate: CivilDate
   openingCents: Cents
+  /**
+   * Where this sits among everything recorded, oldest first. Two starts on
+   * the same day are ordinary -- a plan committed with an opening and then
+   * counted toward at a check-in that afternoon -- and the later record is
+   * the truth, so the tie is broken by this, never by query order.
+   */
+  recordedOrder?: number
 }
 
 /**

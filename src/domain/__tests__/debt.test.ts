@@ -15,6 +15,7 @@ import {
   validateDebtRates,
   type Debt,
   monthlyPaymentCents,
+  promoCliff,
 } from '../debt'
 
 const TODAY = '2026-09-19'
@@ -451,5 +452,80 @@ describe('rejecting a debt that cannot describe a real debt', () => {
     ]) {
       expect(() => validateDebtInputs({ ...ok, minPaymentRule })).not.toThrow()
     }
+  })
+})
+
+describe('the one definition of a deal cliff', () => {
+  // The user's card: $5,775.42 at 0% until 31 Mar 2028, minimum 1% but never
+  // below $303, full rate 30.49%. Eighteen months of $303 is $5,454, so
+  // $321.42 would still be there when the deal ends.
+  const shield = debt({
+    id: 'shield',
+    name: 'Shield',
+    balanceCents: 577542,
+    aprBasisPoints: 3049,
+    minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 30300 },
+    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-03-31' }],
+  })
+
+  it('names what the payments leave at the full rate', () => {
+    expect(promoCliff(shield, '2026-09-21')).toEqual({
+      untilDate: '2028-03-31',
+      promoRateBasisPoints: 0,
+      amountCents: 577542,
+      monthsLeft: 18,
+      shortCents: 32142,
+    })
+  })
+
+  it('is on track once that much is paid, or once the household pays enough monthly', () => {
+    expect(promoCliff({ ...shield, balanceCents: 577542 - 32142 }, '2026-09-21')!.shortCents).toBe(0)
+    expect(promoCliff({ ...shield, plannedPaymentCents: 32100 }, '2026-09-21')!.shortCents).toBe(0)
+  })
+
+  it('is nothing without a live deal', () => {
+    expect(promoCliff({ ...shield, promoRules: [] }, '2026-09-21')).toBeNull()
+    expect(promoCliff(shield, '2028-04-01')).toBeNull()
+  })
+
+  it('is what the ranking, the shortfall step and the optimizer all agree on', () => {
+    // Not on track: the ranking prices it at the full rate now. On track: the deal rate.
+    expect(effectiveAprBasisPoints(shield, '2026-09-21')).toBe(3049)
+    expect(effectiveAprBasisPoints({ ...shield, balanceCents: 577542 - 32142 }, '2026-09-21')).toBe(0)
+  })
+})
+
+describe('projections run at the rate in force each month, never a blend', () => {
+  const shield = debt({
+    id: 'shield',
+    name: 'Shield',
+    balanceCents: 577542,
+    aprBasisPoints: 3049,
+    minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 30300 },
+    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-03-31' }],
+  })
+
+  it('charges nothing while the deal runs, and the full rate only on what survives it', () => {
+    // A blended 30.49% from today would bill thousands. In truth: $0 for
+    // eighteen months, then 30.49% on the $321.42 left, gone within two more.
+    expect(interestOverNextYearCents(shield, '2026-09-21')).toBe(0)
+    const projection = projectPayoff({ debt: shield, today: '2026-09-21' })
+    expect(projection.months).toBe(20)
+    expect(projection.payoffDate).toBe('2028-05-21')
+    expect(projection.totalInterestCents).toBeGreaterThan(0)
+    expect(projection.totalInterestCents).toBeLessThan(2000)
+  })
+
+  it('shows that covering the cliff is worth exactly the interest on the survivor', () => {
+    const before = projectPayoff({ debt: shield, today: '2026-09-21' })
+    const after = projectPayoff({ debt: { ...shield, balanceCents: 577542 - 32142 }, today: '2026-09-21' })
+    expect(after.totalInterestCents).toBe(0)
+    expect(after.months).toBe(18)
+    expect(before.totalInterestCents - after.totalInterestCents).toBe(before.totalInterestCents)
+  })
+
+  it('still bills a plain card its full rate from the first month', () => {
+    const plain = debt({ id: 'p', name: 'Plain', balanceCents: 500000, aprBasisPoints: 2499 })
+    expect(interestOverNextYearCents(plain, '2026-09-21')).toBeGreaterThan(80000)
   })
 })

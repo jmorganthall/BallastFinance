@@ -196,6 +196,46 @@ interface Tranche {
 }
 
 /**
+ * The one definition of a promotional cliff, used by the ranking, the
+ * share-out's shortfall step and the lump-sum optimizer alike, so they can
+ * never disagree about whether a deal is on track.
+ *
+ * `shortCents` is what the household's monthly payments (what they actually
+ * pay, else the minimum) will NOT have cleared of the deal-rate balance by
+ * the day the deal ends: the money that will meet the full rate. Zero means
+ * on track. Only the soonest live deal is considered; it is the one whose
+ * deadline is real.
+ */
+export interface PromoCliff {
+  untilDate: CivilDate
+  promoRateBasisPoints: number
+  /** The balance on the deal. */
+  amountCents: Cents
+  monthsLeft: number
+  /** What the payments leave at the full rate when the deal ends. 0 = on track. */
+  shortCents: Cents
+}
+
+export function promoCliff(debt: Debt, today: CivilDate): PromoCliff | null {
+  if (debt.state !== 'open' || debt.balanceCents <= 0) return null
+  const next = debt.promoRules
+    .filter((rule) => compareDates(rule.untilDate, today) > 0)
+    .sort((a, b) => compareDates(a.untilDate, b.untilDate))[0]
+  if (!next) return null
+  const amountCents =
+    next.appliesTo === 'full' ? debt.balanceCents : Math.min(next.amountCents ?? 0, debt.balanceCents)
+  if (amountCents <= 0) return null
+  const monthsLeft = monthsBetween(today, next.untilDate)
+  return {
+    untilDate: next.untilDate,
+    promoRateBasisPoints: next.rateBasisPoints,
+    amountCents,
+    monthsLeft,
+    shortCents: Math.max(0, amountCents - monthsLeft * monthlyPaymentCents(debt)),
+  }
+}
+
+/**
  * Split a balance into promo tranches plus whatever sits at the standard rate,
  * applying the promo logic of PRD §7 to each.
  *
@@ -405,63 +445,109 @@ export function projectPayoff(args: {
   leadWeeks?: number
 }): Projection {
   const { debt } = args
-  const extra = args.extraPerMonthCents ?? 0
   if (debt.balanceCents <= 0) {
     return { months: 0, payoffDate: args.today, totalInterestCents: 0 }
   }
+  const run = simulateMonths({ debt, today: args.today, extraPerMonthCents: args.extraPerMonthCents ?? 0 })
+  return {
+    months: run.paidOffAfterMonths,
+    payoffDate: run.paidOffAfterMonths === null ? null : addMonths(args.today, run.paidOffAfterMonths),
+    totalInterestCents: run.interestCents,
+  }
+}
 
-  const monthlyRate =
-    effectiveAprBasisPoints(debt, args.today, args.leadWeeks ?? DEFAULT_PROMO_LEAD_WEEKS) /
-    BASIS_POINTS /
-    12
+/**
+ * Month by month, at the rate actually in force each month.
+ *
+ * A deal-rate balance is charged its deal rate until the deal ends and the
+ * full rate after -- not a blended rate from today. The blend (the "effective
+ * APR") is the right thing to RANK by, because it is how urgent a cliff is;
+ * it is the wrong thing to PROJECT with, because it charges a 0% card 30%
+ * from day one and reports a year of interest that will never be billed.
+ * Everything that states a fact about a debt's future -- when it is paid
+ * off, what it will cost, what a payment today saves -- comes from here.
+ *
+ * Payments go to the deal-rate balance first, which is how a card issuer
+ * applies the minimum, and is exactly what makes a cliff a cliff.
+ */
+function simulateMonths(args: {
+  debt: Debt
+  today: CivilDate
+  extraPerMonthCents: Cents
+  /** Stop after this many months, still open. Absent: run to payoff or the cap. */
+  horizonMonths?: number
+}): { paidOffAfterMonths: number | null; interestCents: Cents } {
+  const { debt, extraPerMonthCents: extra } = args
+  const limit = args.horizonMonths ?? MAX_MONTHS
 
-  let balance = debt.balanceCents
+  // Each live deal as its own running balance, soonest deadline first, with
+  // whatever is not on a deal at the full rate.
+  const deals = debt.promoRules
+    .filter((rule) => compareDates(rule.untilDate, args.today) > 0)
+    .sort((a, b) => compareDates(a.untilDate, b.untilDate))
+  let standard = debt.balanceCents
+  const tranches: { balance: Cents; rateBasisPoints: number; untilDate: CivilDate }[] = []
+  for (const rule of deals) {
+    if (standard <= 0) break
+    const amount = rule.appliesTo === 'full' ? standard : Math.min(rule.amountCents ?? 0, standard)
+    if (amount <= 0) continue
+    tranches.push({ balance: amount, rateBasisPoints: rule.rateBasisPoints, untilDate: rule.untilDate })
+    standard -= amount
+  }
+
   let interest = 0
+  for (let month = 1; month <= limit; month += 1) {
+    // The month being charged runs from this date; a deal that has ended by
+    // then has rolled into the full-rate balance.
+    const monthStart = addMonths(args.today, month - 1)
+    for (let i = tranches.length - 1; i >= 0; i -= 1) {
+      if (compareDates(tranches[i]!.untilDate, monthStart) <= 0) {
+        standard += tranches[i]!.balance
+        tranches.splice(i, 1)
+      }
+    }
 
-  for (let month = 1; month <= MAX_MONTHS; month += 1) {
-    const charged = Math.round(balance * monthlyRate)
+    let charged = 0
+    for (const t of tranches) {
+      const c = Math.round((t.balance * t.rateBasisPoints) / BASIS_POINTS / 12)
+      t.balance += c
+      charged += c
+    }
+    const cs = Math.round((standard * debt.aprBasisPoints) / BASIS_POINTS / 12)
+    standard += cs
+    charged += cs
     interest += charged
-    balance += charged
 
-    const working: Debt = { ...debt, balanceCents: balance }
-    const payment = Math.min(balance, monthlyPaymentCents(working) + extra)
+    const total = standard + tranches.reduce((sum, t) => sum + t.balance, 0)
+    const payment = Math.min(total, monthlyPaymentCents({ ...debt, balanceCents: total }) + extra)
 
     // A payment that does not cover the interest never clears the balance.
     // Except at pocket change, where the last payment takes the lot: a debt
     // that got there shrank from real money, so it is paid off.
     if (payment <= charged && extra === 0) {
-      if (balance <= POCKET_CHANGE_CENTS) {
-        return { months: month, payoffDate: addMonths(args.today, month), totalInterestCents: interest }
-      }
-      return { months: null, payoffDate: null, totalInterestCents: interest }
+      if (total <= POCKET_CHANGE_CENTS) return { paidOffAfterMonths: month, interestCents: interest }
+      return { paidOffAfterMonths: null, interestCents: interest }
     }
 
-    balance -= payment
-    if (balance <= 0) {
-      return {
-        months: month,
-        payoffDate: addMonths(args.today, month),
-        totalInterestCents: interest,
-      }
+    // Deal balances first, then the full-rate balance.
+    let left = payment
+    for (const t of tranches) {
+      const take = Math.min(t.balance, left)
+      t.balance -= take
+      left -= take
+    }
+    standard -= Math.min(standard, left)
+
+    if (standard + tranches.reduce((sum, t) => sum + t.balance, 0) <= 0) {
+      return { paidOffAfterMonths: month, interestCents: interest }
     }
   }
 
-  return { months: null, payoffDate: null, totalInterestCents: interest }
+  return { paidOffAfterMonths: null, interestCents: interest }
 }
 
 /** Interest this debt will accrue over the next 12 months if left at minimums. */
-export function interestOverNextYearCents(debt: Debt, today: CivilDate, leadWeeks?: number): Cents {
+export function interestOverNextYearCents(debt: Debt, today: CivilDate, _leadWeeks?: number): Cents {
   if (debt.balanceCents <= 0) return 0
-  const monthlyRate =
-    effectiveAprBasisPoints(debt, today, leadWeeks ?? DEFAULT_PROMO_LEAD_WEEKS) / BASIS_POINTS / 12
-
-  let balance = debt.balanceCents
-  let interest = 0
-  for (let month = 0; month < 12 && balance > 0; month += 1) {
-    const charged = Math.round(balance * monthlyRate)
-    interest += charged
-    balance += charged
-    balance -= Math.min(balance, monthlyPaymentCents({ ...debt, balanceCents: balance }))
-  }
-  return interest
+  return simulateMonths({ debt, today, extraPerMonthCents: 0, horizonMonths: 12 }).interestCents
 }

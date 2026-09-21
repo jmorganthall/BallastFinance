@@ -3,6 +3,7 @@ import {
   accountViews,
   aheadOptions,
   assignExtraToPlans,
+  currentCycle,
   catchUpOptions,
   computeDrift,
   packageViews,
@@ -102,6 +103,22 @@ describe('the Disney package rolls up to a Capital One instruction (Phase A acce
         expect(item.weekly.transferPerWeekCents).toBe(item.weekly.totalPerWeekCents)
       }
     }
+  })
+
+  it('lets the later record win a same-day tie between two cycle starts', () => {
+    // Committed this morning with $18.37 already set aside; counted toward
+    // this afternoon at a check-in, to $45.00. The afternoon is the truth.
+    const cycles = [
+      { lineItemId: 'li-x', startDate: '2026-09-20', openingCents: 1837, recordedOrder: 3 },
+      { lineItemId: 'li-x', startDate: '2026-09-20', openingCents: 4500, recordedOrder: 7 },
+      { lineItemId: 'li-x', startDate: '2026-09-21', openingCents: 1, recordedOrder: 8 },
+      { lineItemId: 'li-y', startDate: '2026-09-20', openingCents: 999, recordedOrder: 9 },
+    ]
+    expect(currentCycle('li-x', cycles, '2026-09-20')!.openingCents).toBe(4500)
+    // And the order they are handed over in does not matter.
+    expect(currentCycle('li-x', [...cycles].reverse(), '2026-09-20')!.openingCents).toBe(4500)
+    // A later day still wins over any same-day ordering.
+    expect(currentCycle('li-x', cycles, '2026-09-21')!.openingCents).toBe(1)
   })
 
   it('gives each account its own weekly number', () => {

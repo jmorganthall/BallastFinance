@@ -10,6 +10,7 @@
  */
 
 import { requireEngine } from '@/server/session'
+import { debtTopUps } from '@/server/engine'
 import { Card, Money, PageHeader } from '@/components/ui'
 import { DebtShare } from '@/components/debt-share'
 import { runAllocationAction } from '@/server/actions'
@@ -64,9 +65,10 @@ export default async function AllocatePage({
   // in the same order the Debts screen shows, and it is the same call the
   // confirm button makes -- so what is previewed here is what gets issued.
   const debtShare = plan?.shares.find((share) => share.destination === 'debt')
+  // After the first step: a cliff the top-ups covered is a deal again here.
   const optimised =
-    debtShare && debtShare.amountCents > 0
-      ? await engine.optimiseLumpSum(debtShare.amountCents)
+    plan && debtShare && debtShare.amountCents > 0
+      ? await engine.optimiseLumpSum(debtShare.amountCents, undefined, { lessPaid: debtTopUps(plan) })
       : null
 
   return (

@@ -22,11 +22,13 @@
  * what to cover; the split takes the rest.
  */
 
-import { compareDates, monthsBetween, type CivilDate } from './dates'
+import type { CivilDate } from './dates'
 import { formatCents, type Cents } from './money'
 import type { Id } from './types'
 import { computeDrift, type AccountView } from './rollup'
-import { monthlyPaymentCents, type Debt } from './debt'
+import { promoCliff, type Debt } from './debt'
+
+const percent = (basisPoints: number) => (basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
 
 export interface Shortfall {
   kind: 'plan' | 'debt'
@@ -53,32 +55,15 @@ export function findShortfalls(args: {
 }): Shortfall[] {
   const debts: Shortfall[] = []
   for (const debt of args.debts) {
-    if (debt.state !== 'open' || debt.balanceCents <= 0) continue
-    const payment = monthlyPaymentCents(debt)
-    let unallocated = debt.balanceCents
-    const live = debt.promoRules
-      .filter((rule) => compareDates(rule.untilDate, args.today) > 0)
-      .sort((a, b) => compareDates(a.untilDate, b.untilDate))
-    for (const rule of live) {
-      if (unallocated <= 0) break
-      const amountCents =
-        rule.appliesTo === 'full' ? unallocated : Math.min(rule.amountCents ?? 0, unallocated)
-      if (amountCents <= 0) continue
-      unallocated -= amountCents
-      const monthsLeft = monthsBetween(args.today, rule.untilDate)
-      const covered = monthsLeft * payment
-      const short = amountCents - covered
-      if (short <= 0) continue
-      debts.push({
-        kind: 'debt',
-        targetId: debt.id,
-        label: debt.name,
-        shortCents: short,
-        reason: `Its ${(rule.rateBasisPoints / 100).toFixed(2).replace(/\.?0+$/, '')}% deal ends ${rule.untilDate}, and the monthly payments leave ${formatCents(short)} of the ${formatCents(amountCents)} still there at the full rate.`,
-      })
-      // One entry per debt: the soonest cliff is the one that matters.
-      break
-    }
+    const cliff = promoCliff(debt, args.today)
+    if (!cliff || cliff.shortCents <= 0) continue
+    debts.push({
+      kind: 'debt',
+      targetId: debt.id,
+      label: debt.name,
+      shortCents: cliff.shortCents,
+      reason: `Its ${percent(cliff.promoRateBasisPoints)}% deal ends ${cliff.untilDate}, and the monthly payments leave ${formatCents(cliff.shortCents)} of the ${formatCents(cliff.amountCents)} still there at the full rate.`,
+    })
   }
   debts.sort((a, b) => b.shortCents - a.shortCents)
 

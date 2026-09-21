@@ -309,3 +309,63 @@ describe('degenerate inputs produce sane answers, not crashes', () => {
     expect(result.why).toContain('left over')
   })
 })
+
+describe('a deal-rate card takes only what its payments would leave at the full rate', () => {
+  // The user's case: $5,775.42 at 0% until 31 Mar 2028, $303 a month, full
+  // rate 30.49%. $321.42 would survive the deal. Beyond that, every dollar
+  // put there saves nothing while a 20.49% card is open.
+  const shield = debt({
+    id: 'shield',
+    name: 'US Bank Shield 9795 (Balance Transfer)',
+    balanceCents: 577542,
+    aprBasisPoints: 3049,
+    minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 30300 },
+    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-03-31' }],
+  })
+  const altitude = debt({
+    id: 'altitude',
+    name: 'Altitude Reserve',
+    balanceCents: 719966,
+    aprBasisPoints: 2049,
+    minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 3000 },
+  })
+
+  it('covers the cliff, then moves on to the card that costs something', () => {
+    const result = optimiseLumpSum({ debts: [shield, altitude], amountCents: 201959, today: '2026-09-21' })
+    expect(result.allocations.map((a) => [a.debtName, a.amountCents])).toEqual([
+      ['US Bank Shield 9795 (Balance Transfer)', 32142],
+      ['Altitude Reserve', 201959 - 32142],
+    ])
+    expect(result.allocations[0]!.reason).toContain('0% deal ends 2028-03-31')
+    expect(result.allocations[0]!.reason).toContain('This covers it')
+    expect(result.allocations[1]!.reason).toContain('20.49%')
+    expect(result.unallocatedCents).toBe(0)
+    // What covering the cliff saves is the interest on the survivor, not a
+    // year of 30.49% on the whole card.
+    expect(result.allocations[0]!.lifetimeInterestAvoidedCents).toBeLessThan(2000)
+  })
+
+  it('sends nothing more to the card once the first step has covered its cliff', () => {
+    // The share-out's "cover what is short" already paid $321.42: the
+    // optimizer sees the balance after that, and the card is a deal again.
+    const covered = { ...shield, balanceCents: 577542 - 32142 }
+    const result = optimiseLumpSum({ debts: [covered, altitude], amountCents: 181429, today: '2026-09-21' })
+    expect(result.allocations.map((a) => a.debtName)).toEqual(['Altitude Reserve'])
+  })
+
+  it('leaves money over rather than paying early a deal it is on track to clear', () => {
+    const covered = { ...shield, balanceCents: 577542 - 32142 }
+    const result = optimiseLumpSum({ debts: [covered], amountCents: 181429, today: '2026-09-21' })
+    expect(result.allocations).toEqual([])
+    expect(result.unallocatedCents).toBe(181429)
+    expect(result.why).toContain('on track to clear')
+    expect(result.why).toContain('left over')
+  })
+
+  it('covers part of a cliff when that is all there is, and says so', () => {
+    const result = optimiseLumpSum({ debts: [shield, altitude], amountCents: 10000, today: '2026-09-21' })
+    expect(result.allocations).toHaveLength(1)
+    expect(result.allocations[0]!.amountCents).toBe(10000)
+    expect(result.allocations[0]!.reason).toContain('covers part of it')
+  })
+})
