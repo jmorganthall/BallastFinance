@@ -119,6 +119,36 @@ describe('outstanding instructions', () => {
     expect(instructionSentence(issued({ instructionId: 'c2', type: 'rate_cut', ...odd }))).toContain('$0.33 a week')
   })
 
+  it('says what a share-out move is for, and names the day for one held back', () => {
+    const share = { type: 'one_time_move' as const, purpose: 'share_out' as const, targetLabel: 'Fun money', amountCents: 50802 }
+    expect(instructionSentence(issued({ instructionId: 'h1', issuedOn: '2026-09-20', availableOn: '2026-09-20', ...share }))).toBe(
+      'Move $508.02 into Fun money, its share of what was spare.',
+    )
+    expect(instructionSentence(issued({ instructionId: 'h2', issuedOn: '2026-09-20', availableOn: '2026-10-04', ...share }))).toBe(
+      'On 2026-10-04, move $508.02 into Fun money.',
+    )
+    expect(
+      instructionSentence(issued({ instructionId: 'c', type: 'one_time_move', purpose: 'cover', amountCents: 30000 })),
+    ).toBe('Move $300.00 into Annual Expenses once, to cover what it is behind.')
+    expect(
+      instructionSentence(issued({ instructionId: 'l', type: 'one_time_move', purpose: 'left_over', amountCents: 12345 })),
+    ).toBe('Decide where $123.45 goes; it was the debt share with nowhere useful to go.')
+  })
+
+  it('holds a move back until its day, and only starts counting its age from then', () => {
+    const halves = [
+      issued({ instructionId: 'now', type: 'one_time_move', purpose: 'share_out', issuedOn: '2026-09-20', availableOn: '2026-09-20' }),
+      issued({ instructionId: 'later', type: 'one_time_move', purpose: 'share_out', issuedOn: '2026-09-20', availableOn: '2026-10-04' }),
+    ]
+    const onTheDay = outstandingInstructions({ issued: halves, confirmed: [], today: '2026-09-27' })
+    expect(onTheDay.map((i) => [i.instructionId, i.dueNow, i.ageInDays])).toEqual([
+      ['now', true, 7],
+      ['later', false, 0],
+    ])
+    const afterwards = outstandingInstructions({ issued: halves, confirmed: [], today: '2026-10-06' })
+    expect(afterwards.find((i) => i.instructionId === 'later')).toMatchObject({ dueNow: true, ageInDays: 2 })
+  })
+
   it('reads a move-out as what it is', () => {
     expect(
       instructionSentence(issued({ instructionId: 'o', type: 'one_time_move_out', amountCents: 492510 })),

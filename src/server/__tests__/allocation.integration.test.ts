@@ -9,7 +9,7 @@ import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
 import { Engine } from '@/server/engine'
-import { INTAKE_CONTRACT_VERSION } from '@/domain'
+import { INTAKE_CONTRACT_VERSION, instructionSentence } from '@/domain'
 
 const url = process.env.DATABASE_URL
 const describeDb = url ? describe : describe.skip
@@ -83,7 +83,15 @@ describeDb('allocation runs', () => {
     )
     expect(halves).toHaveLength(2)
     expect(halves.reduce((s, h) => s + h.amountCents, 0)).toBe(53750)
-    expect(halves.map((h) => h.endsOn).sort()).toEqual(['2026-09-19', '2026-10-03'])
+    expect(halves.map((h) => h.availableOn).sort()).toEqual(['2026-09-19', '2026-10-03'])
+    // The first is for now; the second is held back, says its day, and is
+    // not counted as waiting until that day comes.
+    const [first, second] = [...halves].sort((a, b) => a.availableOn!.localeCompare(b.availableOn!))
+    expect(first).toMatchObject({ dueNow: true, purpose: 'share_out' })
+    expect(second).toMatchObject({ dueNow: false, ageInDays: 0 })
+    expect(instructionSentence(first!)).toBe('Move $268.75 into Fun money, its share of what was spare.')
+    expect(instructionSentence(second!)).toBe('On 2026-10-03, move $268.75 into Fun money.')
+    expect(second!.note).toContain('held back')
   })
 
   it('records the run as one event with the whole split', async () => {

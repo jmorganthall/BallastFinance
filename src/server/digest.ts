@@ -84,10 +84,18 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
     }
   }
 
-  if (outstanding.length > 0) {
+  const dueNow = outstanding.filter((i) => i.dueNow)
+  const comingUp = outstanding.filter((i) => !i.dueNow)
+  if (dueNow.length > 0) {
     lines.push('', '## Still to do', '')
-    for (const instruction of outstanding) {
-      lines.push(`- ${instructionSentence(instruction)}`)
+    for (const instruction of dueNow) {
+      lines.push(`- ${instructionSentence(instruction)}${instruction.note ? ` (${instruction.note})` : ''}`)
+    }
+  }
+  if (comingUp.length > 0) {
+    lines.push('', '## Coming up', '')
+    for (const instruction of comingUp) {
+      lines.push(`- ${instructionSentence(instruction)}${instruction.note ? ` (${instruction.note})` : ''}`)
     }
   }
 

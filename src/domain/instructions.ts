@@ -28,6 +28,14 @@ export type InstructionType =
   | 'debt_payment'
   | 'spend_confirmation'
 
+/**
+ * Why a one-time move was asked for. The same move reads differently: money
+ * to catch an account up, an account's share of what was spare, covering
+ * what a plan is behind, or a share that had nowhere useful to go. Absent
+ * means a catch-up, which is what every move was before purposes existed.
+ */
+export type InstructionPurpose = 'catch_up' | 'share_out' | 'cover' | 'left_over'
+
 export interface IssuedInstruction {
   instructionId: Id
   type: InstructionType
@@ -38,6 +46,14 @@ export interface IssuedInstruction {
   targetLabel: string
   /** Optional human sentence, stored with the instruction so it reads the same later. */
   note?: string
+  purpose?: InstructionPurpose
+  /**
+   * Not before this day. The second half of the fun money is released later
+   * so it is not spent all at once; it carries the day it becomes available,
+   * the to-do list holds it under "coming up" until then, and its sentence
+   * names the day. Absent means now.
+   */
+  availableOn?: CivilDate
   /**
    * When a rate bump stops. A real field rather than something encoded into the
    * note, because the accrual math reads it: the change ladder says reach for a
@@ -54,7 +70,10 @@ export interface ConfirmedInstruction {
 }
 
 export interface OutstandingInstruction extends IssuedInstruction {
+  /** Days it has been waiting -- counted from the day it became available, not the day it was asked. */
   ageInDays: number
+  /** False while its available-from day is still ahead. */
+  dueNow: boolean
 }
 
 /** The open asks: issued, not yet confirmed, oldest first. */
@@ -85,11 +104,19 @@ export function outstandingInstructions(args: {
       const key = `${instruction.type}:${instruction.targetId}`
       return latestByTarget.get(key)?.instructionId === instruction.instructionId
     })
-    .map((instruction) => ({
-      ...instruction,
-      ageInDays: daysBetween(instruction.issuedOn, args.today),
-    }))
-    .sort((a, b) => b.ageInDays - a.ageInDays)
+    .map((instruction) => {
+      const from =
+        instruction.availableOn && compareDates(instruction.availableOn, instruction.issuedOn) > 0
+          ? instruction.availableOn
+          : instruction.issuedOn
+      return {
+        ...instruction,
+        ageInDays: daysBetween(from, args.today),
+        dueNow: compareDates(from, args.today) <= 0,
+      }
+    })
+    // Oldest ask first; anything not yet available sits at the end.
+    .sort((a, b) => Number(b.dueNow) - Number(a.dueNow) || b.ageInDays - a.ageInDays)
 }
 
 function daysBetween(from: CivilDate, to: CivilDate): number {
@@ -114,8 +141,24 @@ export function instructionSentence(instruction: IssuedInstruction): string {
   switch (instruction.type) {
     case 'set_weekly_transfer':
       return `In Capital One 360, set the recurring transfer into ${instruction.targetLabel} to ${formatCents(instruction.amountCents)} per week.`
-    case 'one_time_move':
-      return `Move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel} once, to catch up.`
+    case 'one_time_move': {
+      const later =
+        instruction.availableOn && compareDates(instruction.availableOn, instruction.issuedOn) > 0
+          ? instruction.availableOn
+          : null
+      switch (instruction.purpose ?? 'catch_up') {
+        case 'share_out':
+          return later
+            ? `On ${later}, move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel}.`
+            : `Move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel}, its share of what was spare.`
+        case 'cover':
+          return `Move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel} once, to cover what it is behind.`
+        case 'left_over':
+          return `Decide where ${formatCents(instruction.amountCents)} goes; it was the debt share with nowhere useful to go.`
+        case 'catch_up':
+          return `Move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel} once, to catch up.`
+      }
+    }
     case 'one_time_move_out':
       return `Move ${formatCents(instruction.amountCents)} out of ${instruction.targetLabel} once; it holds more than the plan needs.`
     case 'rate_bump':
