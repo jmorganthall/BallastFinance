@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Empty, Money, PageHeader, Pill } from '@/components/ui'
+import { nextDue, type DueUrgency } from '@/domain/next-due'
+import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import { ProgressBar } from '@/components/progress-bar'
 
 export const dynamic = 'force-dynamic'
@@ -11,9 +12,16 @@ const STATE_COPY = {
   retired: { tone: 'neutral' as const, label: 'Done' },
 }
 
+/** The nearer the next thing out, the heavier it reads: under 30 days bold, 30 to 60 medium, beyond plain. */
+const URGENCY_WEIGHT: Record<DueUrgency, string> = {
+  soon: 'font-semibold text-[var(--color-ink)]',
+  near: 'font-medium text-[var(--color-ink)]',
+  far: '',
+}
+
 export default async function PackagesPage() {
   const { engine } = await requireEngine()
-  const views = await engine.packageViews()
+  const [views, today] = await Promise.all([engine.packageViews(), Promise.resolve(engine.today())])
 
   return (
     <>
@@ -34,6 +42,13 @@ export default async function PackagesPage() {
         <ul className="space-y-3">
           {views.map((view) => {
             const copy = STATE_COPY[view.package.state]
+            const next =
+              view.package.state === 'retired'
+                ? null
+                : nextDue(
+                    view.items.map((item) => item.lineItem),
+                    today,
+                  )
             return (
               <li key={view.package.id}>
                 <Link href={`/packages/${view.package.id}`}>
@@ -53,6 +68,15 @@ export default async function PackagesPage() {
                         </>
                       ) : null}
                     </p>
+                    {next ? (
+                      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                        Next out: {next.label},{' '}
+                        <span className={URGENCY_WEIGHT[next.urgency]}>
+                          {next.daysAway < 0 ? 'was due' : 'due'} {next.distance}
+                        </span>{' '}
+                        ({humanDate(next.dueDate)})
+                      </p>
+                    ) : null}
                     {view.package.state === 'active' ? (
                       <ProgressBar
                         className="mt-3"
