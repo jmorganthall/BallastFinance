@@ -9,7 +9,7 @@
 
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Empty, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import { WeeklyNumber } from '@/components/weekly-number'
 import { formatCents, instructionSentence, respreadEquivalentPerWeekCents } from '@/domain'
 import { confirmInstructionAction, confirmSpendAction } from '@/server/actions'
@@ -24,6 +24,11 @@ export default async function ThisWeekPage() {
     engine.closeOutPrompts(),
   ])
   const today = engine.today()
+
+  // What can be done today, and what is held back until a later day (the
+  // second half of the fun money). Different lists, so "now" is never in doubt.
+  const dueNow = outstanding.filter((i) => i.dueNow)
+  const comingUp = outstanding.filter((i) => !i.dueNow)
 
   const withWork = accounts.filter((a) => a.weekly.transferPerWeekCents !== 0)
   const grandTotal = withWork.reduce((s, a) => s + a.weekly.transferPerWeekCents, 0)
@@ -92,16 +97,19 @@ export default async function ThisWeekPage() {
         </section>
       ) : null}
 
-      {outstanding.length > 0 ? (
+      {dueNow.length > 0 ? (
         <section className="mb-5">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             To do
           </h2>
           <ul className="space-y-3">
-            {outstanding.map((instruction) => (
+            {dueNow.map((instruction) => (
               <li key={instruction.instructionId}>
                 <Card>
                   <p className="text-sm">{instructionSentence(instruction)}</p>
+                  {instruction.note ? (
+                    <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
+                  ) : null}
                   <form action={confirmInstructionAction} className="mt-3">
                     <input
                       type="hidden"
@@ -120,6 +128,42 @@ export default async function ThisWeekPage() {
                       Asked {instruction.ageInDays} days ago.
                     </p>
                   ) : null}
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {comingUp.length > 0 ? (
+        <section className="mb-5">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            Coming up
+          </h2>
+          <ul className="space-y-3">
+            {comingUp.map((instruction) => (
+              <li key={instruction.instructionId}>
+                <Card className="border-dashed">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm">{instructionSentence(instruction)}</p>
+                    <Pill tone="neutral">From {humanDate(instruction.availableOn!)}</Pill>
+                  </div>
+                  {instruction.note ? (
+                    <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
+                  ) : null}
+                  <form action={confirmInstructionAction} className="mt-3">
+                    <input
+                      type="hidden"
+                      name="instruction_id"
+                      value={instruction.instructionId}
+                    />
+                    <button
+                      type="submit"
+                      className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium text-[var(--color-ink-soft)]"
+                    >
+                      Done early
+                    </button>
+                  </form>
                 </Card>
               </li>
             ))}

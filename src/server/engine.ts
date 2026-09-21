@@ -70,6 +70,7 @@ import {
   type CloseOutPrompt,
   type ConfirmedInstruction,
   type DriftAdjustment,
+  type InstructionPurpose,
   type InstructionType,
   type IssuedInstruction,
   type OutstandingInstruction,
@@ -975,6 +976,8 @@ export class Engine {
     targetLabel: string
     note?: string
     endsOn?: CivilDate
+    purpose?: InstructionPurpose
+    availableOn?: CivilDate
   }): Promise<Id> {
     const instructionId = randomUUID()
     await this.db.insert(events).values({
@@ -990,6 +993,8 @@ export class Engine {
         target_label: input.targetLabel,
         note: input.note ?? null,
         ends_on: input.endsOn ?? null,
+        purpose: input.purpose ?? null,
+        available_on: input.availableOn ?? null,
       },
     })
     return instructionId
@@ -1027,6 +1032,8 @@ export class Engine {
         target_label: string
         note: string | null
         ends_on: CivilDate | null
+        purpose?: InstructionPurpose | null
+        available_on?: CivilDate | null
       }
       return {
         instructionId: p.instruction_id,
@@ -1037,6 +1044,8 @@ export class Engine {
         targetLabel: p.target_label,
         note: p.note ?? undefined,
         endsOn: p.ends_on ?? undefined,
+        purpose: p.purpose ?? undefined,
+        availableOn: p.available_on ?? undefined,
       }
     })
   }
@@ -1176,6 +1185,7 @@ export class Engine {
                 amountCents: topUp.amountCents,
                 targetId: topUp.targetId,
                 targetLabel: topUp.label,
+                purpose: 'cover' as const,
                 note:
                   topUp.amountCents < topUp.shortCents
                     ? `Covers part of the ${formatCents(topUp.shortCents)} it is behind.`
@@ -1208,11 +1218,12 @@ export class Engine {
               amountCents: release.amountCents,
               targetId: 'lifestyle',
               targetLabel: share.label,
-              endsOn: release.releaseOn,
+              purpose: 'share_out',
+              availableOn: release.releaseOn,
               note:
                 release.releaseOn === today
-                  ? 'First half, available now.'
-                  : `Second half, from ${release.releaseOn}.`,
+                  ? 'The first half of the fun money, available now.'
+                  : 'The second half of the fun money, held back so it is not all spent at once.',
             }),
           )
         }
@@ -1264,7 +1275,8 @@ export class Engine {
               amountCents: optimised.unallocatedCents,
               targetId: 'debt',
               targetLabel: share.label,
-              note: `${optimised.why} Decide where this goes.`,
+              purpose: 'left_over',
+              note: optimised.why,
             }),
           )
         }
@@ -1281,6 +1293,7 @@ export class Engine {
           amountCents: share.amountCents,
           targetId: account?.id ?? share.destination,
           targetLabel: account?.name ?? share.label,
+          purpose: 'share_out',
         }),
       )
     }
