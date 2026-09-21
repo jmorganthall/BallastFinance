@@ -15,10 +15,12 @@ import {
   driftAdjustmentComponent,
   shouldHaveSaved,
   shouldHaveSavedForItem,
+  evenPaceCents,
   weeklyBreakdown,
   type RateComponent,
   type WeeklyBreakdown,
 } from './accrual'
+import { previousOccurrence } from './recurrence'
 import { compareDates, type CivilDate } from './dates'
 import type { Cents } from './money'
 import {
@@ -80,6 +82,16 @@ export interface LineItemView {
   totalCents: Cents
   shouldHaveSavedCents: Cents
   remainingCents: Cents
+  /**
+   * The pace: where the money would be today had it been saved evenly since
+   * the part last came round (or since it was confirmed spent and started
+   * over, if that was later), or since the plan started for a one-off. Set
+   * aside at or above this is on track; below it is behind that pace, which
+   * is why the weekly figure runs above the steady one.
+   */
+  paceCents: Cents
+  /** When that even save would have started. */
+  paceSince: CivilDate
   weekly: WeeklyBreakdown
   /** Past its due date and not yet confirmed spent -- it keeps nagging (PRD §5). */
   isOverdue: boolean
@@ -90,6 +102,8 @@ export interface PackageView {
   items: LineItemView[]
   totalCents: Cents
   shouldHaveSavedCents: Cents
+  /** The parts' paces added up: where the plan's money would be by today, saved evenly. */
+  paceCents: Cents
   weekly: WeeklyBreakdown
 }
 
@@ -113,6 +127,41 @@ function effectiveCommitDate(pkg: Package, today: CivilDate): CivilDate {
   return pkg.committedAt ?? today
 }
 
+/**
+ * When a part's pace clock started. A part that repeats is measured from
+ * the last time it came round -- the whole point of "should have been saving
+ * since" -- or from the day it was actually confirmed spent and started over,
+ * when that came later, so a spend confirmed a few days late does not read
+ * as a cycle behind. A one-off is measured from the day it existed in a live
+ * plan: the commit, or the day it was added to one. A check-in count only
+ * restates what was already there and never moves the clock.
+ */
+function paceWindowStart(args: {
+  lineItem: LineItem
+  pkg: Package
+  cycles: readonly LineItemCycle[]
+  today: CivilDate
+}): CivilDate {
+  const mine = args.cycles.filter(
+    (c) => c.lineItemId === args.lineItem.id && compareDates(c.startDate, args.today) <= 0,
+  )
+  const last = previousOccurrence(args.lineItem.dueDate, args.lineItem.recurrence)
+  if (last) {
+    const rolled = mine
+      .filter((c) => c.origin === 'rolled')
+      .map((c) => c.startDate)
+      .sort()
+      .at(-1)
+    return rolled && compareDates(rolled, last) > 0 ? rolled : last
+  }
+  const commit = effectiveCommitDate(args.pkg, args.today)
+  const added = mine
+    .filter((c) => c.origin === 'added')
+    .map((c) => c.startDate)
+    .sort()[0]
+  return added && compareDates(added, commit) > 0 ? added : commit
+}
+
 function viewLineItem(args: {
   lineItem: LineItem
   pkg: Package
@@ -131,6 +180,8 @@ function viewLineItem(args: {
   })
   const totalCents = lineItemTotalCents(lineItem)
   const shouldHaveSavedCents = shouldHaveSavedForItem(components, today, totalCents)
+  const paceSince = paceWindowStart({ lineItem, pkg, cycles: args.cycles, today })
+  const paceCents = evenPaceCents({ totalCents, fromDate: paceSince, dueDate: lineItem.dueDate, today })
 
   return {
     lineItem,
@@ -138,6 +189,8 @@ function viewLineItem(args: {
     totalCents,
     shouldHaveSavedCents,
     remainingCents: Math.max(0, totalCents - shouldHaveSavedCents),
+    paceCents,
+    paceSince,
     weekly: weeklyBreakdown(components, today),
     isOverdue: compareDates(today, lineItem.dueDate) > 0 && lineItem.state !== 'retired',
   }
@@ -166,6 +219,7 @@ export function packageViews(input: DerivationInput): PackageView[] {
       items,
       totalCents: live.reduce((s, v) => s + v.totalCents, 0),
       shouldHaveSavedCents: live.reduce((s, v) => s + v.shouldHaveSavedCents, 0),
+      paceCents: live.reduce((s, v) => s + v.paceCents, 0),
       weekly: weeklyBreakdown(components, today),
     }
   })
@@ -458,6 +512,42 @@ function addWeeks(d: CivilDate, weeks: number): CivilDate {
 
 export function totalShouldHaveSaved(views: readonly AccountView[]): Cents {
   return views.reduce((s, v) => s + v.shouldHaveSavedCents, 0)
+}
+
+export type ProgressStatus = 'funded' | 'on_track' | 'behind'
+
+export interface Progress {
+  status: ProgressStatus
+  /** How full the bar is: set aside as a whole-number share of the total. */
+  fillPercent: number
+  /** Where the pace tick sits, likewise. */
+  pacePercent: number
+  /** How far short of the pace, when behind; else zero. */
+  behindByCents: Cents
+}
+
+/**
+ * The progress bar's one reading (PRD §9): set aside against the pace and
+ * the total. Fully funded when nothing more is to be set aside; on track at
+ * or above the pace; behind below it. The screen draws what this says and
+ * works nothing out for itself.
+ */
+export function progressOf(v: {
+  totalCents: Cents
+  shouldHaveSavedCents: Cents
+  paceCents: Cents
+}): Progress {
+  const total = Math.max(0, v.totalCents)
+  const held = Math.max(0, Math.min(v.shouldHaveSavedCents, total))
+  const pace = Math.max(0, Math.min(v.paceCents, total))
+  const percent = (cents: Cents) => (total === 0 ? 100 : Math.round((cents / total) * 100))
+  const status: ProgressStatus = held >= total ? 'funded' : held >= pace ? 'on_track' : 'behind'
+  return {
+    status,
+    fillPercent: percent(held),
+    pacePercent: percent(pace),
+    behindByCents: status === 'behind' ? pace - held : 0,
+  }
 }
 
 export { shouldHaveSaved }

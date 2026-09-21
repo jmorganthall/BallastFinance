@@ -7,6 +7,7 @@ import {
   catchUpOptions,
   computeDrift,
   packageViews,
+  progressOf,
   whatIfCommit,
   type DerivationInput,
 } from '../rollup'
@@ -535,5 +536,97 @@ describe('ahead of the plan', () => {
     expect(after.weekly.ongoingPerWeekCents).toBe(before.weekly.ongoingPerWeekCents)
     // A cut changes what goes in each week, not what the plan says should be there.
     expect(after.shouldHaveSavedCents).toBe(before.shouldHaveSavedCents)
+  })
+})
+
+describe('progress against the pace', () => {
+  const view = (cents: { total: number; held: number; pace: number }) =>
+    progressOf({ totalCents: cents.total, shouldHaveSavedCents: cents.held, paceCents: cents.pace })
+
+  it('is fully funded when nothing more is to be set aside, with no tick', () => {
+    expect(view({ total: 84400, held: 84400, pace: 34386 })).toEqual({
+      status: 'funded',
+      fillPercent: 100,
+      pacePercent: 41,
+      behindByCents: 0,
+    })
+  })
+
+  it('is on track at or above the pace, behind below it', () => {
+    expect(view({ total: 33000, held: 17100, pace: 17100 }).status).toBe('on_track')
+    expect(view({ total: 33000, held: 0, pace: 17100 })).toEqual({
+      status: 'behind',
+      fillPercent: 0,
+      pacePercent: 52,
+      behindByCents: 17100,
+    })
+  })
+
+  it('measures a repeating part from the last time it came round', () => {
+    // Progressive, every 6 months, next 9 Jan: last came round 9 July. Saved
+    // evenly since, 11 of 27 Saturdays would be in: ceil(84400 × 11 / 27).
+    const views = accountViews({
+      today: TODAY,
+      accounts: [annual],
+      packages: [pkg()],
+      lineItems: [
+        li({
+          id: 'li-progressive',
+          label: 'Progressive',
+          unitAmountCents: 84400,
+          dueDate: '2027-01-09',
+          recurrence: { every: 6, unit: 'month' },
+        }),
+      ],
+    })
+    const item = views[0]!.items[0]!
+    expect(item.paceSince).toBe('2026-07-09')
+    expect(item.paceCents).toBe(34386)
+    expect(item.shouldHaveSavedCents).toBe(0)
+    expect(progressOf(item).status).toBe('behind')
+  })
+
+  it('measures a one-off from the day it existed in a live plan, and a count never moves that', () => {
+    const items = [li({ id: 'li-a', label: 'A' }), li({ id: 'li-b', label: 'B' })]
+    const views = accountViews({
+      today: '2026-10-03',
+      accounts: [annual],
+      packages: [pkg()],
+      lineItems: items,
+      cycleStarts: [
+        // B was added to the live plan a week after commit; A was counted toward at a check-in.
+        { lineItemId: 'li-b', startDate: '2026-09-26', openingCents: 0, recordedOrder: 0, origin: 'added' },
+        { lineItemId: 'li-a', startDate: '2026-10-03', openingCents: 20000, recordedOrder: 1, origin: 'counted' },
+      ],
+    })
+    const [a, b] = views[0]!.items
+    expect(a!.paceSince).toBe(TODAY)
+    expect(b!.paceSince).toBe('2026-09-26')
+    expect(progressOf(a!).status).toBe('on_track')
+    expect(progressOf(b!).status).toBe('on_track')
+  })
+
+  it('measures a repeating part from the day it was confirmed spent, when that came after it was due', () => {
+    // Due 9 Jan, every 6 months; the July one was confirmed spent on the 15th.
+    const views = accountViews({
+      today: TODAY,
+      accounts: [annual],
+      packages: [pkg({ committedAt: '2026-01-10' })],
+      lineItems: [
+        li({
+          id: 'li-p',
+          label: 'Progressive',
+          unitAmountCents: 84400,
+          dueDate: '2027-01-09',
+          recurrence: { every: 6, unit: 'month' },
+        }),
+      ],
+      cycleStarts: [{ lineItemId: 'li-p', startDate: '2026-07-15', openingCents: 0, recordedOrder: 0, origin: 'rolled' }],
+    })
+    const item = views[0]!.items[0]!
+    expect(item.paceSince).toBe('2026-07-15')
+    // Saving started the day it was confirmed, so it is exactly on its pace.
+    expect(item.paceCents).toBe(item.shouldHaveSavedCents)
+    expect(progressOf(item).status).toBe('on_track')
   })
 })

@@ -18,7 +18,7 @@
 
 import { assertCivilDate, compareDates, type CivilDate } from './dates'
 import type { DebtCategory, MinPaymentRule } from './debt'
-import { parseAmountOrNull, parsePercentOrNull, type Cents } from './money'
+import { formatCents, parseAmountOrNull, parsePercentOrNull, type Cents } from './money'
 import { recurrenceOf, rollToFuture, type Recurrence, type RecurrenceUnit } from './recurrence'
 
 export interface ImportedExpense {
@@ -354,7 +354,11 @@ export function parseSheet(
             continue
           }
           dueDate = rollToFuture(dueDate, recurrence, context.today)
-          notes.push(`Next Due ${due} has passed; the next one, ${dueDate}, is what gets planned.`)
+          notes.push(
+            `Next Due ${due} has passed; the next one, ${dueDate}, is what gets planned${
+              opening > 0 ? `, and the ${formatCents(Math.min(opening, amountCents))} reserved now counts toward it` : ''
+            }.`,
+          )
         }
         if (opening > amountCents) notes.push('Reserved Now is more than the amount; only the amount is counted, the rest stays in the account.')
         if (!existing.has(account.toLowerCase()) && !accountsToCreate.some((a) => a.toLowerCase() === account.toLowerCase())) {

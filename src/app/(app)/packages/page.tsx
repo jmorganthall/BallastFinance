@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, Money, PageHeader, Pill } from '@/components/ui'
+import { ProgressBar } from '@/components/progress-bar'
 
 export const dynamic = 'force-dynamic'
 
@@ -52,6 +53,14 @@ export default async function PackagesPage() {
                         </>
                       ) : null}
                     </p>
+                    {view.package.state === 'active' ? (
+                      <ProgressBar
+                        className="mt-3"
+                        totalCents={view.totalCents}
+                        setAsideCents={view.shouldHaveSavedCents}
+                        paceCents={view.paceCents}
+                      />
+                    ) : null}
                   </Card>
                 </Link>
               </li>

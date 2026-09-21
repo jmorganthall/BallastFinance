@@ -387,6 +387,38 @@ function advanceWeeks(from: CivilDate, weeks: number): CivilDate {
 }
 
 /**
+ * Where the money would be today had it been saved evenly over a window,
+ * from `fromDate` to the due date: the pace. Priced with the same base
+ * component a committed item gets, so "should be here by now" and "is here"
+ * are one arithmetic. Nothing before the window opens; all of it once the
+ * due date is here; never more than the total.
+ *
+ * This is the one definition of the pace (PRD §6). The opening suggested
+ * for a recurring part, the progress bar's tick, and the reshuffle's first
+ * pass all read it; none re-derives it.
+ */
+export function evenPaceCents(args: {
+  totalCents: Cents
+  fromDate: CivilDate
+  dueDate: CivilDate
+  today: CivilDate
+}): Cents {
+  if (args.totalCents <= 0) return 0
+  if (compareDates(args.dueDate, args.today) <= 0) return args.totalCents
+  if (compareDates(args.fromDate, args.today) >= 0) return 0
+  const component: RateComponent = {
+    kind: 'base',
+    lineItemId: null,
+    reserveAccountId: '',
+    startDate: args.fromDate,
+    endDate: args.dueDate,
+    amountCents: args.totalCents,
+    weeks: accrualWeeksBetween(args.fromDate, args.dueDate),
+  }
+  return Math.max(0, Math.min(componentDeliveredBy(component, args.today), args.totalCents))
+}
+
+/**
  * What a recurring item would already have set aside, had the household been
  * saving for it since the last time it came round.
  *
@@ -412,16 +444,11 @@ export function openingSinceLastOccurrence(args: {
   if (compareDates(last, args.today) >= 0) return null
   if (args.totalCents <= 0) return null
 
-  // The same base component a committed item gets, priced over the whole cycle.
-  const component: RateComponent = {
-    kind: 'base',
-    lineItemId: null,
-    reserveAccountId: '',
-    startDate: last,
-    endDate: args.dueDate,
-    amountCents: args.totalCents,
-    weeks: accrualWeeksBetween(last, args.dueDate),
-  }
-  const cents = Math.max(0, Math.min(componentDeliveredBy(component, args.today), args.totalCents))
+  const cents = evenPaceCents({
+    totalCents: args.totalCents,
+    fromDate: last,
+    dueDate: args.dueDate,
+    today: args.today,
+  })
   return cents > 0 ? { lastOccurrence: last, cents } : null
 }
