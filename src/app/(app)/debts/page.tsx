@@ -75,6 +75,7 @@ export default async function DebtsPage({
       ageDays: freshness.ageDays,
       stale: freshness.stale,
       effectiveRate: rate(rung.effectiveAprBasisPoints),
+      effectiveAprBasisPoints: rung.effectiveAprBasisPoints,
       listedRate:
         rung.effectiveAprBasisPoints !== rung.debt.aprBasisPoints ? rate(rung.debt.aprBasisPoints) : null,
       minimumCents: rung.minimumPaymentCents,
