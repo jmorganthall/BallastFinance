@@ -19,6 +19,7 @@ import { ProgressBar } from '@/components/progress-bar'
 import {
   addLineItemAction,
   commitPackageAction,
+  deletePackageAction,
   renamePackageAction,
   retireLineItemAction,
   retirePackageAction,
@@ -26,6 +27,7 @@ import {
 } from '@/server/actions'
 import { describeRecurrence, formatCents } from '@/domain'
 import { RecurrenceFields } from '@/components/recurrence-fields'
+import { DeletePlan } from './delete-plan'
 
 export const dynamic = 'force-dynamic'
 
@@ -449,7 +451,16 @@ export default async function PackageDetailPage({
         </p>
       ) : null}
 
-      {!isDone ? (
+      {isDone ? (
+        <>
+          <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            The plan itself
+          </h2>
+          <Card>
+            <DeletePlan packageId={view.package.id} name={view.package.name} action={deletePackageAction} />
+          </Card>
+        </>
+      ) : (
         <>
           <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             The plan itself
@@ -496,7 +507,7 @@ export default async function PackageDetailPage({
             </div>
           </Card>
         </>
-      ) : null}
+      )}
 
       <p className="mt-6 text-center text-sm">
         <Link href="/packages" className="text-[var(--color-accent)] underline">

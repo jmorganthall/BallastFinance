@@ -175,6 +175,42 @@ describeDb('editing plans and debts', () => {
       expect((await engine.listLineItems()).filter((i) => i.packageId === packageId).every((i) => i.state === 'retired')).toBe(true)
       expect(await eventsOfKind('package_retired')).toHaveLength(2)
     })
+
+    it('deletes a finished plan for good, only with its name typed back, and keeps its history', async () => {
+      const created = await engine.createPackageFromIntake({
+        contract_version: INTAKE_CONTRACT_VERSION,
+        package: { name: 'Santa Visit' },
+        line_items: [{ label: 'Photos', unit_amount: '45', due_date: '2028-12-19', reserve_account: accountId }],
+      })
+      if (!created.ok) throw new Error(JSON.stringify(created.problems))
+      await engine.commitPackage(created.packageId, { openingCents: 0 })
+      const commitsBefore = (await eventsOfKind('package_committed')).length
+
+      // A live plan cannot be deleted, whatever is typed.
+      await expect(engine.deletePackage(created.packageId, 'Santa Visit')).rejects.toThrow(/finished/)
+      await engine.retirePackage(created.packageId)
+
+      // The name has to match exactly; nothing changes when it does not.
+      await expect(engine.deletePackage(created.packageId, 'santa visit')).rejects.toThrow(/does not match/)
+      await expect(engine.deletePackage(created.packageId, '')).rejects.toThrow(/does not match/)
+      expect((await engine.listPackages()).some((p) => p.id === created.packageId)).toBe(true)
+
+      await engine.deletePackage(created.packageId, '  Santa Visit ')
+      expect((await engine.listPackages()).some((p) => p.id === created.packageId)).toBe(false)
+      expect((await engine.listLineItems()).some((i) => i.packageId === created.packageId)).toBe(false)
+
+      // The log keeps what the plan was, and everything recorded before it.
+      const [deleted] = await eventsOfKind('package_deleted')
+      expect(deleted!.payload).toMatchObject({
+        package_id: created.packageId,
+        name: 'Santa Visit',
+        line_items: [{ label: 'Photos', unit_amount_cents: 4500, due_date: '2028-12-19' }],
+      })
+      expect(await eventsOfKind('package_committed')).toHaveLength(commitsBefore)
+
+      // Deleting it again is refused rather than silently succeeding.
+      await expect(engine.deletePackage(created.packageId, 'Santa Visit')).rejects.toThrow(/No such package/)
+    })
   })
 
   describe('counting an overage toward the plans', () => {

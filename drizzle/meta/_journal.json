@@ -57,6 +57,13 @@
       "when": 1789939598104,
       "tag": "0007_debt_planned_payment",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790034859817,
+      "tag": "0008_package_deleted_event",
+      "breakpoints": true
     }
   ]
 }
