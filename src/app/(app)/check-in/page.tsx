@@ -142,12 +142,13 @@ export default async function CheckInPage({
               const options = behind
                 ? catchUpOptions({ shortfallCents: shortfall, today, overWeeks: CATCH_UP_WEEKS })
                 : []
-              // Ahead: first count the extra toward this account's plans, soonest
-              // due first. What those cannot absorb is a real surplus, which can be
-              // shared out, or the weekly set-aside can ease off.
+              // Ahead: first count the extra toward this account's plans by the
+              // one rule (every part to its pace, the rest onto the one-offs, never
+              // above pace on a repeating part). What they should not count is a
+              // real surplus: share it out, ease off by a date, or keep it.
               const counted = ahead
                 ? assignExtraToPlans({ extraCents: shortfall, items: view.items })
-                : { assignments: [], leftoverCents: 0, stillShort: [], alreadyFundedCount: 0 }
+                : { assignments: [], leftoverCents: 0, stillShort: [], nothingToAddCount: 0 }
               const easeOff = ahead
                 ? aheadOptions({
                     extraCents: shortfall,
@@ -228,7 +229,7 @@ export default async function CheckInPage({
                               {counted.leftoverCents > 0
                                 ? formatCents(shortfall - counted.leftoverCents)
                                 : 'it'}{' '}
-                              toward your plans here, soonest first
+                              toward your plans here
                             </p>
                             <ul className="mt-2 space-y-1 text-sm">
                               {counted.assignments.map((a) => (
@@ -239,7 +240,9 @@ export default async function CheckInPage({
                                       {' '}· {humanDate(a.dueDate)}
                                       {a.fullyFunded
                                         ? ' · the last it needs'
-                                        : ` · of the ${formatCents(a.shortCents)} it still needs`}
+                                        : a.atPace
+                                          ? ' · brings it to where it should be by now'
+                                          : ` · of the ${formatCents(a.shortCents)} it could take`}
                                     </span>
                                   </span>
                                   <span className="shrink-0 tabular">
@@ -251,7 +254,7 @@ export default async function CheckInPage({
                             <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
                               The weekly amounts drop to match, and nothing has to move.
                               {counted.leftoverCents > 0
-                                ? ` The other ${formatCents(counted.leftoverCents)} is more than every plan here needs.`
+                                ? ` The other ${formatCents(counted.leftoverCents)} stays as extra: counting it toward a repeating plan early would lower the weekly amount now only to raise it again when that plan comes round.`
                                 : ''}
                               {counted.stillShort.length > 0
                                 ? ` The extra runs out there; ${
@@ -260,8 +263,8 @@ export default async function CheckInPage({
                                       : `${counted.stillShort.length} later plans here still need more`
                                   } and will keep saving weekly.`
                                 : ''}
-                              {counted.alreadyFundedCount > 0
-                                ? ` ${counted.alreadyFundedCount === 1 ? 'One plan here is' : `${counted.alreadyFundedCount} plans here are`} already fully funded, so ${counted.alreadyFundedCount === 1 ? 'it is' : 'they are'} not listed.`
+                              {counted.nothingToAddCount > 0
+                                ? ` ${counted.nothingToAddCount === 1 ? 'One plan here is' : `${counted.nothingToAddCount} plans here are`} already where ${counted.nothingToAddCount === 1 ? 'it' : 'they'} should be by now, so ${counted.nothingToAddCount === 1 ? 'it is' : 'they are'} not listed.`
                                 : ''}
                             </p>
                             <button
@@ -275,7 +278,7 @@ export default async function CheckInPage({
                           <p className="text-sm text-[var(--color-ink-soft)]">
                             {view.items.length === 0
                               ? 'Nothing is planned against this account, so the extra is spare.'
-                              : 'Every plan here is already fully funded, so the extra is spare.'}
+                              : 'Every plan here is already where it should be by now, so the extra is spare.'}
                           </p>
                         )}
 
@@ -346,9 +349,11 @@ export default async function CheckInPage({
           </h2>
           <p className="mb-3 text-sm text-[var(--color-ink-soft)]">
             What an account holds is counted toward its parts, and where it is counted sets each
-            part&apos;s weekly figure. A reshuffle spreads it again: every part up to where it should be
-            by now, soonest due first, then whatever is left to the parts due soonest. Nothing moves in
-            the bank.
+            part&apos;s weekly figure. A reshuffle spreads it again so that figure stays steady: every
+            part up to where it should be by now, soonest due first, then whatever is left onto the
+            one-off parts. A repeating plan is never counted ahead of where it should be, because that
+            lowers the weekly amount now only to raise it again when the plan comes round. Anything
+            beyond that stays in the account as extra. Nothing moves in the bank.
           </p>
           <ul className="space-y-3">
             {live.map((view, index) => {
@@ -406,8 +411,11 @@ export default async function CheckInPage({
                           ))}
                         </ul>
                         <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
-                          Only where the money is counted changes. The account still holds the same{' '}
-                          {formatCents(spread.potCents)}, and nothing has to move.
+                          The account still holds the same {formatCents(spread.potCents)}, and nothing has
+                          to move.
+                          {spread.uncountedCents > 0
+                            ? ` ${formatCents(spread.uncountedCents)} of it stops being counted toward any plan and shows as extra at your next check-in, where you can ease off the weekly amount by a date or leave it as a cushion.`
+                            : ' Only where the money is counted changes.'}
                         </p>
                         <button
                           type="submit"

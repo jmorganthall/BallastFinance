@@ -1,8 +1,10 @@
 /**
  * Reshuffle: the same counted money, re-spread across an account's parts so
- * the weekly transfer is the household's steady rate and no more. Every part
- * up to its pace first, soonest due first; then whatever is left, soonest
- * first. Where money is counted changes; how much never does.
+ * the weekly transfer is the household's steady rate and stays there. Every
+ * part up to its pace first, soonest due first; then whatever is left onto
+ * the one-offs; nothing above pace on a part that comes round again, so the
+ * figure never sits low for a while and then climbs. What no part should
+ * count stays in the account as extra.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -72,7 +74,7 @@ describe('reshuffle', () => {
     ).toBe(PROGRESSIVE_PACE)
   })
 
-  it('takes a far-off part down to its pace and puts the rest on what is due soonest', () => {
+  it('takes a repeating part down to its pace and puts the rest on the one-offs, soonest first', () => {
     // The spreadsheet had the whole $844 reserved for a bill four months out.
     const before = input([
       { lineItemId: 'progressive', startDate: TODAY, openingCents: 84400, recordedOrder: 0, origin: 'commit' },
@@ -80,25 +82,29 @@ describe('reshuffle', () => {
     const result = reshuffleAccount(before, annual.id)!
 
     expect(result.potCents).toBe(84400)
+    expect(result.uncountedCents).toBe(0)
     expect(result.lines.map((l) => l.lineItemId)).toEqual(['soon', 'progressive', 'far'])
-    // Pace first: Progressive keeps its 34386. Then soonest first: Soon fills
-    // its $400, and the last 10014 goes back to Progressive, next in line.
+    // Pace first: Progressive keeps its 34386 and not a cent more, or its
+    // weekly figure would jump when it comes round in January. Then the
+    // one-offs, soonest first: Soon fills its $400, Far takes the last 10014.
     expect(result.openings).toEqual([
       { lineItemId: 'soon', openingCents: 40000 },
-      { lineItemId: 'progressive', openingCents: 34386 + 10014 },
+      { lineItemId: 'progressive', openingCents: 34386 },
+      { lineItemId: 'far', openingCents: 10014 },
     ])
     expect(result.lines.map((l) => [l.holdsNowCents, l.holdsAfterCents])).toEqual([
       [0, 40000],
-      [84400, 44400],
-      [0, 0],
+      [84400, 34386],
+      [0, 10014],
     ])
-    // Soon stops costing $100 a week; Progressive's 40000 over 16 weeks is $25.
+    // Soon stops costing $100 a week; Progressive settles at its steady
+    // 50014 over 16 weeks; Far's 389986 over 40 weeks.
     expect(result.perWeekNowCents).toBe(10000 + 0 + 10000)
-    expect(result.perWeekAfterCents).toBe(0 + 2500 + 10000)
-    expect(result.lines.map((l) => l.perWeekAfterCents)).toEqual([0, 2500, 10000])
+    expect(result.perWeekAfterCents).toBe(0 + 3126 + 9750)
+    expect(result.lines.map((l) => l.perWeekAfterCents)).toEqual([0, 3126, 9750])
   })
 
-  it('changes where the money is counted, never how much', () => {
+  it('changes where the money is counted, not how much, while the one-offs can take it', () => {
     const result = reshuffleAccount(
       input([{ lineItemId: 'progressive', startDate: TODAY, openingCents: 84400, recordedOrder: 0, origin: 'commit' }]),
       annual.id,
@@ -107,6 +113,24 @@ describe('reshuffle', () => {
     const after = result.lines.reduce((s, l) => s + l.holdsAfterCents, 0)
     expect(after).toBe(now)
     expect(after).toBe(result.potCents)
+  })
+
+  it('never counts above pace on a part that comes round again: the rest stays uncounted, as extra', () => {
+    // Only the repeating bill in the account, holding the whole $844.
+    const result = reshuffleAccount(
+      input(
+        [{ lineItemId: 'progressive', startDate: TODAY, openingCents: 84400, recordedOrder: 0, origin: 'commit' }],
+        [progressive],
+      ),
+      annual.id,
+    )!
+    expect(result.openings).toEqual([{ lineItemId: 'progressive', openingCents: PROGRESSIVE_PACE }])
+    expect(result.uncountedCents).toBe(84400 - PROGRESSIVE_PACE)
+    expect(result.lines[0]!.holdsAfterCents).toBe(PROGRESSIVE_PACE)
+    // The transfer rises to the bill's steady rate now, rather than sitting at
+    // nothing until January and then jumping to it.
+    expect(result.perWeekNowCents).toBe(0)
+    expect(result.perWeekAfterCents).toBe(3126)
   })
 
   it('is what the screens will show once the openings are recorded', () => {
@@ -120,7 +144,7 @@ describe('reshuffle', () => {
     ])
     const view = accountViews(recorded).find((v) => v.account.id === annual.id)!
     expect(view.weekly.totalPerWeekCents).toBe(result.perWeekAfterCents)
-    expect(view.shouldHaveSavedCents).toBe(result.potCents)
+    expect(view.shouldHaveSavedCents).toBe(result.potCents - result.uncountedCents)
     for (const line of result.lines) {
       const item = view.items.find((v) => v.lineItem.id === line.lineItemId)!
       expect(item.shouldHaveSavedCents).toBe(line.holdsAfterCents)

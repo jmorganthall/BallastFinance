@@ -33,6 +33,7 @@ import {
   type Package,
   type ReserveAccount,
 } from './types'
+import { ceilingCents, placeMoney, roomCents, soonestFirst, spreadPartOf } from './spread'
 
 export interface DerivationInput {
   today: CivilDate
@@ -441,67 +442,70 @@ export interface OpeningAssignment {
   openingCents: Cents
   /** True when this finishes it: nothing more to set aside for this part. */
   fullyFunded: boolean
+  /** True when this brings it to where an even save would have it by today. */
+  atPace: boolean
 }
 
 export interface ExtraAssignment {
   assignments: OpeningAssignment[]
-  /** What no plan here could use: a genuine surplus. */
+  /**
+   * What no part here should count: more than the one-offs can take and
+   * above pace on everything that comes round again. Counted early it would
+   * lower the weekly figure now only to raise it later, so it stays in the
+   * account as extra (see `spread.ts`).
+   */
   leftoverCents: Cents
   /**
-   * Parts that still need money but got none, because the extra ran out
+   * Parts that could take more but got none, because the extra ran out
    * before their turn. Named so the screen can say the list is not "the top
    * few" -- it is everything the extra could reach, soonest first.
    */
   stillShort: { lineItemId: Id; label: string; dueDate: CivilDate; shortCents: Cents }[]
-  /** Parts already fully funded, which are never listed: nothing to count toward. */
-  alreadyFundedCount: number
+  /** Parts with nothing to count toward: fully funded, or already at pace and repeating. Never listed. */
+  nothingToAddCount: number
 }
 
+/**
+ * Count an extra found at a check-in toward the account's parts, by the one
+ * rule in `spread.ts`, starting from what each part already holds so it only
+ * ever adds.
+ */
 export function assignExtraToPlans(args: {
   extraCents: Cents
-  items: readonly Pick<LineItemView, 'lineItem' | 'totalCents' | 'shouldHaveSavedCents'>[]
+  items: readonly Pick<LineItemView, 'lineItem' | 'totalCents' | 'shouldHaveSavedCents' | 'paceCents'>[]
 }): ExtraAssignment {
-  let remaining = Math.max(0, args.extraCents)
+  const parts = args.items.map((v) => spreadPartOf(v, v.shouldHaveSavedCents))
+  const { holdingsById, uncountedCents } = placeMoney(parts, args.extraCents)
+
   const assignments: OpeningAssignment[] = []
   const stillShort: ExtraAssignment['stillShort'] = []
-  let alreadyFundedCount = 0
+  let nothingToAddCount = 0
 
-  const ordered = [...args.items].sort(
-    (a, b) =>
-      compareDates(a.lineItem.dueDate, b.lineItem.dueDate) ||
-      a.lineItem.label.localeCompare(b.lineItem.label),
-  )
-  for (const item of ordered) {
-    const lacks = Math.max(0, item.totalCents - item.shouldHaveSavedCents)
-    // Already funded: nothing to count toward, so it is not offered.
-    if (lacks <= 0) {
-      alreadyFundedCount += 1
+  for (const part of [...parts].sort(soonestFirst)) {
+    const room = roomCents(part)
+    if (room <= 0) {
+      nothingToAddCount += 1
       continue
     }
-    const added = Math.min(lacks, remaining)
+    const openingCents = holdingsById.get(part.id) ?? part.heldCents
+    const added = openingCents - part.heldCents
     if (added <= 0) {
-      stillShort.push({
-        lineItemId: item.lineItem.id,
-        label: item.lineItem.label,
-        dueDate: item.lineItem.dueDate,
-        shortCents: lacks,
-      })
+      stillShort.push({ lineItemId: part.id, label: part.label, dueDate: part.dueDate, shortCents: room })
       continue
     }
-    remaining -= added
-    const openingCents = item.shouldHaveSavedCents + added
     assignments.push({
-      lineItemId: item.lineItem.id,
-      label: item.lineItem.label,
-      dueDate: item.lineItem.dueDate,
-      shortCents: lacks,
+      lineItemId: part.id,
+      label: part.label,
+      dueDate: part.dueDate,
+      shortCents: room,
       addedCents: added,
       openingCents,
-      fullyFunded: openingCents >= item.totalCents,
+      fullyFunded: openingCents >= part.totalCents,
+      atPace: openingCents >= ceilingCents({ ...part, oneOff: false }),
     })
   }
 
-  return { assignments, leftoverCents: remaining, stillShort, alreadyFundedCount }
+  return { assignments, leftoverCents: uncountedCents, stillShort, nothingToAddCount }
 }
 
 function addWeeks(d: CivilDate, weeks: number): CivilDate {

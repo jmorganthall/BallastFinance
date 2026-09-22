@@ -83,9 +83,11 @@ describeDb('reshuffle', () => {
 
   it('previews without recording anything', async () => {
     const plan = (await engine.reshufflePreview(accountId))!
-    expect(plan.openings.map((o) => o.openingCents)).toEqual([40000, 44400])
+    // Soon to its total, Progressive to its pace and no further, Far takes the rest.
+    expect(plan.openings.map((o) => o.openingCents)).toEqual([40000, 34386, 10014])
+    expect(plan.uncountedCents).toBe(0)
     expect(plan.perWeekNowCents).toBe(20000)
-    expect(plan.perWeekAfterCents).toBe(12500)
+    expect(plan.perWeekAfterCents).toBe(3126 + 9750)
     const view = (await engine.accountViews()).find((v) => v.account.id === accountId)!
     expect(view.weekly.totalPerWeekCents).toBe(20000)
   })
@@ -97,11 +99,13 @@ describeDb('reshuffle', () => {
     // The account's total is untouched: only where it is counted moved.
     expect(view.shouldHaveSavedCents).toBe(84400)
     const progressive = view.items.find((i) => i.lineItem.id === progressiveId)!
-    expect(progressive.shouldHaveSavedCents).toBe(44400)
-    expect(progressive.weekly.totalPerWeekCents).toBe(2500)
+    // At its pace, Progressive costs its steady rate now and the same after
+    // it comes round in January: no low number that later becomes a high one.
+    expect(progressive.shouldHaveSavedCents).toBe(34386)
+    expect(progressive.weekly.totalPerWeekCents).toBe(3126)
 
     const cycles = await engine.listCycleStarts()
-    expect(cycles.map((c) => c.origin)).toEqual(['commit', 'counted', 'counted'])
+    expect(cycles.map((c) => c.origin)).toEqual(['commit', 'counted', 'counted', 'counted'])
     // Progressive's pace still runs from July: a count never moves the clock.
     expect(progressive.paceSince).toBe('2026-07-09')
   })
@@ -109,6 +113,6 @@ describeDb('reshuffle', () => {
   it('then finds nothing more to change', async () => {
     const again = (await engine.reshuffleAccount(accountId))!
     expect(again.openings).toEqual([])
-    expect((await engine.listCycleStarts()).length).toBe(3)
+    expect((await engine.listCycleStarts()).length).toBe(4)
   })
 })

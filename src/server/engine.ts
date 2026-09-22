@@ -759,8 +759,9 @@ export class Engine {
 
   /**
    * What re-spreading this account's counted money across its parts would
-   * change (PRD §6): every part up to its pace first, then the rest soonest
-   * due first. A preview; nothing is recorded.
+   * change (PRD §6): every part up to its pace first, the rest onto the
+   * one-offs, and nothing above pace on a part that comes round again. A
+   * preview; nothing is recorded.
    */
   async reshufflePreview(accountId: Id): Promise<Reshuffle | null> {
     return planReshuffle(await this.derivationInput(), accountId)
@@ -770,8 +771,9 @@ export class Engine {
    * Do it. Each part whose counted money changes gets that figure recorded
    * as its opening today -- the same fact a check-in count records -- and
    * the spread is worked out again here as it is recorded, so what lands is
-   * today's answer rather than a stale preview. The account's total is
-   * untouched, so nothing needs confirming.
+   * today's answer rather than a stale preview. What the account holds is
+   * untouched, so nothing needs confirming; anything the parts should not
+   * count shows as extra at the next check-in.
    */
   async reshuffleAccount(accountId: Id): Promise<Reshuffle | null> {
     const plan = await this.reshufflePreview(accountId)
