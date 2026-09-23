@@ -218,6 +218,28 @@ export async function retirePackageAction(formData: FormData): Promise<void> {
 }
 
 /**
+ * Delete a finished plan for good. The plan's name comes back with the form
+ * and the engine refuses unless it matches, so a stray tap cannot do this.
+ */
+export async function deletePackageAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  const packageId = String(formData.get('package_id'))
+  try {
+    await engine.deletePackage(packageId, String(formData.get('confirm_name') ?? ''))
+  } catch (error) {
+    if (error instanceof EngineError) {
+      redirect(`/packages/${packageId}?error=${encodeURIComponent(error.message)}`)
+    }
+    throw error
+  }
+  revalidatePath('/')
+  revalidatePath('/packages')
+  revalidatePath('/check-in')
+  redirect('/packages')
+}
+
+/**
  * A check-in found more in an account than its plans had accrued, and the
  * person chose to count it toward those plans. The amounts arrive as one
  * hidden field per part, exactly as previewed.

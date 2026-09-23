@@ -67,6 +67,24 @@ button, a[role='button'], input, select {
   min-height: 44px;
 }
 
+/*
+ * iOS Safari draws a date field as its own widget: it keeps an intrinsic width
+ * (so it spills out of a two-column row) and pads its value taller than the
+ * field beside it. Make it an ordinary box that takes the size it is given.
+ * The inner value keeps a line's height so an empty field does not collapse.
+ */
+input[type='date'] {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  min-width: 0;
+}
+input[type='date']::-webkit-date-and-time-value {
+  min-height: 1.5rem;
+  line-height: 1.5rem;
+  text-align: left;
+}
+
 /* A number a human is about to type into a bank should be unmistakable. */
 .tabular {
   font-variant-numeric: tabular-nums;

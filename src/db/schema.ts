@@ -78,6 +78,12 @@ export const eventKindEnum = pgEnum('event_kind', [
   'debt_removed',
   /** A check-in counted money already in the account toward its plans (PRD §5). */
   'opening_recorded',
+  /**
+   * A finished plan taken off the books for good (migration 0008). The row
+   * goes; this event keeps what it was, so the log still explains the
+   * money that went through it.
+   */
+  'package_deleted',
 ])
 
 /**

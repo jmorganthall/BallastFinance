@@ -431,6 +431,57 @@ export class Engine {
     })
   }
 
+  /**
+   * Take a finished plan off the books for good. Only a retired plan can go,
+   * and only with its name typed back exactly: the check is here, in the one
+   * write path, not left to a screen. The rows go (its parts with them); the
+   * events stay, as they always do, and a `package_deleted` event records what
+   * the plan was, so the log still explains the money that went through it.
+   */
+  async deletePackage(packageId: Id, confirmName: string): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const [pkg] = await tx
+        .select()
+        .from(packagesTable)
+        .where(and(eq(packagesTable.id, packageId), eq(packagesTable.householdId, this.householdId)))
+      if (!pkg) throw new EngineError('No such package in this household')
+      if (pkg.state !== 'retired') {
+        throw new EngineError('Only a finished plan can be deleted. Stop saving for it first.')
+      }
+      if (confirmName.trim() !== pkg.name) {
+        throw new EngineError('The name typed does not match the plan, so nothing was deleted.')
+      }
+
+      const parts = await tx.select().from(lineItemsTable).where(eq(lineItemsTable.packageId, packageId))
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'package_deleted',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        payload: {
+          package_id: packageId,
+          name: pkg.name,
+          module: pkg.module,
+          created_at: pkg.createdAt,
+          committed_at: pkg.committedAt,
+          line_items: parts.map((row) => ({
+            line_item_id: row.id,
+            label: row.label,
+            unit_amount_cents: row.unitAmountCents,
+            quantity: row.quantity,
+            due_date: row.dueDate,
+            reserve_account_id: row.reserveAccountId,
+            state: row.state,
+            recurrence: toLineItem(row).recurrence,
+          })),
+        },
+      })
+      await tx.delete(lineItemsTable).where(eq(lineItemsTable.packageId, packageId))
+      await tx.delete(packagesTable).where(eq(packagesTable.id, packageId))
+    })
+  }
+
   // ---------------------------------------------------------------- line items
 
   /**
@@ -708,8 +759,9 @@ export class Engine {
 
   /**
    * What re-spreading this account's counted money across its parts would
-   * change (PRD §6): every part up to its pace first, then the rest soonest
-   * due first. A preview; nothing is recorded.
+   * change (PRD §6): every part up to its pace first, the rest onto the
+   * one-offs, and nothing above pace on a part that comes round again. A
+   * preview; nothing is recorded.
    */
   async reshufflePreview(accountId: Id): Promise<Reshuffle | null> {
     return planReshuffle(await this.derivationInput(), accountId)
@@ -719,8 +771,9 @@ export class Engine {
    * Do it. Each part whose counted money changes gets that figure recorded
    * as its opening today -- the same fact a check-in count records -- and
    * the spread is worked out again here as it is recorded, so what lands is
-   * today's answer rather than a stale preview. The account's total is
-   * untouched, so nothing needs confirming.
+   * today's answer rather than a stale preview. What the account holds is
+   * untouched, so nothing needs confirming; anything the parts should not
+   * count shows as extra at the next check-in.
    */
   async reshuffleAccount(accountId: Id): Promise<Reshuffle | null> {
     const plan = await this.reshufflePreview(accountId)

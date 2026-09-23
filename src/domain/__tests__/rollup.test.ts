@@ -361,10 +361,64 @@ describe('cycles and opening balances', () => {
 })
 
 describe('counting an overage toward the plans', () => {
-  const item = (id: string, label: string, dueDate: string, totalCents: number, saved: number) => ({
-    lineItem: li({ id, label, dueDate, unitAmountCents: totalCents }),
+  // One-offs with no pace yet unless said otherwise: their window has just opened.
+  const item = (
+    id: string,
+    label: string,
+    dueDate: string,
+    totalCents: number,
+    saved: number,
+    paceCents = 0,
+    recurrence: LineItem['recurrence'] = null,
+  ) => ({
+    lineItem: li({ id, label, dueDate, unitAmountCents: totalCents, recurrence }),
     totalCents,
     shouldHaveSavedCents: saved,
+    paceCents,
+  })
+
+  it('counts toward a repeating part only up to its pace, and puts the rest on the one-offs', () => {
+    const result = assignExtraToPlans({
+      extraCents: 80000,
+      items: [
+        item('ins', 'Insurance', '2026-11-01', 60000, 10000, 30000, { every: 6, unit: 'month' }),
+        item('trip', 'Trip', '2027-06-01', 300000, 0),
+      ],
+    })
+    expect(result.assignments.map((a) => [a.label, a.addedCents, a.openingCents, a.atPace, a.fullyFunded])).toEqual([
+      ['Insurance', 20000, 30000, true, false],
+      ['Trip', 60000, 60000, true, false],
+    ])
+    expect(result.assignments[0]!.shortCents).toBe(20000)
+    expect(result.stillShort).toEqual([])
+    expect(result.leftoverCents).toBe(0)
+  })
+
+  it('leaves what no part should count as extra, rather than parking it on a repeating part', () => {
+    const result = assignExtraToPlans({
+      extraCents: 500000,
+      items: [
+        item('ins', 'Insurance', '2026-11-01', 60000, 10000, 30000, { every: 6, unit: 'month' }),
+        item('trip', 'Trip', '2027-06-01', 300000, 0),
+      ],
+    })
+    expect(result.assignments.map((a) => [a.label, a.openingCents, a.fullyFunded])).toEqual([
+      ['Insurance', 30000, false],
+      ['Trip', 300000, true],
+    ])
+    expect(result.leftoverCents).toBe(500000 - 20000 - 300000)
+  })
+
+  it('skips a repeating part already at or above its pace', () => {
+    const result = assignExtraToPlans({
+      extraCents: 1000,
+      items: [
+        item('ins', 'Insurance', '2026-11-01', 60000, 50000, 30000, { every: 6, unit: 'month' }),
+        item('trip', 'Trip', '2027-06-01', 300000, 0),
+      ],
+    })
+    expect(result.assignments.map((a) => a.label)).toEqual(['Trip'])
+    expect(result.nothingToAddCount).toBe(1)
   })
 
   it('funds the soonest-due part first, then the next, and stops when the extra runs out', () => {
@@ -405,13 +459,13 @@ describe('counting an overage toward the plans', () => {
       assignments: [],
       leftoverCents: 0,
       stillShort: [{ lineItemId: 'a', label: 'A', dueDate: '2026-11-01', shortCents: 100 }],
-      alreadyFundedCount: 0,
+      nothingToAddCount: 0,
     })
     expect(assignExtraToPlans({ extraCents: 500, items: [] })).toEqual({
       assignments: [],
       leftoverCents: 500,
       stillShort: [],
-      alreadyFundedCount: 0,
+      nothingToAddCount: 0,
     })
   })
 
@@ -426,7 +480,7 @@ describe('counting an overage toward the plans', () => {
     })
     expect(result.assignments.map((a) => a.label)).toEqual(['Christmas'])
     expect(result.assignments[0]).toMatchObject({ shortCents: 80000, addedCents: 1000, fullyFunded: false })
-    expect(result.alreadyFundedCount).toBe(2)
+    expect(result.nothingToAddCount).toBe(2)
     expect(result.stillShort).toEqual([])
   })
 
@@ -448,7 +502,7 @@ describe('counting an overage toward the plans', () => {
     expect(result.stillShort).toEqual([
       { lineItemId: 'c', label: 'Christmas', dueDate: '2026-12-19', shortCents: 80000 },
     ])
-    expect(result.alreadyFundedCount).toBe(1)
+    expect(result.nothingToAddCount).toBe(1)
     expect(result.leftoverCents).toBe(0)
   })
 })
