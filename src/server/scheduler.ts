@@ -19,6 +19,8 @@ import {
   buildWeeklyDigest,
 } from '@/server/digest'
 import { sendNotification } from '@/server/notifications'
+import { Engine } from '@/server/engine'
+import { fetchMarketMortgageRate, marketRateFetchEnabled } from '@/server/market-rate'
 
 const TIMEZONE = process.env.HOUSEHOLD_TIMEZONE ?? 'America/Chicago'
 
@@ -31,6 +33,11 @@ const WEEKLY_DIGEST_CRON = process.env.DIGEST_CRON ?? '0 8 * * 6'
 const DUE_PROMPT_CRON = process.env.DUE_PROMPT_CRON ?? '0 9 * * 6'
 const CHECK_IN_NUDGE_CRON = process.env.CHECK_IN_NUDGE_CRON ?? '0 17 * * 0'
 const PROMO_WARNING_CRON = process.env.PROMO_WARNING_CRON ?? '0 10 * * 1'
+/**
+ * Daily, though the survey is weekly (Thursdays): one small download a day
+ * means a missed week heals itself the next morning, not the next Thursday.
+ */
+const MARKET_RATE_CRON = process.env.MARKET_RATE_CRON ?? '0 9 * * *'
 
 const tasks: ScheduledTask[] = []
 
@@ -73,8 +80,26 @@ function schedule(expression: string, label: string, job: () => Promise<void>): 
   console.log(`[cron] ${label} scheduled at "${expression}" (${TIMEZONE})`)
 }
 
+/** One download, stored for every household. A failure leaves the last rate in place. */
+async function refreshMarketRate(): Promise<void> {
+  const rate = await fetchMarketMortgageRate()
+  if (!rate) {
+    console.error('[cron:market-rate] FRED returned nothing that reads as a mortgage rate; keeping the last one')
+    return
+  }
+  await forEachHousehold('market-rate', async (householdId, timezone) => {
+    await new Engine({ householdId, actorUserId: null, timezone }).recordMarketMortgageRate(rate)
+  })
+}
+
 export function startScheduler(): void {
   if (tasks.length > 0) return // already started
+
+  if (marketRateFetchEnabled()) {
+    schedule(MARKET_RATE_CRON, 'market-rate', refreshMarketRate)
+    // Once at start, so a fresh install has a rate before its first morning.
+    void refreshMarketRate().catch((error) => console.error('[cron:market-rate] failed:', error))
+  }
 
   schedule(WEEKLY_DIGEST_CRON, 'weekly-digest', async () => {
     await forEachHousehold('weekly-digest', async (householdId, timezone) => {

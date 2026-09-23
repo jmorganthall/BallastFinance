@@ -739,3 +739,109 @@ export async function saveNudgeSettingsAction(formData: FormData): Promise<void>
   revalidatePath('/settings')
   redirect('/settings?saved=1')
 }
+
+// ---------------------------------------------------------------- equity (PRD §15)
+
+const EQUITY_PATH = '/debts/equity'
+
+/** Back to the equity screen, with a message when something was refused. */
+function backToEquity(message: string | null): never {
+  revalidatePath(EQUITY_PATH)
+  redirect(message ? `${EQUITY_PATH}?error=${encodeURIComponent(message)}` : `${EQUITY_PATH}?saved=1`)
+}
+
+/** An engine or domain refusal becomes a message on the page; anything else is a real fault. */
+async function refusalOf(run: () => Promise<void>): Promise<string | null> {
+  const { AssetDataError } = await import('@/domain')
+  const { EngineError } = await import('@/server/engine')
+  try {
+    await run()
+    return null
+  } catch (error) {
+    if (error instanceof AssetDataError || error instanceof EngineError) return error.message
+    throw error
+  }
+}
+
+export async function createAssetAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull, parsePercentOrNull } = await import('@/domain')
+  const kind = formData.get('kind') === 'vehicle' ? 'vehicle' : 'home'
+  const valueCents = parseAmountOrNull(formData.get('value') as string)
+  if (valueCents === null) backToEquity('Enter what it would sell for, like 425,000.')
+  const sellingRaw = String(formData.get('selling_cost') ?? '').trim()
+  const sellingCostBasisPoints = sellingRaw === '' ? undefined : parsePercentOrNull(sellingRaw)
+  if (sellingCostBasisPoints === null) backToEquity('Enter the cost of selling as a percent, like 7.')
+
+  backToEquity(
+    await refusalOf(async () => {
+      await engine.createAsset({
+        name: String(formData.get('name') ?? ''),
+        kind,
+        valueCents: valueCents!,
+        sellingCostBasisPoints: sellingCostBasisPoints ?? undefined,
+      })
+    }),
+  )
+}
+
+export async function updateAssetAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull, parsePercentOrNull } = await import('@/domain')
+  const valueCents = parseAmountOrNull(formData.get('value') as string)
+  const sellingCostBasisPoints = parsePercentOrNull(formData.get('selling_cost') as string)
+  if (valueCents === null) backToEquity('Enter what it would sell for, like 425,000.')
+  if (sellingCostBasisPoints === null) backToEquity('Enter the cost of selling as a percent, like 7.')
+
+  backToEquity(
+    await refusalOf(() =>
+      engine.updateAsset(String(formData.get('asset_id')), {
+        name: String(formData.get('name') ?? ''),
+        valueCents: valueCents!,
+        sellingCostBasisPoints: sellingCostBasisPoints!,
+        state: formData.get('sold') ? 'sold' : 'owned',
+      }),
+    ),
+  )
+}
+
+export async function removeAssetAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  backToEquity(await refusalOf(() => engine.removeAsset(String(formData.get('asset_id')))))
+}
+
+export async function linkDebtToAssetAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const assetId = String(formData.get('asset_id') ?? '')
+  backToEquity(
+    await refusalOf(() => engine.linkDebtToAsset(String(formData.get('debt_id')), assetId === '' ? null : assetId)),
+  )
+}
+
+export async function saveHomeBuyingAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseHomeBuyingForm, parsePercentOrNull } = await import('@/domain')
+  const field = (name: string) => String(formData.get(name) ?? '')
+
+  const parsed = parseHomeBuyingForm({
+    currentHousingPayment: field('current_payment'),
+    propertyTaxPercent: field('property_tax'),
+    insurancePerYear: field('insurance'),
+    mortgageInsurancePercent: field('mortgage_insurance'),
+    hoaPerMonth: field('hoa'),
+    buyingCostPercent: field('buying_cost'),
+    termYears: field('term_years'),
+  })
+  if (!parsed.ok) backToEquity(parsed.message)
+
+  const typed = field('typed_rate').trim()
+  const typedBasisPoints = typed === '' ? null : parsePercentOrNull(typed)
+  if (typed !== '' && typedBasisPoints === null) backToEquity('Enter the rate as a percent, like 6.25, or leave it blank.')
+
+  backToEquity(
+    await refusalOf(async () => {
+      await engine.setHomeBuyingAssumptions(parsed.assumptions)
+      await engine.setTypedMortgageRate(typedBasisPoints)
+    }),
+  )
+}

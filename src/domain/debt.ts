@@ -57,6 +57,12 @@ export interface Debt {
    */
   fixedPayment: boolean
   state: DebtState
+  /**
+   * The home or vehicle this debt is secured on (PRD §15), or none. Read only
+   * by the equity figures: what is owed on an asset comes off what selling it
+   * would leave.
+   */
+  assetId?: Id | null
 }
 
 export class DebtDataError extends Error {}
