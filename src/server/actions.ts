@@ -373,6 +373,19 @@ export async function confirmInstructionAction(formData: FormData): Promise<void
   const { engine } = await requireEngine()
   await engine.confirmInstruction({ instructionId: String(formData.get('instruction_id')) })
   revalidatePath('/')
+  revalidatePath('/check-in')
+}
+
+/**
+ * "Not doing this" on a to-do, or "stop this" on a running bump or cut (PRD
+ * D18). One event; the numbers it changes change now, because changing the
+ * transfer back is something the person has already done in the bank.
+ */
+export async function endInstructionAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  await engine.endInstruction({ instructionId: String(formData.get('instruction_id')) })
+  revalidatePath('/')
+  revalidatePath('/check-in')
 }
 
 export async function confirmSpendAction(formData: FormData): Promise<void> {

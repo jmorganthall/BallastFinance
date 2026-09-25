@@ -11,7 +11,13 @@ import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
 import { Engine } from '@/server/engine'
-import { INTAKE_CONTRACT_VERSION, aheadOptions, catchUpOptions, computeDrift } from '@/domain'
+import {
+  INTAKE_CONTRACT_VERSION,
+  aheadOptions,
+  catchUpOptions,
+  committedAfter,
+  computeDrift,
+} from '@/domain'
 
 const url = process.env.DATABASE_URL
 const describeDb = url ? describe : describe.skip
@@ -197,5 +203,158 @@ describeDb('check-ins, drift and close-out', () => {
     await expect(
       engine.confirmSpend({ lineItemId: items[0]!.id, actualAmountCents: 1 }),
     ).rejects.toThrow(/already closed out/)
+  })
+})
+
+/**
+ * The adjustment lifecycle (PRD D18, rev 28): a catch-up is offered once,
+ * replaced rather than stacked, and can be stopped by recording one event.
+ */
+describeDb('the adjustment lifecycle (D18)', () => {
+  let client: ReturnType<typeof postgres>
+  let db: ReturnType<typeof drizzle<typeof schema>>
+  let householdId: string
+  let engine: Engine
+  let accountId: string
+  let today = '2026-09-19'
+
+  const pin = (date: string) => {
+    today = date
+    engine = new Engine({ householdId, actorUserId: null, db, today })
+  }
+  const view = async () => (await engine.accountViews()).find((v) => v.account.id === accountId)!
+  const netDrift = async () => {
+    const balance = (await engine.latestConfirmedBalances()).get(accountId)!
+    const commitments = (await engine.openCommitmentsByAccount()).get(accountId)!
+    return computeDrift({
+      account: await view(),
+      confirmedCents: balance.amountCents,
+      committedCents: committedAfter({ commitments, from: balance.on }),
+    })
+  }
+
+  beforeAll(async () => {
+    client = postgres(url!, { max: 4, prepare: false })
+    db = drizzle(client, { schema })
+    const [household] = await db
+      .insert(schema.households)
+      .values({ name: `Lifecycle ${crypto.randomUUID()}` })
+      .returning()
+    householdId = household!.id
+    pin('2026-09-19')
+    accountId = (
+      await engine.createReserveAccount({ name: 'Annual Expenses', institutionLabel: 'Capital One 360' })
+    ).id
+    const created = await engine.createPackageFromIntake({
+      contract_version: INTAKE_CONTRACT_VERSION,
+      package: { name: 'Christmas 2026' },
+      line_items: [
+        { label: 'Gifts', unit_amount: '1700', quantity: 1, due_date: '2026-12-19', reserve_account: accountId },
+      ],
+    })
+    if (!created.ok) throw new Error(JSON.stringify(created.problems))
+    await engine.commitPackage(created.packageId)
+  })
+
+  afterAll(async () => {
+    if (householdId) {
+      await db.delete(schema.lineItems).where(eq(schema.lineItems.householdId, householdId))
+      await db.delete(schema.packages).where(eq(schema.packages.householdId, householdId))
+      await db.delete(schema.reserveAccounts).where(eq(schema.reserveAccounts.householdId, householdId))
+    }
+    await client?.end()
+  })
+
+  it('never offers the same catch-up twice once the bump is confirmed', async () => {
+    pin('2026-10-31')
+    const before = await view()
+    // $148.32 short. Accept the bump and mark it done the same day.
+    await engine.confirmBalance({ reserveAccountId: accountId, amountCents: before.shouldHaveSavedCents - 14832 })
+    const raw = await netDrift()
+    expect(raw).toMatchObject({ committedCents: 0, driftCents: -14832 })
+
+    const bump = catchUpOptions({ shortfallCents: 14832, today, overWeeks: 8 }).find((o) => o.kind === 'rate_bump')!
+    const id = await engine.issueInstruction({
+      type: 'rate_bump',
+      amountCents: bump.amountCents,
+      targetId: accountId,
+      targetLabel: 'Annual Expenses',
+      endsOn: bump.endDate!,
+    })
+    // Offered and unanswered, it already counts: the to-do covers the gap.
+    expect((await netDrift()).driftCents).toBe(0)
+
+    await engine.confirmInstruction({ instructionId: id })
+    const after = await netDrift()
+    expect(after.committedCents).toBe(14832)
+    expect(after.driftCents).toBe(0)
+    expect(catchUpOptions({ shortfallCents: -after.driftCents, today, overWeeks: 8 })).toEqual([])
+    expect((await view()).weekly.catchUp).toHaveLength(1)
+  })
+
+  it('stops a running bump that day: the weekly figure drops, should-hold does not move', async () => {
+    pin('2026-11-18')
+    const before = await view()
+    const running = (await engine.openCommitmentsByAccount()).get(accountId)!.running
+    expect(running).toHaveLength(1)
+    const bumpId = running[0]!.id
+
+    await engine.endInstruction({ instructionId: bumpId })
+
+    const after = await view()
+    expect(after.weekly.catchUp).toEqual([])
+    expect(after.weekly.totalPerWeekCents).toBeLessThan(before.weekly.totalPerWeekCents)
+    expect(after.shouldHaveSavedCents).toBe(before.shouldHaveSavedCents)
+    // Nothing is edited in place: the issued and confirmed events are as they were, plus one.
+    const ended = await engine.listEndedInstructions()
+    expect(ended).toEqual([{ instructionId: bumpId, endedOn: '2026-11-18' }])
+    expect((await engine.listIssuedInstructions()).some((i) => i.instructionId === bumpId)).toBe(true)
+    expect((await engine.listConfirmedInstructions()).some((c) => c.instructionId === bumpId)).toBe(true)
+    // The stopped bump keeps only what it delivered (two Saturdays of eight), and has nothing left to add.
+    const kept = (await engine.openCommitmentsByAccount()).get(accountId)!.running[0]!
+    expect(kept).toMatchObject({ id: bumpId, endDate: '2026-11-18', amountCents: 3708 })
+    expect(committedAfter({ commitments: (await engine.openCommitmentsByAccount()).get(accountId)!, from: today })).toBe(0)
+
+    await expect(engine.endInstruction({ instructionId: bumpId })).rejects.toThrow(/already been ended/)
+  })
+
+  it('lets a newer open bump replace the older one, so only the newer is outstanding', async () => {
+    pin('2026-11-21')
+    const issue = (amountCents: number) =>
+      engine.issueInstruction({
+        type: 'rate_bump',
+        amountCents,
+        targetId: accountId,
+        targetLabel: 'Annual Expenses',
+        endsOn: '2027-01-16',
+      })
+    const older = await issue(8000)
+    const newer = await issue(12000)
+
+    const open = await engine.outstandingInstructions()
+    expect(open.map((i) => i.instructionId)).toEqual([newer])
+    // And only the newer prices what the transfer becomes.
+    const pending = (await engine.driftAdjustments()).pending
+    expect(pending.map((a) => a.id)).toEqual([newer])
+    expect(pending[0]!.amountCents).toBe(12000)
+    expect(older).not.toBe(newer)
+
+    // Withdrawing the newer does not bring the older back.
+    await engine.endInstruction({ instructionId: newer })
+    expect(await engine.outstandingInstructions()).toEqual([])
+    expect((await view()).pendingWeekly).toBeNull()
+  })
+
+  it('refuses to end an instruction another household issued', async () => {
+    const [other] = await db
+      .insert(schema.households)
+      .values({ name: `Other ${crypto.randomUUID()}` })
+      .returning()
+    const stranger = new Engine({ householdId: other!.id, actorUserId: null, db, today })
+    const [mine] = await engine.listIssuedInstructions()
+    await expect(stranger.endInstruction({ instructionId: mine!.instructionId })).rejects.toThrow(
+      /No such instruction/,
+    )
+    expect(await stranger.listEndedInstructions()).toEqual([])
   })
 })

@@ -13,14 +13,20 @@ import {
   acceptCatchUpAction,
   acceptOpeningsAction,
   confirmBalancesAction,
+  endInstructionAction,
   reshuffleAction,
 } from '@/server/actions'
 import {
   aheadOptions,
   assignExtraToPlans,
   catchUpOptions,
+  committedAfter,
   computeDrift,
   formatCents,
+  pendingByKind,
+  runningAdjustments,
+  stopCatchUpOffer,
+  stopCatchUpSentence,
 } from '@/domain'
 
 export const dynamic = 'force-dynamic'
@@ -34,9 +40,10 @@ export default async function CheckInPage({
 }) {
   const { done, counted, reshuffled } = await searchParams
   const { engine } = await requireEngine()
-  const [accounts, confirmed] = await Promise.all([
+  const [accounts, confirmed, commitments] = await Promise.all([
     engine.accountViews(),
     engine.latestConfirmedBalances(),
+    engine.openCommitmentsByAccount(),
   ])
   const today = engine.today()
 
@@ -135,28 +142,56 @@ export default async function CheckInPage({
                 )
               }
 
-              const drift = computeDrift({ account: view, confirmedCents: last.amountCents })
+              // The gap is what the plan says should be there, less the balance,
+              // less what every open bump, cut or one-time move on this account
+              // will still deliver after the balance date (PRD D18). An offer
+              // nobody has acted on counts too, so nothing is offered twice.
+              const open = commitments.get(view.account.id)!
+              const drift = computeDrift({
+                account: view,
+                confirmedCents: last.amountCents,
+                committedCents: committedAfter({ commitments: open, from: last.on }),
+              })
               const behind = drift.driftCents < 0
               const ahead = drift.driftCents > 0
               const shortfall = Math.abs(drift.driftCents)
+              const waiting = pendingByKind(open)
+              const onTheWay = [
+                ...runningAdjustments({ running: open.running, today }).map((r) => ({ ...r, status: 'running' as const })),
+                ...runningAdjustments({ running: open.pending, today }).map((r) => ({ ...r, status: 'waiting' as const })),
+              ]
               const options = behind
-                ? catchUpOptions({ shortfallCents: shortfall, today, overWeeks: CATCH_UP_WEEKS })
+                ? catchUpOptions({
+                    shortfallCents: shortfall,
+                    today,
+                    overWeeks: CATCH_UP_WEEKS,
+                    pendingBumpCents: waiting.bumpCents,
+                    pendingMoveCents: waiting.moveCents,
+                  })
                 : []
+              // Ahead with a catch-up bump still running: the first choice is to
+              // stop it today, and the rest applies to what is left (D18).
+              const stop = ahead ? stopCatchUpOffer({ running: open.running, today, extraCents: shortfall }) : null
+              const extraLeft = stop ? stop.leftCents : shortfall
               // Ahead: first count the extra toward this account's plans by the
               // one rule (every part to its pace, the rest onto the one-offs, never
               // above pace on a repeating part). What they should not count is a
               // real surplus: share it out, ease off by a date, or keep it.
-              const counted = ahead
-                ? assignExtraToPlans({ extraCents: shortfall, items: view.items })
-                : { assignments: [], leftoverCents: 0, stillShort: [], nothingToAddCount: 0 }
-              const easeOff = ahead
-                ? aheadOptions({
-                    extraCents: shortfall,
-                    weeklyCents: view.weekly.totalPerWeekCents,
-                    today,
-                    overWeeks: CATCH_UP_WEEKS,
-                  }).filter((o) => o.kind === 'rate_cut')
-                : []
+              const counted =
+                ahead && extraLeft > 0
+                  ? assignExtraToPlans({ extraCents: extraLeft, items: view.items })
+                  : { assignments: [], leftoverCents: 0, stillShort: [], nothingToAddCount: 0 }
+              const easeOff =
+                ahead && extraLeft > 0
+                  ? aheadOptions({
+                      extraCents: extraLeft,
+                      weeklyCents: view.weekly.totalPerWeekCents,
+                      today,
+                      overWeeks: CATCH_UP_WEEKS,
+                      pendingCutCents: waiting.cutCents,
+                      pendingMoveOutCents: waiting.moveOutCents,
+                    }).filter((o) => o.kind === 'rate_cut')
+                  : []
 
               return (
                 <li key={view.account.id}>
@@ -178,8 +213,35 @@ export default async function CheckInPage({
                       <strong>
                         <Money cents={shortfall} /> {behind ? 'short' : 'extra'}
                       </strong>
+                      {drift.driftCents === 0 && drift.committedCents !== 0
+                        ? ', counting what is already on the way'
+                        : ''}
                       .
                     </p>
+
+                    {(onTheWay.length > 0 || open.pendingMoves.length > 0) && drift.driftCents !== 0 ? (
+                      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                        {onTheWay.map((r) => (
+                          <span key={r.instructionId}>
+                            {r.perWeekCents > 0
+                              ? `A catch-up of ${formatCents(r.perWeekCents)} a week is already ${
+                                  r.status === 'running' ? 'running' : 'on your to-do list'
+                                } until ${humanDate(r.endDate)}. `
+                              : `Setting aside ${formatCents(-r.perWeekCents)} a week less until ${humanDate(r.endDate)} is already ${
+                                  r.status === 'running' ? 'running' : 'on your to-do list'
+                                }. `}
+                          </span>
+                        ))}
+                        {open.pendingMoves.map((m) => (
+                          <span key={m.instructionId}>
+                            {m.amountCents > 0
+                              ? `Moving ${formatCents(m.amountCents)} across once is already on your to-do list. `
+                              : `Moving ${formatCents(-m.amountCents)} out once is already on your to-do list. `}
+                          </span>
+                        ))}
+                        {behind ? 'This is the extra on top.' : 'This is the extra beyond that.'}
+                      </p>
+                    ) : null}
 
                     {behind ? (
                       <div className="mt-4 space-y-2">
@@ -204,6 +266,11 @@ export default async function CheckInPage({
                               {option.kind === 'one_time'
                                 ? `Move ${formatCents(option.amountCents)} across now`
                                 : `Add ${formatCents(option.perWeekCents ?? 0)}/week until ${option.endDate}`}
+                              {option.replacesCents > 0 ? (
+                                <span className="block text-xs text-[var(--color-ink-soft)]">
+                                  Replaces the one already on your to-do list, and covers it.
+                                </span>
+                              ) : null}
                             </span>
                             <button
                               type="submit"
@@ -216,7 +283,33 @@ export default async function CheckInPage({
                       </div>
                     ) : ahead ? (
                       <div className="mt-4 space-y-2">
-                        {counted.assignments.length > 0 ? (
+                        {stop ? (
+                          <form
+                            action={endInstructionAction}
+                            className="flex items-center justify-between gap-3 rounded-xl border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3"
+                          >
+                            <input type="hidden" name="instruction_id" value={stop.instructionId} />
+                            <span className="text-sm">
+                              {stopCatchUpSentence(stop)}
+                              <span className="block text-xs text-[var(--color-ink-soft)]">
+                                {stop.shortAfterCents > 0
+                                  ? `It had ${formatCents(stop.remainingCents)} more to add, so stopping leaves this account ${formatCents(stop.shortAfterCents)} short; your next check-in picks that up.`
+                                  : stop.leftCents > 0
+                                    ? `That uses up ${formatCents(stop.remainingCents)} of the extra; the choices below are for the other ${formatCents(stop.leftCents)}.`
+                                    : 'That uses up the extra exactly.'}{' '}
+                                Set the transfer back in Capital One 360 to match.
+                              </span>
+                            </span>
+                            <button
+                              type="submit"
+                              className="shrink-0 rounded-lg bg-[var(--color-accent)] px-3 py-2 text-sm font-medium text-white"
+                            >
+                              Stop it
+                            </button>
+                          </form>
+                        ) : null}
+
+                        {extraLeft > 0 && counted.assignments.length > 0 ? (
                           <form
                             action={acceptOpeningsAction}
                             className="rounded-xl border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3"
@@ -227,7 +320,7 @@ export default async function CheckInPage({
                             <p className="text-sm font-medium">
                               Count{' '}
                               {counted.leftoverCents > 0
-                                ? formatCents(shortfall - counted.leftoverCents)
+                                ? formatCents(extraLeft - counted.leftoverCents)
                                 : 'it'}{' '}
                               toward your plans here
                             </p>
@@ -274,25 +367,26 @@ export default async function CheckInPage({
                               Count it toward these plans
                             </button>
                           </form>
-                        ) : (
+                        ) : extraLeft > 0 ? (
                           <p className="text-sm text-[var(--color-ink-soft)]">
                             {view.items.length === 0
                               ? 'Nothing is planned against this account, so the extra is spare.'
                               : 'Every plan here is already where it should be by now, so the extra is spare.'}
                           </p>
-                        )}
+                        ) : null}
 
                         {/* The alternative to counting it toward plans: share the whole
                             extra out. Whatever the plans cannot use is still extra at the
                             next check-in, and this option is offered again then. */}
+                        {extraLeft > 0 ? (
                         <Link
                           href={`/allocate?from=${view.account.id}&floor=${encodeURIComponent(
-                            formatCents(shortfall).replace('$', '').replace(/,/g, ''),
+                            formatCents(extraLeft).replace('$', '').replace(/,/g, ''),
                           )}`}
                           className="flex items-center justify-between gap-3 rounded-xl bg-[var(--color-surface)] p-3 text-sm"
                         >
                           <span>
-                            Share {formatCents(shortfall)} out instead
+                            Share {formatCents(extraLeft)} out instead
                             <span className="block text-xs text-[var(--color-ink-soft)]">
                               Runs it through Share out: debts, fun money, savings, by your rules.
                             </span>
@@ -301,6 +395,7 @@ export default async function CheckInPage({
                             Go
                           </span>
                         </Link>
+                        ) : null}
 
                         {easeOff.map((option) => (
                           <form
@@ -321,6 +416,9 @@ export default async function CheckInPage({
                                 : `Or set aside ${formatCents(option.perWeekCents ?? 0)}/week less until ${humanDate(option.endDate!)}`}
                               <span className="block text-xs text-[var(--color-ink-soft)]">
                                 Leaves the extra where it is and uses it up over time.
+                                {option.replacesCents > 0
+                                  ? ' Replaces the one already on your to-do list, and covers it.'
+                                  : ''}
                               </span>
                             </span>
                             <button
