@@ -74,7 +74,7 @@ export function DebtTable({ rows }: { rows: DebtRow[] }) {
   )
 
   return (
-    <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]">
+    <div className="overflow-x-auto rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--color-line)]">
@@ -84,7 +84,8 @@ export function DebtTable({ rows }: { rows: DebtRow[] }) {
             {heading('rate', 'Rate', 'hidden text-right sm:table-cell')}
             {heading('payment', 'Per month', 'text-right')}
             {heading('payoff', 'Paid off by', 'hidden md:table-cell')}
-            <th className={`${th} w-16`}>
+            {/* On a phone the Edit link sits under the debt's name instead, so the table stays inside its card. */}
+            <th className={`${th} hidden w-16 sm:table-cell`}>
               <span className="sr-only">Actions</span>
             </th>
           </tr>
@@ -134,11 +135,22 @@ function Row({
   open: 'edit' | 'remove' | null
   setOpen: (open: Open) => void
 }) {
+  const editButton = (
+    <button
+      type="button"
+      onClick={() => setOpen(open ? null : { kind: 'edit', id: row.id })}
+      aria-expanded={open !== null}
+      className="min-h-9 rounded-lg px-2 text-sm font-medium text-[var(--color-accent)] underline"
+    >
+      {open ? 'Close' : 'Edit'}
+    </button>
+  )
+
   return (
     <>
       <tr className={`border-t border-[var(--color-line)] ${open ? 'bg-[var(--color-surface)]' : ''}`}>
         <td className={`${td} text-[var(--color-ink-soft)]`}>{row.rank}</td>
-        <td className={td}>
+        <td className={`${td} break-words`}>
           <span className="font-medium">{row.name}</span>
           <span className={`block text-xs ${row.stale ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-soft)]'}`}>
             {row.kind}
@@ -146,15 +158,16 @@ function Row({
             {row.ageDays === 0 ? 'checked today' : `as of ${humanDate(row.asOf)}`}
             {row.stale ? ` (${row.ageDays} days ago)` : ''}
           </span>
+          <span className="-ml-2 mt-1 block sm:hidden">{editButton}</span>
         </td>
-        <td className={`${td} text-right font-medium tabular`}>{formatCents(row.balanceCents)}</td>
+        <td className={`${td} whitespace-nowrap text-right font-medium tabular`}>{formatCents(row.balanceCents)}</td>
         <td className={`${td} hidden text-right tabular sm:table-cell`}>
           {row.effectiveRate}
           {row.listedRate ? (
             <span className="block text-xs text-[var(--color-ink-soft)]">listed {row.listedRate}</span>
           ) : null}
         </td>
-        <td className={`${td} text-right tabular`}>
+        <td className={`${td} whitespace-nowrap text-right tabular`}>
           {formatCents(row.paymentCents)}
           {row.paymentCents > row.minimumCents ? (
             <span className="block text-xs text-[var(--color-ink-soft)]">min {formatCents(row.minimumCents)}</span>
@@ -163,16 +176,7 @@ function Row({
         <td className={`${td} hidden md:table-cell`}>
           {row.payoffDate ? humanDate(row.payoffDate) : <span className="text-[var(--color-ink-soft)]">Never, at this rate</span>}
         </td>
-        <td className={`${td} text-right`}>
-          <button
-            type="button"
-            onClick={() => setOpen(open ? null : { kind: 'edit', id: row.id })}
-            aria-expanded={open !== null}
-            className="min-h-9 rounded-lg px-2 text-sm font-medium text-[var(--color-accent)] underline"
-          >
-            {open ? 'Close' : 'Edit'}
-          </button>
-        </td>
+        <td className={`${td} hidden text-right sm:table-cell`}>{editButton}</td>
       </tr>
 
       {open ? (
