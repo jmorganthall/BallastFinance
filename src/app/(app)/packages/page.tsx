@@ -33,6 +33,13 @@ export default async function PackagesPage() {
       >
         Start a plan
       </Link>
+      <p className="-mt-2 mb-4 text-sm text-[var(--color-ink-soft)]">
+        Pricing a Disney trip?{' '}
+        <Link href="/trips" className="text-[var(--color-accent)] underline underline-offset-4">
+          Work it out under Trips
+        </Link>{' '}
+        and add it here in one tap.
+      </p>
 
       {views.length === 0 ? (
         <Empty title="No plans yet.">

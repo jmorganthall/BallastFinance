@@ -20,10 +20,11 @@ point-in-time record of what was built against, cite the document's revision num
 
 ## What it contains
 
-Fifteen sections: overview and the D1–D9 decisions log, users/auth/household, the data
+Sixteen sections: overview and the D1–D9 decisions log, users/auth/household, the data
 model, the Package Intake contract, the Reservations module (accrual math), the Allocation
 Engine, Debt Priorities, notifications, UX requirements, architecture, security, build
-phasing, out-of-scope/open items, the income module (§14), and the equity and next-home module (§15).
+phasing, out-of-scope/open items, the income module (§14), the equity and next-home module
+(§15), and the trip planner (§16, Disney first).
 
 ## Constraints the PRD marks non-negotiable
 
@@ -50,7 +51,9 @@ repo still has to know them. Everything else: read the document.
 | D | Debt inventory, scoring + slider, ladder, projections, lump-sum optimizer | Built |
 | E | Income and recurring expenses (§14) | Specified, not built |
 | F | Equity and next home: homes and vehicles, weekly mortgage rate, "What could we buy?" (§15, PRD rev 26) | Built |
+| Trip-A/B | Trip planner, Disney first: trips, ways to do it, the usual figures, the drive and gas-price fetches, "Add to Plans" (§16, PRD rev 35) | Built |
+| Trip-C | Favourite dining list (§16) | Not built |
 
-Phases A–D and F are implemented and tested. What remains before v1 is done is
+Phases A–D, F and Trip-A/B are implemented and tested. What remains before v1 is done is
 verification against reality, not more building — see the PRD's acceptance
 criteria (§12) and the open items (§13).

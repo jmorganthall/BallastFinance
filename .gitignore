@@ -38,3 +38,6 @@ pgdata/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Claude Code agent worktrees (session scratch, auto-removed)
+.claude/worktrees/

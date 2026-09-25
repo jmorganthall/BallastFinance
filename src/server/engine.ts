@@ -20,6 +20,9 @@ import {
   packages as packagesTable,
   reserveAccounts as reserveAccountsTable,
   settings as settingsTable,
+  tripLines as tripLinesTable,
+  tripVariants as tripVariantsTable,
+  trips as tripsTable,
 } from '@/db/schema'
 import { randomUUID } from 'node:crypto'
 import {
@@ -110,6 +113,37 @@ import {
   type HomeCost,
   type MarketRate,
   type RateInUse,
+  contingencyBasisPoints,
+  defaultLines,
+  DEFAULT_MAX_DRIVE_MINUTES,
+  DEFAULT_REFERENCE_PRICES,
+  driveSettingKey,
+  headlineDueDate,
+  keepTypedLines,
+  mergeReferencePrices,
+  toIntake,
+  validateChoices,
+  validateDriveEstimate,
+  validateGasPrice,
+  validateHomeLocation,
+  validateLineInputs,
+  validateReferencePrices,
+  validateTripInputs,
+  variantPrice,
+  type DefaultLine,
+  type DriveEstimate,
+  type GasPrice,
+  type HomeLocation,
+  type ReferencePrice,
+  type Traveler,
+  type Trip,
+  type TripCar,
+  type TripDestination,
+  type TripLine,
+  type TripLineCategory,
+  type TripVariant,
+  type VariantChoices,
+  type VariantPrice,
 } from '@/domain'
 
 export class EngineError extends Error {}
@@ -117,6 +151,27 @@ export class EngineError extends Error {}
 export type CreatePackageResult =
   | { ok: true; packageId: Id; lineItemIds: Id[] }
   | { ok: false; problems: IntakeProblem[] }
+
+/** A transaction handle, or the connection itself for a read outside one. */
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
+type Conn = Db | Tx
+
+/** Everything the trip screen shows: facts, plus each way's price tag from the derivation module. */
+export interface TripView {
+  trip: Trip
+  variants: (TripVariant & { lines: TripLine[]; price: VariantPrice; firstMoneyDue: CivilDate })[]
+  referencePrices: ReferencePrice[]
+  bufferCents: Cents
+  drive: DriveEstimate | null
+  gasPrice: GasPrice | null
+  maxDriveMinutes: number
+}
+
+/**
+ * Parts a person added by hand sort from here, above every default part, so a
+ * rebuild after a change of choices can tell them apart and keep them.
+ */
+const ADDED_LINE_SORT = 1000
 
 export interface EngineContext {
   householdId: Id
@@ -2134,6 +2189,518 @@ export class Engine {
     }
   }
 
+  // ---------------------------------------------------------------- trips (PRD §16)
+
+  async listTrips(): Promise<Trip[]> {
+    const rows = await this.db
+      .select()
+      .from(tripsTable)
+      .where(eq(tripsTable.householdId, this.householdId))
+    return rows.map(toTrip).sort((a, b) => a.startDate.localeCompare(b.startDate) || a.name.localeCompare(b.name))
+  }
+
+  /** The household's usual figures: the defaults, with whatever it has changed laid over them. */
+  async referencePrices(): Promise<ReferencePrice[]> {
+    const stored = await this.getSetting<ReferencePrice[] | null>('trip_reference_prices', null)
+    return mergeReferencePrices(DEFAULT_REFERENCE_PRICES, stored)
+  }
+
+  async setReferencePrices(prices: readonly ReferencePrice[]): Promise<void> {
+    validateReferencePrices(prices)
+    await this.putSetting('trip_reference_prices', prices)
+  }
+
+  async homeLocation(): Promise<HomeLocation | null> {
+    return this.getSetting<HomeLocation | null>('home_location', null)
+  }
+
+  async setHomeLocation(home: HomeLocation): Promise<void> {
+    validateHomeLocation(home)
+    await this.putSetting('home_location', home)
+  }
+
+  async maxDriveMinutes(): Promise<number> {
+    return this.getSetting<number>('trip_max_drive_minutes', DEFAULT_MAX_DRIVE_MINUTES)
+  }
+
+  async gasPrice(): Promise<GasPrice | null> {
+    return this.getSetting<GasPrice | null>('gas_price', null)
+  }
+
+  /** The drive from this trip's home, if it has been looked up. */
+  async driveEstimate(trip: Pick<Trip, 'home' | 'destination'>): Promise<DriveEstimate | null> {
+    if (!trip.home) return null
+    return this.getSetting<DriveEstimate | null>(driveSettingKey(trip.home, trip.destination), null)
+  }
+
+  /**
+   * A trip, every way of doing it, and what each comes to. The figures are
+   * the derivation module's; the rows are facts.
+   */
+  async tripView(tripId: Id): Promise<TripView | null> {
+    const [trip] = (await this.listTrips()).filter((t) => t.id === tripId)
+    if (!trip) return null
+    const [variants, referencePrices, buffer, drive, gas, maxDriveMinutes] = await Promise.all([
+      this.variantsWithLines(tripId),
+      this.referencePrices(),
+      this.bufferCents(),
+      this.driveEstimate(trip),
+      this.gasPrice(),
+      this.maxDriveMinutes(),
+    ])
+    const percent = contingencyBasisPoints(referencePrices)
+    return {
+      trip,
+      variants: variants.map((v) => ({
+        ...v,
+        price: variantPrice(v.lines, percent),
+        firstMoneyDue: headlineDueDate(v.lines, buffer, trip.startDate),
+      })),
+      referencePrices,
+      bufferCents: buffer,
+      drive,
+      gasPrice: gas,
+      maxDriveMinutes,
+    }
+  }
+
+  async createTrip(input: {
+    name: string
+    destination?: TripDestination
+    startDate: CivilDate
+    endDate: CivilDate
+    travelers: Traveler[]
+    car: TripCar | null
+  }): Promise<Trip> {
+    const name = input.name.trim()
+    const travelers = input.travelers.map((t) => ({ name: t.name.trim(), band: t.band }))
+    validateTripInputs({ ...input, name, travelers })
+    const today = this.today()
+    const home = await this.homeLocation()
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(tripsTable)
+        .values({
+          householdId: this.householdId,
+          name,
+          destination: input.destination ?? 'wdw',
+          startDate: input.startDate,
+          endDate: input.endDate,
+          travelers,
+          home,
+          car: input.car,
+          createdAt: today,
+        })
+        .returning()
+      if (!row) throw new EngineError('Could not start the trip')
+      const trip = toTrip(row)
+      await this.recordTripChange(tx, { trip_id: trip.id, before: null, after: tripEventShape(trip) })
+      return trip
+    })
+  }
+
+  /**
+   * Change the trip's facts. Who is going and for how long decide every
+   * part's quantity, so each way of doing it is rebuilt, keeping what a
+   * person typed.
+   */
+  async updateTrip(
+    tripId: Id,
+    patch: Partial<{ name: string; startDate: CivilDate; endDate: CivilDate; travelers: Traveler[]; car: TripCar | null; home: HomeLocation | null }>,
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const before = await this.tripForWrite(tx, tripId)
+      const after: Trip = {
+        ...before,
+        ...patch,
+        name: (patch.name ?? before.name).trim(),
+        travelers: (patch.travelers ?? before.travelers).map((t) => ({ name: t.name.trim(), band: t.band })),
+      }
+      validateTripInputs(after)
+      if (after.home) validateHomeLocation(after.home)
+      await tx
+        .update(tripsTable)
+        .set({
+          name: after.name,
+          startDate: after.startDate,
+          endDate: after.endDate,
+          travelers: after.travelers,
+          car: after.car,
+          home: after.home,
+        })
+        .where(eq(tripsTable.id, tripId))
+      await this.recordTripChange(tx, { trip_id: tripId, before: tripEventShape(before), after: tripEventShape(after) })
+      await this.rebuildVariants(tx, after)
+    })
+  }
+
+  /** Put a trip away without sending it. Its rows stay for the record. */
+  async retireTrip(tripId: Id): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const trip = await this.tripInHousehold(tx, tripId)
+      if (trip.retiredAt) return
+      await tx.update(tripsTable).set({ retiredAt: today }).where(eq(tripsTable.id, tripId))
+      await this.recordTripChange(tx, { trip_id: tripId, before: { retired_at: null }, after: { retired_at: today } })
+    })
+  }
+
+  /** A way of doing the trip, with every part it needs, priced from the usual figures. */
+  async addVariant(tripId: Id, input: { name: string; choices: VariantChoices }): Promise<TripVariant> {
+    const name = input.name.trim()
+    if (!name) throw new EngineError('Give this way of doing it a name, like "Drive and stay at Pop".')
+    const today = this.today()
+    return this.db.transaction(async (tx) => {
+      const trip = await this.tripForWrite(tx, tripId)
+      validateChoices(input.choices, trip)
+      const [row] = await tx
+        .insert(tripVariantsTable)
+        .values({ tripId, name, choices: input.choices, createdAt: today })
+        .returning()
+      if (!row) throw new EngineError('Could not add it')
+      const variant = toVariant(row)
+      const lines = await this.buildLines(trip, variant, [])
+      await this.replaceLines(tx, variant.id, lines)
+      await this.recordTripChange(tx, { trip_id: tripId, variant_id: variant.id, before: null, after: variantEventShape(variant) })
+      return variant
+    })
+  }
+
+  async updateVariant(tripId: Id, variantId: Id, patch: Partial<{ name: string; choices: VariantChoices }>): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const trip = await this.tripForWrite(tx, tripId)
+      const before = await this.variantInTrip(tx, tripId, variantId)
+      const after: TripVariant = { ...before, ...patch, name: (patch.name ?? before.name).trim() }
+      if (!after.name) throw new EngineError('Give this way of doing it a name.')
+      validateChoices(after.choices, trip)
+      await tx.update(tripVariantsTable).set({ name: after.name, choices: after.choices }).where(eq(tripVariantsTable.id, variantId))
+      await this.recordTripChange(tx, { trip_id: tripId, variant_id: variantId, before: variantEventShape(before), after: variantEventShape(after) })
+      if (patch.choices) {
+        const existing = await this.linesOf(tx, variantId)
+        await this.replaceLines(tx, variantId, await this.buildLines(trip, after, existing))
+      }
+    })
+  }
+
+  async removeVariant(tripId: Id, variantId: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.tripForWrite(tx, tripId)
+      const variant = await this.variantInTrip(tx, tripId, variantId)
+      await this.recordTripChange(tx, { trip_id: tripId, variant_id: variantId, before: variantEventShape(variant), after: null })
+      await tx.delete(tripVariantsTable).where(eq(tripVariantsTable.id, variantId))
+    })
+  }
+
+  /** A person's own figure for a part. From here on it is typed, dated today, and no fetch touches it. */
+  async updateTripLine(
+    tripId: Id,
+    lineId: Id,
+    patch: Partial<{ label: string; quantity: number; unitAmountCents: Cents; dueDate: CivilDate; reserveAccountId: Id | null; note: string | null }>,
+  ): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      await this.tripForWrite(tx, tripId)
+      const before = await this.lineInTrip(tx, tripId, lineId)
+      const figureChanged =
+        (patch.unitAmountCents !== undefined && patch.unitAmountCents !== before.unitAmountCents) ||
+        (patch.quantity !== undefined && patch.quantity !== before.quantity)
+      // A deal's note says what it applies to, which its cap depends on, so the note is not the person's to edit there.
+      const keepNote = patch.note === undefined || before.category === 'promotion'
+      const after: TripLine = {
+        ...before,
+        ...patch,
+        label: (patch.label ?? before.label).trim(),
+        note: keepNote ? before.note : patch.note?.trim() || null,
+        source: figureChanged ? 'typed' : before.source,
+        asOf: figureChanged ? today : before.asOf,
+      }
+      validateLineInputs(after)
+      if (after.reserveAccountId) await this.accountInHousehold(after.reserveAccountId)
+      await tx
+        .update(tripLinesTable)
+        .set({
+          label: after.label,
+          quantity: after.quantity,
+          unitAmountCents: after.unitAmountCents,
+          dueDate: after.dueDate,
+          reserveAccountId: after.reserveAccountId,
+          source: after.source,
+          asOf: after.asOf,
+          note: after.note,
+        })
+        .where(eq(tripLinesTable.id, lineId))
+      await this.recordTripChange(tx, {
+        trip_id: tripId,
+        variant_id: before.variantId,
+        line_id: lineId,
+        before: lineEventShape(before),
+        after: lineEventShape(after),
+      })
+    })
+  }
+
+  /** A part the defaults did not think of. Kept through rebuilds. */
+  async addTripLine(
+    tripId: Id,
+    variantId: Id,
+    input: { category: TripLineCategory; label: string; quantity: number; unitAmountCents: Cents; dueDate: CivilDate; reserveAccountId?: Id | null; note?: string | null },
+  ): Promise<TripLine> {
+    const today = this.today()
+    return this.db.transaction(async (tx) => {
+      await this.tripForWrite(tx, tripId)
+      await this.variantInTrip(tx, tripId, variantId)
+      const line = { ...input, label: input.label.trim(), note: input.note?.trim() || null }
+      validateLineInputs(line)
+      if (line.reserveAccountId) await this.accountInHousehold(line.reserveAccountId)
+      const existing = await this.linesOf(tx, variantId)
+      const sort = Math.max(ADDED_LINE_SORT - 1, ...existing.map((l) => l.sort)) + 1
+      const [row] = await tx
+        .insert(tripLinesTable)
+        .values({
+          variantId,
+          category: line.category,
+          label: line.label,
+          quantity: line.quantity,
+          unitAmountCents: line.unitAmountCents,
+          dueDate: line.dueDate,
+          reserveAccountId: line.reserveAccountId ?? null,
+          source: 'typed',
+          asOf: today,
+          note: line.note,
+          sort,
+        })
+        .returning()
+      if (!row) throw new EngineError('Could not add the part')
+      const added = toTripLine(row)
+      await this.recordTripChange(tx, { trip_id: tripId, variant_id: variantId, line_id: added.id, before: null, after: lineEventShape(added) })
+      return added
+    })
+  }
+
+  async removeTripLine(tripId: Id, lineId: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.tripForWrite(tx, tripId)
+      const line = await this.lineInTrip(tx, tripId, lineId)
+      await this.recordTripChange(tx, { trip_id: tripId, variant_id: line.variantId, line_id: lineId, before: lineEventShape(line), after: null })
+      await tx.delete(tripLinesTable).where(eq(tripLinesTable.id, lineId))
+    })
+  }
+
+  /**
+   * Keep a looked-up drive for this trip's home, and refresh every fuel figure
+   * that came from a fetch. A typed fuel figure is left alone (D20).
+   */
+  async recordDriveEstimate(tripId: Id, drive: DriveEstimate): Promise<void> {
+    validateDriveEstimate(drive)
+    const trip = (await this.listTrips()).find((t) => t.id === tripId)
+    if (!trip) throw new EngineError('No such trip in this household')
+    if (!trip.home) throw new EngineError('The trip needs a home to drive from. Set it under Trips.')
+    await this.putSetting(driveSettingKey(trip.home, trip.destination), drive)
+    await this.refreshFetchedLines(tripId)
+  }
+
+  /** Keep this week's gas price and refresh every fetched fuel figure on every open trip. */
+  async recordGasPrice(gas: GasPrice): Promise<void> {
+    validateGasPrice(gas)
+    await this.putSetting('gas_price', gas)
+    for (const trip of await this.listTrips()) {
+      if (trip.sentOn || trip.retiredAt) continue
+      await this.refreshFetchedLines(trip.id)
+    }
+  }
+
+  /**
+   * Add to Plans (PRD §16): the one-way handoff. The way of doing it becomes a
+   * package through the intake contract, exactly as the manual builder's
+   * would, and the trip records which one went and when. From here on the
+   * plan is the truth; the trip's figures are read-only.
+   */
+  async sendVariantToPlans(
+    tripId: Id,
+    variantId: Id,
+    options: { defaultAccountId: Id },
+  ): Promise<CreatePackageResult> {
+    const today = this.today()
+    const trip = (await this.listTrips()).find((t) => t.id === tripId)
+    if (!trip) throw new EngineError('No such trip in this household')
+    if (trip.packageId) throw new EngineError('This trip is a plan already.')
+    const variant = (await this.variantsWithLines(tripId)).find((v) => v.id === variantId)
+    if (!variant) throw new EngineError('No such way of doing it on this trip')
+    await this.accountInHousehold(options.defaultAccountId)
+
+    const intake = toIntake({
+      trip,
+      variant,
+      lines: variant.lines,
+      referencePrices: await this.referencePrices(),
+      defaultAccountId: options.defaultAccountId,
+      today,
+    })
+    // Account scope is checked inside intake (canWriteAccount for the actor),
+    // so a part pointed at a spouse's account is refused with a message, not sent.
+    const created = await this.createPackageFromIntake(intake)
+    if (!created.ok) return created
+
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(tripsTable)
+        .set({ chosenVariantId: variantId, packageId: created.packageId, sentOn: today })
+        .where(and(eq(tripsTable.id, tripId), eq(tripsTable.householdId, this.householdId)))
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'trip_sent',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { trip_id: tripId, variant_id: variantId, package_id: created.packageId },
+      })
+    })
+    return created
+  }
+
+  // -- trip plumbing: every read is household-scoped through the trip row
+
+  private async tripInHousehold(tx: Conn, tripId: Id): Promise<Trip> {
+    const [row] = await tx
+      .select()
+      .from(tripsTable)
+      .where(and(eq(tripsTable.id, tripId), eq(tripsTable.householdId, this.householdId)))
+    if (!row) throw new EngineError('No such trip in this household')
+    return toTrip(row)
+  }
+
+  /** A trip that may still change: not sent, not put away. */
+  private async tripForWrite(tx: Conn, tripId: Id): Promise<Trip> {
+    const trip = await this.tripInHousehold(tx, tripId)
+    if (trip.packageId) throw new EngineError('This trip is a plan now. Change the plan instead.')
+    if (trip.retiredAt) throw new EngineError('This trip has been put away.')
+    return trip
+  }
+
+  private async variantInTrip(tx: Conn, tripId: Id, variantId: Id): Promise<TripVariant> {
+    const [row] = await tx
+      .select()
+      .from(tripVariantsTable)
+      .where(and(eq(tripVariantsTable.id, variantId), eq(tripVariantsTable.tripId, tripId)))
+    if (!row) throw new EngineError('No such way of doing it on this trip')
+    return toVariant(row)
+  }
+
+  private async lineInTrip(tx: Conn, tripId: Id, lineId: Id): Promise<TripLine> {
+    const [row] = await tx
+      .select({ line: tripLinesTable })
+      .from(tripLinesTable)
+      .innerJoin(tripVariantsTable, eq(tripLinesTable.variantId, tripVariantsTable.id))
+      .where(and(eq(tripLinesTable.id, lineId), eq(tripVariantsTable.tripId, tripId)))
+    if (!row) throw new EngineError('No such part on this trip')
+    return toTripLine(row.line)
+  }
+
+  private async accountInHousehold(accountId: Id): Promise<ReserveAccount> {
+    const account = (await this.listReserveAccounts()).find((a) => a.id === accountId)
+    if (!account) throw new EngineError('No such reserve account in this household')
+    return account
+  }
+
+  private async linesOf(tx: Conn, variantId: Id): Promise<TripLine[]> {
+    const rows = await tx.select().from(tripLinesTable).where(eq(tripLinesTable.variantId, variantId))
+    return rows.map(toTripLine).sort((a, b) => a.sort - b.sort)
+  }
+
+  private async variantsWithLines(tripId: Id): Promise<(TripVariant & { lines: TripLine[] })[]> {
+    const variants = (await this.db.select().from(tripVariantsTable).where(eq(tripVariantsTable.tripId, tripId)))
+      .map(toVariant)
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.name.localeCompare(b.name))
+    return Promise.all(variants.map(async (v) => ({ ...v, lines: await this.linesOf(this.db, v.id) })))
+  }
+
+  /** The default parts for a way of doing it, with the person's typed figures and added parts carried over. */
+  private async buildLines(trip: Trip, variant: TripVariant, existing: readonly TripLine[]): Promise<DefaultLine[]> {
+    const [referencePrices, drive, gas, maxDriveMinutes] = await Promise.all([
+      this.referencePrices(),
+      this.driveEstimate(trip),
+      this.gasPrice(),
+      this.maxDriveMinutes(),
+    ])
+    const fresh = defaultLines(trip, variant, { referencePrices, drive, gasPrice: gas, maxDriveMinutes, today: this.today() })
+    // Default parts carry their typed figures over by name; added parts come along as they are.
+    const kept = keepTypedLines(
+      existing.filter((l) => l.sort < ADDED_LINE_SORT),
+      fresh,
+    )
+    const added = existing.filter((l) => l.sort >= ADDED_LINE_SORT)
+    return [...kept, ...added]
+  }
+
+  private async replaceLines(tx: Conn, variantId: Id, lines: readonly DefaultLine[]): Promise<void> {
+    await tx.delete(tripLinesTable).where(eq(tripLinesTable.variantId, variantId))
+    if (lines.length === 0) return
+    await tx.insert(tripLinesTable).values(
+      lines.map((l) => ({
+        variantId,
+        category: l.category,
+        label: l.label,
+        quantity: l.quantity,
+        unitAmountCents: l.unitAmountCents,
+        dueDate: l.dueDate,
+        reserveAccountId: l.reserveAccountId,
+        source: l.source,
+        asOf: l.asOf,
+        note: l.note,
+        sort: l.sort,
+      })),
+    )
+  }
+
+  private async rebuildVariants(tx: Conn, trip: Trip): Promise<void> {
+    const variants = (await tx.select().from(tripVariantsTable).where(eq(tripVariantsTable.tripId, trip.id))).map(toVariant)
+    for (const variant of variants) {
+      const existing = await this.linesOf(tx, variant.id)
+      await this.replaceLines(tx, variant.id, await this.buildLines(trip, variant, existing))
+    }
+  }
+
+  /**
+   * After a fetch: every way that drives is rebuilt, so a fuel figure that
+   * came from a fetch takes the new one and a long drive gains its hotel on
+   * the way. A typed fuel figure survives the rebuild untouched (D20). The
+   * fuel figure's before and after is kept, as any other change is.
+   */
+  private async refreshFetchedLines(tripId: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const trip = await this.tripInHousehold(tx, tripId)
+      if (trip.packageId || trip.retiredAt) return
+      const variants = (await tx.select().from(tripVariantsTable).where(eq(tripVariantsTable.tripId, tripId))).map(toVariant)
+      for (const variant of variants) {
+        if (variant.choices.travel !== 'drive') continue
+        const existing = await this.linesOf(tx, variant.id)
+        await this.replaceLines(tx, variant.id, await this.buildLines(trip, variant, existing))
+        const before = existing.find((l) => l.source === 'fetched') ?? null
+        const after = (await this.linesOf(tx, variant.id)).find((l) => l.source === 'fetched') ?? null
+        if (after && after.unitAmountCents !== before?.unitAmountCents) {
+          await this.recordTripChange(tx, {
+            trip_id: tripId,
+            variant_id: variant.id,
+            line_id: after.id,
+            before: before ? lineEventShape(before) : null,
+            after: lineEventShape(after),
+          })
+        }
+      }
+    })
+  }
+
+  private async recordTripChange(tx: Conn, payload: Record<string, unknown>): Promise<void> {
+    await tx.insert(events).values({
+      householdId: this.householdId,
+      kind: 'trip_changed',
+      occurredAt: this.today(),
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload,
+    })
+  }
+
   /** Settings are versioned by effective_from; a change adds a row, never edits one. */
   async putSetting(key: string, value: unknown): Promise<void> {
     await this.db
@@ -2205,6 +2772,82 @@ function toAsset(r: typeof assetsTable.$inferSelect): Asset {
     valueAsOf: r.valueAsOf as CivilDate,
     sellingCostBasisPoints: r.sellingCostBasisPoints,
     state: r.state,
+  }
+}
+
+function toTrip(r: typeof tripsTable.$inferSelect): Trip {
+  return {
+    id: r.id,
+    householdId: r.householdId,
+    name: r.name,
+    destination: r.destination as TripDestination,
+    startDate: r.startDate as CivilDate,
+    endDate: r.endDate as CivilDate,
+    travelers: (r.travelers as Traveler[]) ?? [],
+    home: (r.home as HomeLocation | null) ?? null,
+    car: (r.car as TripCar | null) ?? null,
+    chosenVariantId: r.chosenVariantId,
+    packageId: r.packageId,
+    sentOn: (r.sentOn as CivilDate | null) ?? null,
+    createdAt: r.createdAt as CivilDate,
+    retiredAt: (r.retiredAt as CivilDate | null) ?? null,
+  }
+}
+
+function toVariant(r: typeof tripVariantsTable.$inferSelect): TripVariant {
+  return {
+    id: r.id,
+    tripId: r.tripId,
+    name: r.name,
+    choices: r.choices as VariantChoices,
+    createdAt: r.createdAt as CivilDate,
+  }
+}
+
+function toTripLine(r: typeof tripLinesTable.$inferSelect): TripLine {
+  return {
+    id: r.id,
+    variantId: r.variantId,
+    category: r.category,
+    label: r.label,
+    quantity: r.quantity,
+    unitAmountCents: r.unitAmountCents,
+    dueDate: r.dueDate as CivilDate,
+    reserveAccountId: r.reserveAccountId,
+    source: r.source,
+    asOf: r.asOf as CivilDate,
+    note: r.note,
+    sort: r.sort,
+  }
+}
+
+function tripEventShape(t: Trip) {
+  return {
+    name: t.name,
+    destination: t.destination,
+    start_date: t.startDate,
+    end_date: t.endDate,
+    travelers: t.travelers,
+    home: t.home,
+    car: t.car,
+  }
+}
+
+function variantEventShape(v: TripVariant) {
+  return { name: v.name, choices: v.choices }
+}
+
+function lineEventShape(l: TripLine) {
+  return {
+    category: l.category,
+    label: l.label,
+    quantity: l.quantity,
+    unit_amount_cents: l.unitAmountCents,
+    due_date: l.dueDate,
+    reserve_account_id: l.reserveAccountId,
+    source: l.source,
+    as_of: l.asOf,
+    note: l.note,
   }
 }
 
