@@ -7,8 +7,14 @@
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, PageHeader, Pill } from '@/components/ui'
-import { createTripAction, saveHomeLocationAction, saveReferencePricesAction } from '@/server/actions'
-import { dollarsForInput, headCount, percentForInput, referenceFreshness, sourceName, type Trip } from '@/domain'
+import {
+  createTripAction,
+  saveBlackoutDatesAction,
+  saveHomeAddressAction,
+  savePackTemplateAction,
+  saveReferencePricesAction,
+} from '@/server/actions'
+import { dollarsForInput, headCount, homeIsLocated, percentForInput, referenceFreshness, sourceName, type Trip } from '@/domain'
 import { TravelerFields } from './traveler-fields'
 
 export const dynamic = 'force-dynamic'
@@ -32,10 +38,12 @@ export default async function TripsPage({
 }) {
   const { error, saved } = await searchParams
   const { engine } = await requireEngine()
-  const [trips, prices, home, today] = await Promise.all([
+  const [trips, prices, home, blackouts, packTemplate, today] = await Promise.all([
     engine.listTrips(),
     engine.referencePrices(),
     engine.homeLocation(),
+    engine.blackoutDates(),
+    engine.packTemplate(),
     Promise.resolve(engine.today()),
   ])
   const open = trips.filter((t) => !t.retiredAt)
@@ -48,6 +56,10 @@ export default async function TripsPage({
 
       {error ? (
         <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">{error}</p>
+      ) : saved === 'home' ? (
+        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">
+          Home saved{home?.resolvedName ? ` and found on the map: ${home.resolvedName}` : ''}.
+        </p>
       ) : saved ? (
         <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">Saved.</p>
       ) : null}
@@ -111,7 +123,11 @@ export default async function TripsPage({
           </div>
           <p className="text-xs text-[var(--color-ink-soft)]">
             The car is only for pricing the drive. Leave it blank if you would fly.
-            {home ? ` Home is ${home.label}, from the settings below.` : ' Set where home is below so the drive can be looked up.'}
+            {home
+              ? homeIsLocated(home)
+                ? ` Home is ${home.label}, from the settings below.`
+                : ` Home is ${home.label}, but it has not been found on the map yet, so the drive will wait.`
+              : ' Set where home is below so the drive can be looked up.'}
           </p>
           <button type="submit" className={primaryButton}>
             Start the trip
@@ -138,26 +154,90 @@ export default async function TripsPage({
       <h2 className={sectionTitle}>Where home is</h2>
       <Card>
         <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
-          For looking up the drive to Orlando. Latitude and longitude from a map app (right-click your house); nothing
-          here is sent anywhere but the public route service, and only when you press &ldquo;Check the drive&rdquo;.
+          For looking up the drive to Orlando. Type the address; saving finds it on the map once, through the public
+          OpenStreetMap service, and keeps the spot. Nothing is sent anywhere except when you press save.
         </p>
-        <form action={saveHomeLocationAction} className="space-y-3">
+        {home ? (
+          <p className="mb-3 text-sm">
+            {homeIsLocated(home) ? (
+              <>
+                <strong>{home.address ?? home.label}</strong>
+                {home.resolvedName ? (
+                  <span className="block text-xs text-[var(--color-ink-soft)]">
+                    Found on the map as {home.resolvedName}
+                    {home.geocodedOn ? `, ${humanDate(home.geocodedOn)}` : ''}.
+                  </span>
+                ) : (
+                  <span className="block text-xs text-[var(--color-ink-soft)]">Saved as a spot on the map, before addresses were typed here.</span>
+                )}
+              </>
+            ) : (
+              <>
+                <strong>{home.address ?? home.label}</strong>
+                <span className="block text-xs text-[var(--color-behind)]">
+                  Not found on the map yet, so the drive cannot be looked up. Check the address and save it again.
+                </span>
+              </>
+            )}
+          </p>
+        ) : null}
+        <form action={saveHomeAddressAction} className="space-y-3">
           <label className="block text-sm font-medium">
-            Label
-            <input name="label" required defaultValue={home?.label ?? ''} placeholder="Home" className={input} />
+            Address
+            <input
+              name="address"
+              required
+              defaultValue={home?.address ?? ''}
+              placeholder="123 Main St, Springfield, IL 62701"
+              autoComplete="street-address"
+              className={input}
+            />
           </label>
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block text-sm font-medium">
-              Latitude
-              <input name="latitude" required inputMode="decimal" defaultValue={home?.latitude ?? ''} placeholder="41.8781" className={input} />
-            </label>
-            <label className="block text-sm font-medium">
-              Longitude
-              <input name="longitude" required inputMode="decimal" defaultValue={home?.longitude ?? ''} placeholder="-87.6298" className={input} />
-            </label>
-          </div>
           <button type="submit" className={secondaryButton}>
-            Save home
+            Save and find it on the map
+          </button>
+        </form>
+      </Card>
+
+      <h2 className={sectionTitle}>Weeks we cannot go</h2>
+      <Card>
+        <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+          School terms, work trips, the recital. A trip&apos;s &ldquo;When&rdquo; section flags any week that runs into
+          one of these. Leave a row blank to drop it.
+        </p>
+        <form action={saveBlackoutDatesAction} className="space-y-2">
+          {[...blackouts, { from: '', to: '', label: '' }, { from: '', to: '', label: '' }].map((b, i) => (
+            <div key={i} className="grid grid-cols-[1fr_1fr_1.4fr] gap-2">
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                From
+                <input name="blackout_from" type="date" defaultValue={b.from} className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                To
+                <input name="blackout_to" type="date" defaultValue={b.to} className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                What
+                <input name="blackout_label" defaultValue={b.label} placeholder="School term" className={input} />
+              </label>
+            </div>
+          ))}
+          <button type="submit" className={secondaryButton}>
+            Save these weeks
+          </button>
+        </form>
+      </Card>
+
+      <h2 className={sectionTitle}>What we always pack</h2>
+      <Card>
+        <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+          One item a line. Every trip&apos;s to-do list gets these, due the day before it starts. Changing the list
+          here reaches a trip when its timeline is rebuilt.
+        </p>
+        <form action={savePackTemplateAction} className="space-y-2">
+          <textarea name="pack_template" rows={Math.max(4, packTemplate.length + 1)} defaultValue={packTemplate.join('\n')} className={input} />
+          <button type="submit" className={secondaryButton}>
+            Save the packing list
           </button>
         </form>
       </Card>

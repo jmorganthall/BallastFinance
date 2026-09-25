@@ -419,7 +419,7 @@ describe('what came back from a fetch', () => {
   })
 
   it('stores a drive under a key that depends only on home and destination', () => {
-    const key = driveSettingKey(trip.home!, 'wdw')
+    const key = driveSettingKey({ ...trip.home!, latitude: 41.8781, longitude: -87.6298 }, 'wdw')
     expect(key).toMatch(/^trip_drive_[0-9a-f]{8}$/)
     expect(driveSettingKey({ label: 'Elsewhere', latitude: 41.87811, longitude: -87.62981 }, 'wdw')).toBe(key)
     expect(driveSettingKey({ label: 'Home', latitude: 40.0, longitude: -87.6298 }, 'wdw')).not.toBe(key)

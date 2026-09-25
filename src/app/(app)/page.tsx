@@ -16,18 +16,20 @@ import {
   instructionSentence,
   respreadEquivalentPerWeekCents,
   runningAdjustments,
+  taskBucket,
 } from '@/domain'
-import { confirmInstructionAction, confirmSpendAction, endInstructionAction } from '@/server/actions'
+import { confirmInstructionAction, confirmSpendAction, endInstructionAction, toggleTaskAction } from '@/server/actions'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ThisWeekPage() {
   const { engine, viewer } = await requireEngine()
-  const [accounts, outstanding, closeOuts, commitments] = await Promise.all([
+  const [accounts, outstanding, closeOuts, commitments, tripToDos] = await Promise.all([
     engine.accountViews(),
     engine.outstandingInstructions(),
     engine.closeOutPrompts(),
     engine.openCommitmentsByAccount(),
+    engine.comingUpTripTasks(3),
   ])
   const today = engine.today()
 
@@ -236,6 +238,46 @@ export default async function ThisWeekPage() {
               </li>
             ))}
           </ul>
+        </section>
+      ) : null}
+
+      {/*
+        * Trip to-dos are not money to-dos (PRD §16 D22): booking a table moves
+        * nothing in the bank. They get a small card of their own, only when
+        * there are any, so the weekly number is never crowded by them.
+        */}
+      {tripToDos.length > 0 ? (
+        <section className="mb-5">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            Coming up for trips
+          </h2>
+          <Card>
+            <ul className="divide-y divide-[var(--color-line)]">
+              {tripToDos.map((task) => (
+                <li key={task.id} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                  <div className="min-w-0">
+                    <p className="text-sm">{task.label}</p>
+                    <p className="text-xs text-[var(--color-ink-soft)]">
+                      {taskBucket(task, today) === 'overdue' ? 'Was due ' : 'By '}
+                      {humanDate(task.dueOn)} ·{' '}
+                      <Link href={`/trips/${task.tripId}#to-do`} className="text-[var(--color-accent)] underline underline-offset-4">
+                        {task.tripName}
+                      </Link>
+                    </p>
+                  </div>
+                  <form action={toggleTaskAction}>
+                    <input type="hidden" name="trip_id" value={task.tripId} />
+                    <input type="hidden" name="task_id" value={task.id} />
+                    <input type="hidden" name="done" value="0" />
+                    <input type="hidden" name="back" value="home" />
+                    <button type="submit" className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium">
+                      Done
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          </Card>
         </section>
       ) : null}
 

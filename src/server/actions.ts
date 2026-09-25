@@ -1077,9 +1077,11 @@ export async function checkDriveAction(formData: FormData): Promise<void> {
   if (!tripFetchEnabled()) {
     backToTrip(tripId, 'Looking things up is switched off on this machine (TRIP_FETCH=off). Type the miles and hours instead.')
   }
+  const { homeIsLocated } = await import('@/domain')
   const trip = (await engine.listTrips()).find((t) => t.id === tripId)
   if (!trip) backToTrip(tripId, 'No such trip.')
   if (!trip.home) backToTrip(tripId, 'Set where home is first, under Trips.')
+  if (!homeIsLocated(trip.home)) backToTrip(tripId, 'Home has not been found on the map yet, so the drive cannot be looked up. Save the address again under Trips.')
   let drive: Awaited<ReturnType<typeof fetchDrive>> = null
   try {
     drive = await fetchDrive(trip.home, trip.destination, engine.today())
@@ -1169,12 +1171,275 @@ export async function saveReferencePricesAction(formData: FormData): Promise<voi
   redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
 }
 
-export async function saveHomeLocationAction(formData: FormData): Promise<void> {
+/**
+ * Where home is (D24): the address as typed, found on the map once when it
+ * is saved. A lookup that fails, or is switched off, still saves the address
+ * and says the drive will wait.
+ */
+export async function saveHomeAddressAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const field = (name: string) => String(formData.get(name) ?? '').trim()
-  const done = await tripRefusalOf(() =>
-    engine.setHomeLocation({ label: field('label'), latitude: Number(field('latitude')), longitude: Number(field('longitude')) }),
-  )
+  const { geocodeAddress, tripFetchEnabled } = await import('@/server/trip-fetch')
+  const address = String(formData.get('address') ?? '').trim()
+  const backToTrips = (message: string | null, query: string = 'saved=1'): never => {
+    revalidatePath('/trips')
+    redirect(message ? `/trips?error=${encodeURIComponent(message)}` : `/trips?${query}`)
+  }
+  if (!address) backToTrips('Type the address home is at.')
+  let geocode: Awaited<ReturnType<typeof geocodeAddress>> = null
+  let problem: string | null = null
+  if (!tripFetchEnabled()) {
+    problem = 'Looking things up is switched off on this machine (TRIP_FETCH=off), so home could not be found on the map.'
+  } else {
+    try {
+      geocode = await geocodeAddress(address)
+      if (!geocode) problem = 'The map service could not find that address. Check it and save again.'
+    } catch (error) {
+      problem = `Could not find home on the map: ${(error as Error).message}`
+    }
+  }
+  const done = await tripRefusalOf(() => engine.setHomeAddress({ address, geocode, geocodedOn: engine.today() }))
+  if (done.message !== null) backToTrips(done.message)
+  if (problem) backToTrips(`The address is saved. ${problem} The drive cannot be looked up until it resolves.`)
+  backToTrips(null, 'saved=home')
+}
+
+export async function saveBlackoutDatesAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const froms = formData.getAll('blackout_from').map(String)
+  const tos = formData.getAll('blackout_to').map(String)
+  const labels = formData.getAll('blackout_label').map(String)
+  const done = await tripRefusalOf(async () => {
+    const ranges = froms
+      .map((from, i) => ({ from: from.trim(), to: (tos[i] ?? '').trim(), label: (labels[i] ?? '').trim() }))
+      .filter((r) => r.from !== '' || r.to !== '' || r.label !== '')
+    for (const r of ranges) {
+      assertCivilDate(r.from)
+      assertCivilDate(r.to || r.from)
+    }
+    await engine.setBlackoutDates(ranges.map((r) => ({ ...r, to: r.to || r.from })))
+  })
   revalidatePath('/trips')
   redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
+}
+
+export async function savePackTemplateAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const lines = String(formData.get('pack_template') ?? '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== '')
+  const done = await tripRefusalOf(() => engine.setPackTemplate(lines))
+  revalidatePath('/trips')
+  redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
+}
+
+// -- planning a trip (D22, D23)
+
+export async function useWeekAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const start = String(formData.get('start_date') ?? '')
+  const done = await tripRefusalOf(async () => {
+    assertCivilDate(start)
+    await engine.shiftTrip(tripId, start)
+  })
+  backToTrip(tripId, done.message)
+}
+
+export async function updateTripDayAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { TRIP_PARKS } = await import('@/domain')
+  const tripId = String(formData.get('trip_id'))
+  const park = String(formData.get('park') ?? '') as (typeof TRIP_PARKS)[number]
+  const done = await tripRefusalOf(() =>
+    engine.updateTripDay(tripId, String(formData.get('day_id')), {
+      park: TRIP_PARKS.includes(park) ? park : undefined,
+      plan: { notes: String(formData.get('notes') ?? ''), ropeDrop: formData.get('rope_drop') === 'on' },
+    }),
+  )
+  backToTrip(tripId, done.message, `saved=1#day-${String(formData.get('day_id'))}`)
+}
+
+export async function typeCrowdLevelAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { TRIP_PARKS, TripPlanError } = await import('@/domain')
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(async () => {
+    const date = String(formData.get('date') ?? '')
+    assertCivilDate(date)
+    const park = String(formData.get('park') ?? '') as (typeof TRIP_PARKS)[number]
+    if (!TRIP_PARKS.includes(park)) throw new TripPlanError('Pick which park this is for.')
+    const level = Number(String(formData.get('level') ?? ''))
+    await engine.typeCrowdLevel(tripId, { date, park, level: Number.isInteger(level) ? level : -1 })
+  })
+  backToTrip(tripId, done.message)
+}
+
+/**
+ * "Check how busy": pull the crowd calendar for the trip's months and hold
+ * what came back for the person to look at. Nothing is a crowd level until
+ * they keep it. Every source's failure is a line on the screen.
+ */
+export async function checkCrowdsAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { pullCrowdCalendar, tripFetchEnabled } = await import('@/server/trip-fetch')
+  const { monthsOf } = await import('@/domain')
+  const tripId = String(formData.get('trip_id'))
+  if (!tripFetchEnabled()) {
+    backToTrip(tripId, 'Looking things up is switched off on this machine (TRIP_FETCH=off). Type how busy each day is instead.')
+  }
+  const trip = (await engine.listTrips()).find((t) => t.id === tripId)
+  if (!trip) backToTrip(tripId, 'No such trip.')
+  const months = monthsOf(trip)
+  const pulled = await pullCrowdCalendar(trip.destination, months)
+  if (!pulled.source) {
+    await engine.stashCrowdPull(null)
+    backToTrip(tripId, `No crowd calendar could be read. ${pulled.notes.join(' ')} Type how busy each day is instead.`)
+  }
+  await engine.stashCrowdPull({
+    source: pulled.source.key,
+    label: pulled.source.label,
+    destination: trip.destination,
+    months,
+    levels: pulled.levels,
+    fetchedOn: engine.today(),
+    notes: pulled.notes,
+  })
+  backToTrip(tripId, null, 'crowds=1')
+}
+
+export async function keepCrowdPullAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(() => engine.keepCrowdPull())
+  backToTrip(tripId, done.message)
+}
+
+export async function discardCrowdPullAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  await engine.stashCrowdPull(null)
+  backToTrip(tripId, null)
+}
+
+function reservationFields(formData: FormData) {
+  const field = (name: string) => String(formData.get(name) ?? '').trim()
+  return {
+    date: field('date'),
+    time: field('time') || null,
+    kind: field('kind'),
+    name: field('name'),
+    park: field('park') || null,
+    confirmation: field('confirmation') || null,
+    party: field('party'),
+    perPerson: field('per_person'),
+    lineId: field('line_id') || null,
+    note: field('note') || null,
+  }
+}
+
+async function reservationInput(formData: FormData) {
+  const { parseAmountOrNull, RESERVATION_KINDS, TRIP_PARKS, TripPlanError } = await import('@/domain')
+  const f = reservationFields(formData)
+  assertCivilDate(f.date)
+  const kind = f.kind as (typeof RESERVATION_KINDS)[number]
+  if (!RESERVATION_KINDS.includes(kind)) throw new TripPlanError('Say what kind of reservation this is.')
+  const park = f.park as (typeof TRIP_PARKS)[number] | null
+  if (park !== null && !TRIP_PARKS.includes(park)) throw new TripPlanError('That is not a park this planner knows.')
+  const perPersonCents = f.perPerson === '' ? null : parseAmountOrNull(f.perPerson)
+  if (f.perPerson !== '' && perPersonCents === null) throw new TripPlanError('Enter the cost per person as an amount, like 65.')
+  const party = Number(f.party || '1')
+  return {
+    date: f.date,
+    time: f.time,
+    kind,
+    name: f.name,
+    park,
+    confirmation: f.confirmation,
+    party: Number.isInteger(party) ? party : -1,
+    perPersonCents,
+    lineId: f.lineId,
+    note: f.note,
+  }
+}
+
+export async function addReservationAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(async () => {
+    await engine.addReservation(tripId, await reservationInput(formData))
+  })
+  backToTrip(tripId, done.message, 'saved=1#reservations')
+}
+
+export async function updateReservationAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(async () => {
+    await engine.updateReservation(tripId, String(formData.get('reservation_id')), await reservationInput(formData))
+  })
+  backToTrip(tripId, done.message, 'saved=1#reservations')
+}
+
+export async function removeReservationAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(() => engine.removeReservation(tripId, String(formData.get('reservation_id'))))
+  backToTrip(tripId, done.message, 'saved=1#reservations')
+}
+
+async function taskInput(formData: FormData) {
+  const { TASK_KINDS, TripPlanError } = await import('@/domain')
+  const field = (name: string) => String(formData.get(name) ?? '').trim()
+  const kind = field('kind') as (typeof TASK_KINDS)[number]
+  if (!TASK_KINDS.includes(kind)) throw new TripPlanError('Say what kind of to-do this is.')
+  const dueOn = field('due_on')
+  assertCivilDate(dueOn)
+  return { kind, label: field('label'), dueOn, link: field('link') || null, lineId: field('line_id') || null }
+}
+
+export async function addTaskAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(async () => {
+    await engine.addTask(tripId, await taskInput(formData))
+  })
+  backToTrip(tripId, done.message, 'saved=1#to-do')
+}
+
+export async function updateTaskAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(async () => {
+    await engine.updateTask(tripId, String(formData.get('task_id')), await taskInput(formData))
+  })
+  backToTrip(tripId, done.message, 'saved=1#to-do')
+}
+
+/** One tap: done, or not done after all. Also used from the home screen. */
+export async function toggleTaskAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const taskId = String(formData.get('task_id'))
+  const done = await tripRefusalOf(() => (formData.get('done') === '1' ? engine.untickTask(tripId, taskId) : engine.tickTask(tripId, taskId)))
+  if (formData.get('back') === 'home') {
+    revalidatePath('/')
+    revalidatePath(`/trips/${tripId}`)
+    redirect(done.message ? `/trips/${tripId}?error=${encodeURIComponent(done.message)}` : '/')
+  }
+  backToTrip(tripId, done.message, 'saved=1#to-do')
+}
+
+export async function removeTaskAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(() => engine.removeTask(tripId, String(formData.get('task_id'))))
+  backToTrip(tripId, done.message, 'saved=1#to-do')
+}
+
+export async function rebuildTimelineAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(() => engine.rebuildTimeline(tripId))
+  backToTrip(tripId, done.message, 'saved=1#to-do')
 }

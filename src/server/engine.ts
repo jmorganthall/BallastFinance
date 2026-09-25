@@ -10,7 +10,7 @@
  * this file calls but never duplicates: there is no arithmetic in this layer.
  */
 
-import { and, eq } from 'drizzle-orm'
+import { and, eq, gte, isNull, lte } from 'drizzle-orm'
 import { db as defaultDb, type Db } from '@/db/client'
 import {
   assets as assetsTable,
@@ -20,7 +20,11 @@ import {
   packages as packagesTable,
   reserveAccounts as reserveAccountsTable,
   settings as settingsTable,
+  crowdLevels as crowdLevelsTable,
+  tripDays as tripDaysTable,
   tripLines as tripLinesTable,
+  tripReservations as tripReservationsTable,
+  tripTasks as tripTasksTable,
   tripVariants as tripVariantsTable,
   trips as tripsTable,
 } from '@/db/schema'
@@ -144,6 +148,39 @@ import {
   type TripVariant,
   type VariantChoices,
   type VariantPrice,
+  homeIsLocated,
+  ADDED_LINE_SORT,
+  addDays,
+  compareDates,
+  lineTotalCents as tripLineTotalCents,
+  bookingTimeline,
+  comingUpTasks,
+  cutDays,
+  dayPlan,
+  DEFAULT_PACK_TEMPLATE,
+  mergeTimeline,
+  reservationMoney,
+  sortReservations,
+  sortTasks,
+  validateBlackoutDates,
+  validateCrowdLevel,
+  validateDayInputs,
+  validatePackTemplate,
+  validateReservationInputs,
+  validateTaskInputs,
+  weekComparison,
+  type BlackoutRange,
+  type CrowdLevel,
+  type DayView,
+  type GeocodeResult,
+  type ParsedCrowdLevel,
+  type ReservationMoney,
+  type TaskKind,
+  type TripDay,
+  type TripPark,
+  type TripReservation,
+  type TripTask,
+  type WeekComparisonRow,
 } from '@/domain'
 
 export class EngineError extends Error {}
@@ -155,6 +192,38 @@ export type CreatePackageResult =
 /** A transaction handle, or the connection itself for a read outside one. */
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 type Conn = Db | Tx
+
+/**
+ * A crowd calendar pull, held for the person to look at before it is kept
+ * (D23). Facts as fetched, not yet crowd levels: "Use these" makes them so.
+ */
+export interface CrowdPull {
+  source: string
+  label: string
+  destination: TripDestination
+  months: string[]
+  levels: ParsedCrowdLevel[]
+  fetchedOn: CivilDate
+  /** What each source said when it gave nothing, so the screen can say so plainly. */
+  notes: string[]
+}
+
+/** Everything the planning sections of the trip screen show (D22): facts, plus the derivation module's views of them. */
+export interface TripPlanView {
+  trip: Trip
+  /** The way the plan follows: the one sent, else the first. */
+  variant: (TripVariant & { lines: TripLine[] }) | null
+  days: TripDay[]
+  dayViews: DayView[]
+  reservations: TripReservation[]
+  money: ReservationMoney
+  tasks: TripTask[]
+  weeks: WeekComparisonRow[]
+  crowdLevels: CrowdLevel[]
+  blackoutDates: BlackoutRange[]
+  packTemplate: string[]
+  pendingPull: CrowdPull | null
+}
 
 /** Everything the trip screen shows: facts, plus each way's price tag from the derivation module. */
 export interface TripView {
@@ -171,7 +240,6 @@ export interface TripView {
  * Parts a person added by hand sort from here, above every default part, so a
  * rebuild after a change of choices can tell them apart and keep them.
  */
-const ADDED_LINE_SORT = 1000
 
 export interface EngineContext {
   householdId: Id
@@ -2229,7 +2297,7 @@ export class Engine {
 
   /** The drive from this trip's home, if it has been looked up. */
   async driveEstimate(trip: Pick<Trip, 'home' | 'destination'>): Promise<DriveEstimate | null> {
-    if (!trip.home) return null
+    if (!homeIsLocated(trip.home)) return null
     return this.getSetting<DriveEstimate | null>(driveSettingKey(trip.home, trip.destination), null)
   }
 
@@ -2295,6 +2363,9 @@ export class Engine {
       if (!row) throw new EngineError('Could not start the trip')
       const trip = toTrip(row)
       await this.recordTripChange(tx, { trip_id: trip.id, before: null, after: tripEventShape(trip) })
+      // The days and the first to-dos come with the trip (D22).
+      await this.applyDayCut(tx, trip, false)
+      await this.refreshTimeline(tx, trip)
       return trip
     })
   }
@@ -2331,6 +2402,46 @@ export class Engine {
         .where(eq(tripsTable.id, tripId))
       await this.recordTripChange(tx, { trip_id: tripId, before: tripEventShape(before), after: tripEventShape(after) })
       await this.rebuildVariants(tx, after)
+      if (after.startDate !== before.startDate || after.endDate !== before.endDate) {
+        await this.applyDayCut(tx, after, true)
+        await this.refreshTimeline(tx, after)
+      }
+    })
+  }
+
+  /**
+   * "Use this week" (D22): the same trip, the same length, a different
+   * week. The days move with it -- a park picked for the third day is still
+   * the third day -- and so does a reservation nobody has confirmed yet. One
+   * with a confirmation number is a real booking on a real date and stays
+   * where it is, which the screen then points out.
+   */
+  async shiftTrip(tripId: Id, newStartDate: CivilDate): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const before = await this.tripForWrite(tx, tripId)
+      const offset = compareDates(newStartDate, before.startDate)
+      if (offset === 0) return
+      const after: Trip = { ...before, startDate: newStartDate, endDate: addDays(before.endDate, offset) }
+      validateTripInputs(after)
+      // Move the rows first, then the trip, so the cut finds them in place.
+      // The days go out and come back with their ids, because moving them
+      // one at a time would land on a date another still holds.
+      const days = await this.daysOf(tx, tripId)
+      await tx.delete(tripDaysTable).where(eq(tripDaysTable.tripId, tripId))
+      if (days.length > 0) {
+        await tx
+          .insert(tripDaysTable)
+          .values(days.map((d) => ({ id: d.id, tripId, date: addDays(d.date, offset), park: d.park, plan: d.plan, sort: d.sort })))
+      }
+      for (const r of await this.reservationsOf(tx, tripId)) {
+        if (r.confirmation) continue
+        await tx.update(tripReservationsTable).set({ date: addDays(r.date, offset) }).where(eq(tripReservationsTable.id, r.id))
+      }
+      await tx.update(tripsTable).set({ startDate: after.startDate, endDate: after.endDate }).where(eq(tripsTable.id, tripId))
+      await this.recordTripChange(tx, { trip_id: tripId, before: tripEventShape(before), after: tripEventShape(after) })
+      await this.rebuildVariants(tx, after)
+      await this.applyDayCut(tx, after, true)
+      await this.refreshTimeline(tx, after)
     })
   }
 
@@ -2362,6 +2473,7 @@ export class Engine {
       const lines = await this.buildLines(trip, variant, [])
       await this.replaceLines(tx, variant.id, lines)
       await this.recordTripChange(tx, { trip_id: tripId, variant_id: variant.id, before: null, after: variantEventShape(variant) })
+      await this.refreshTimeline(tx, trip)
       return variant
     })
   }
@@ -2378,6 +2490,7 @@ export class Engine {
       if (patch.choices) {
         const existing = await this.linesOf(tx, variantId)
         await this.replaceLines(tx, variantId, await this.buildLines(trip, after, existing))
+        await this.refreshTimeline(tx, trip)
       }
     })
   }
@@ -2388,6 +2501,7 @@ export class Engine {
       const variant = await this.variantInTrip(tx, tripId, variantId)
       await this.recordTripChange(tx, { trip_id: tripId, variant_id: variantId, before: variantEventShape(variant), after: null })
       await tx.delete(tripVariantsTable).where(eq(tripVariantsTable.id, variantId))
+      await this.refreshTimeline(tx, await this.tripInHousehold(tx, tripId))
     })
   }
 
@@ -2495,6 +2609,7 @@ export class Engine {
     const trip = (await this.listTrips()).find((t) => t.id === tripId)
     if (!trip) throw new EngineError('No such trip in this household')
     if (!trip.home) throw new EngineError('The trip needs a home to drive from. Set it under Trips.')
+    if (!homeIsLocated(trip.home)) throw new EngineError('Home has not been found on the map yet, so the drive cannot be measured. Save the address again under Trips.')
     await this.putSetting(driveSettingKey(trip.home, trip.destination), drive)
     await this.refreshFetchedLines(tripId)
   }
@@ -2554,8 +2669,477 @@ export class Engine {
         source: 'manual',
         payload: { trip_id: tripId, variant_id: variantId, package_id: created.packageId },
       })
+      // The to-dos follow the way that went to Plans.
+      await this.refreshTimeline(tx, await this.tripInHousehold(tx, tripId))
     })
     return created
+  }
+
+  // ---------------------------------------------------------------- planning a trip (PRD §16 D22-D24)
+
+  /**
+   * The planning sections of the trip screen: the days, what is booked, the
+   * to-dos, how the candidate weeks compare. Every figure is the derivation
+   * module's; the rows are facts. A trip made before days existed gets its
+   * rows here, once.
+   */
+  async tripPlanView(tripId: Id): Promise<TripPlanView | null> {
+    const trip = (await this.listTrips()).find((t) => t.id === tripId)
+    if (!trip) return null
+    const days = await this.listTripDays(tripId)
+    const [variants, reservations, tasks, referencePrices, drive, gas, maxDriveMinutes, blackoutDates, packTemplate, pendingPull] = await Promise.all([
+      this.variantsWithLines(tripId),
+      this.listReservations(tripId),
+      this.listTasks(tripId),
+      this.referencePrices(),
+      this.driveEstimate(trip),
+      this.gasPrice(),
+      this.maxDriveMinutes(),
+      this.blackoutDates(),
+      this.packTemplate(),
+      this.pendingCrowdPull(),
+    ])
+    const variant = planningVariant(trip, variants)
+    const crowdLevels = await this.crowdLevels(trip.destination, addDays(trip.startDate, -7 * 3), addDays(trip.endDate, 7 * 3))
+    return {
+      trip,
+      variant,
+      days,
+      dayViews: dayPlan(trip, days, reservations, crowdLevels),
+      reservations,
+      money: reservationMoney(reservations),
+      tasks,
+      weeks: weekComparison({
+        trip,
+        variant,
+        lines: variant?.lines ?? [],
+        days,
+        crowdLevels,
+        referencePrices,
+        drive,
+        gasPrice: gas,
+        maxDriveMinutes,
+        blackoutDates,
+        today: this.today(),
+      }),
+      crowdLevels,
+      blackoutDates,
+      packTemplate,
+      pendingPull,
+    }
+  }
+
+  /** The trip's day rows, in date order. A trip from before they existed gets them now; nothing else changes. */
+  async listTripDays(tripId: Id): Promise<TripDay[]> {
+    return this.db.transaction(async (tx) => {
+      const trip = await this.tripInHousehold(tx, tripId)
+      const existing = await this.daysOf(tx, tripId)
+      const cut = cutDays(trip, existing)
+      if (cut.add.length === 0 && cut.remove.length === 0 && cut.keep.every((k) => k.day.sort === k.sort)) return existing
+      await this.applyDayCut(tx, trip, false)
+      return this.daysOf(tx, tripId)
+    })
+  }
+
+  async updateTripDay(tripId: Id, dayId: Id, patch: Partial<{ park: TripPark; plan: Partial<TripDay['plan']> }>): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.tripForPlanning(tx, tripId)
+      const before = await this.dayInTrip(tx, tripId, dayId)
+      const after: TripDay = {
+        ...before,
+        park: patch.park ?? before.park,
+        plan: { notes: (patch.plan?.notes ?? before.plan.notes).trim(), ropeDrop: patch.plan?.ropeDrop ?? before.plan.ropeDrop },
+      }
+      validateDayInputs(after)
+      await tx.update(tripDaysTable).set({ park: after.park, plan: after.plan }).where(eq(tripDaysTable.id, dayId))
+      await this.recordTripChange(tx, { trip_id: tripId, day_id: dayId, before: dayEventShape(before), after: dayEventShape(after) })
+    })
+  }
+
+  async listReservations(tripId: Id): Promise<TripReservation[]> {
+    await this.tripInHousehold(this.db, tripId)
+    return this.reservationsOf(this.db, tripId)
+  }
+
+  async addReservation(tripId: Id, input: Omit<TripReservation, 'id' | 'tripId'>): Promise<TripReservation> {
+    return this.db.transaction(async (tx) => {
+      await this.tripForPlanning(tx, tripId)
+      const r = tidyReservation(input)
+      validateReservationInputs(r)
+      if (r.lineId) await this.lineInTrip(tx, tripId, r.lineId)
+      const [row] = await tx.insert(tripReservationsTable).values({ tripId, ...r }).returning()
+      if (!row) throw new EngineError('Could not add the reservation')
+      const added = toReservation(row)
+      await this.recordTripChange(tx, { trip_id: tripId, reservation_id: added.id, before: null, after: reservationEventShape(added) })
+      return added
+    })
+  }
+
+  async updateReservation(tripId: Id, reservationId: Id, patch: Partial<Omit<TripReservation, 'id' | 'tripId'>>): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.tripForPlanning(tx, tripId)
+      const before = await this.reservationInTrip(tx, tripId, reservationId)
+      const after: TripReservation = { ...before, ...tidyReservation({ ...before, ...patch }) }
+      validateReservationInputs(after)
+      if (after.lineId) await this.lineInTrip(tx, tripId, after.lineId)
+      const { id: _id, tripId: _tripId, ...columns } = after
+      await tx.update(tripReservationsTable).set(columns).where(eq(tripReservationsTable.id, reservationId))
+      await this.recordTripChange(tx, { trip_id: tripId, reservation_id: reservationId, before: reservationEventShape(before), after: reservationEventShape(after) })
+    })
+  }
+
+  async removeReservation(tripId: Id, reservationId: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.tripForPlanning(tx, tripId)
+      const r = await this.reservationInTrip(tx, tripId, reservationId)
+      await this.recordTripChange(tx, { trip_id: tripId, reservation_id: reservationId, before: reservationEventShape(r), after: null })
+      await tx.delete(tripReservationsTable).where(eq(tripReservationsTable.id, reservationId))
+    })
+  }
+
+  async listTasks(tripId: Id): Promise<TripTask[]> {
+    await this.tripInHousehold(this.db, tripId)
+    return this.tasksOf(this.db, tripId)
+  }
+
+  /** A person's own to-do. Never touched by a timeline rebuild. */
+  async addTask(tripId: Id, input: { kind: TaskKind; label: string; dueOn: CivilDate; link?: string | null; lineId?: Id | null }): Promise<TripTask> {
+    return this.db.transaction(async (tx) => {
+      await this.tripForPlanning(tx, tripId)
+      const task = { kind: input.kind, label: input.label.trim(), dueOn: input.dueOn, link: input.link?.trim() || null, lineId: input.lineId ?? null }
+      validateTaskInputs(task)
+      if (task.lineId) await this.lineInTrip(tx, tripId, task.lineId)
+      const existing = await this.tasksOf(tx, tripId)
+      const sort = Math.max(-1, ...existing.map((t) => t.sort)) + 1
+      const [row] = await tx
+        .insert(tripTasksTable)
+        .values({ tripId, ...task, sort, generated: false, key: null })
+        .returning()
+      if (!row) throw new EngineError('Could not add the to-do')
+      const added = toTask(row)
+      await this.recordTripChange(tx, { trip_id: tripId, task_id: added.id, before: null, after: taskEventShape(added) })
+      return added
+    })
+  }
+
+  /** Editing a to-do makes it the person's: the timeline stops rebuilding it. */
+  async updateTask(tripId: Id, taskId: Id, patch: Partial<{ kind: TaskKind; label: string; dueOn: CivilDate; link: string | null; lineId: Id | null }>): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.tripForPlanning(tx, tripId)
+      const before = await this.taskInTrip(tx, tripId, taskId)
+      const after: TripTask = {
+        ...before,
+        kind: patch.kind ?? before.kind,
+        label: (patch.label ?? before.label).trim(),
+        dueOn: patch.dueOn ?? before.dueOn,
+        link: patch.link === undefined ? before.link : patch.link?.trim() || null,
+        lineId: patch.lineId === undefined ? before.lineId : patch.lineId,
+        generated: false,
+      }
+      validateTaskInputs(after)
+      if (after.lineId) await this.lineInTrip(tx, tripId, after.lineId)
+      await tx
+        .update(tripTasksTable)
+        .set({ kind: after.kind, label: after.label, dueOn: after.dueOn, link: after.link, lineId: after.lineId, generated: false })
+        .where(eq(tripTasksTable.id, taskId))
+      await this.recordTripChange(tx, { trip_id: tripId, task_id: taskId, before: taskEventShape(before), after: taskEventShape(after) })
+    })
+  }
+
+  async tickTask(tripId: Id, taskId: Id): Promise<void> {
+    await this.setTaskDone(tripId, taskId, this.today())
+  }
+
+  async untickTask(tripId: Id, taskId: Id): Promise<void> {
+    await this.setTaskDone(tripId, taskId, null)
+  }
+
+  async removeTask(tripId: Id, taskId: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.tripForPlanning(tx, tripId)
+      const task = await this.taskInTrip(tx, tripId, taskId)
+      await this.recordTripChange(tx, { trip_id: tripId, task_id: taskId, before: taskEventShape(task), after: null })
+      await tx.delete(tripTasksTable).where(eq(tripTasksTable.id, taskId))
+    })
+  }
+
+  /** "Rebuild the timeline": the generated to-dos brought up to date; nothing a person edited or ticked is touched. */
+  async rebuildTimeline(tripId: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const trip = await this.tripForPlanning(tx, tripId)
+      await this.refreshTimeline(tx, trip)
+    })
+  }
+
+  /** The next few trip to-dos across every trip not put away, soonest first, for the home screen. */
+  async comingUpTripTasks(limit: number = 3): Promise<(TripTask & { tripName: string })[]> {
+    const trips = (await this.listTrips()).filter((t) => !t.retiredAt)
+    if (trips.length === 0) return []
+    const names = new Map(trips.map((t) => [t.id, t.name]))
+    const rows = await this.db
+      .select({ task: tripTasksTable })
+      .from(tripTasksTable)
+      .innerJoin(tripsTable, eq(tripTasksTable.tripId, tripsTable.id))
+      .where(and(eq(tripsTable.householdId, this.householdId), isNull(tripsTable.retiredAt), isNull(tripTasksTable.doneOn)))
+    const tasks = rows.map((r) => toTask(r.task))
+    return comingUpTasks(tasks, limit).map((t) => ({ ...t, tripName: names.get(t.tripId) ?? 'A trip' }))
+  }
+
+  // -- how busy (D23): reference data, household-independent, written only here
+
+  async crowdLevels(destination: TripDestination, from: CivilDate, to: CivilDate): Promise<CrowdLevel[]> {
+    const rows = await this.db
+      .select()
+      .from(crowdLevelsTable)
+      .where(and(eq(crowdLevelsTable.destination, destination), gte(crowdLevelsTable.date, from), lte(crowdLevelsTable.date, to)))
+    return rows.map(toCrowdLevel)
+  }
+
+  /**
+   * Keep what a pull found, one row per date, park and source; a later pull
+   * from the same source replaces its own figure for a day. Recorded in the
+   * log once per pull: which source, how many days.
+   */
+  async recordCrowdLevels(levels: readonly ParsedCrowdLevel[], meta: { destination: TripDestination; source: string; fetchedOn: CivilDate }): Promise<number> {
+    for (const l of levels) validateCrowdLevel({ ...l, source: meta.source })
+    if (levels.length === 0) return 0
+    await this.db.transaction(async (tx) => {
+      for (const l of levels) {
+        await tx
+          .insert(crowdLevelsTable)
+          .values({ destination: meta.destination, date: l.date, park: l.park, level: l.level, source: meta.source, fetchedOn: meta.fetchedOn })
+          .onConflictDoUpdate({
+            target: [crowdLevelsTable.destination, crowdLevelsTable.date, crowdLevelsTable.park, crowdLevelsTable.source],
+            set: { level: l.level, fetchedOn: meta.fetchedOn },
+          })
+      }
+      const dates = levels.map((l) => l.date).sort()
+      await this.recordTripChange(tx, {
+        crowd_levels: { destination: meta.destination, source: meta.source, count: levels.length, from: dates[0], to: dates[dates.length - 1], fetched_on: meta.fetchedOn },
+      })
+    })
+    return levels.length
+  }
+
+  /** A level a person typed for a day: the truest figure there is, shown over any fetched one. */
+  async typeCrowdLevel(tripId: Id, input: { date: CivilDate; park: TripPark; level: number }): Promise<void> {
+    const trip = await this.tripInHousehold(this.db, tripId)
+    await this.recordCrowdLevels([input], { destination: trip.destination, source: 'typed', fetchedOn: this.today() })
+  }
+
+  async pendingCrowdPull(): Promise<CrowdPull | null> {
+    const stored = await this.getSetting<CrowdPull | false | null>('trip_crowd_pull', null)
+    return stored && typeof stored === 'object' && Array.isArray(stored.levels) ? stored : null
+  }
+
+  /** Hold a pull for the person to look at. Nothing is a crowd level until they say so. A cleared hold is stored as false: a setting's value is never null. */
+  async stashCrowdPull(pull: CrowdPull | null): Promise<void> {
+    await this.putSetting('trip_crowd_pull', pull ?? false)
+  }
+
+  /** "Use these": the held pull becomes crowd levels, and the hold is cleared. */
+  async keepCrowdPull(): Promise<number> {
+    const pull = await this.pendingCrowdPull()
+    if (!pull) throw new EngineError('There is nothing waiting to be kept.')
+    const kept = await this.recordCrowdLevels(pull.levels, { destination: pull.destination, source: pull.source, fetchedOn: pull.fetchedOn })
+    await this.stashCrowdPull(null)
+    return kept
+  }
+
+  // -- where home is (D24), and the household's planning settings
+
+  /**
+   * Home as an address, saved with the point the geocoder found for it. A
+   * lookup that failed keeps the address and no point, and the drive waits.
+   * Open trips whose home has no point yet take this one, so a second try
+   * that works reaches the trip started after the first that did not.
+   */
+  async setHomeAddress(input: { address: string; geocode: GeocodeResult | null; geocodedOn: CivilDate }): Promise<HomeLocation> {
+    const address = input.address.trim()
+    const home: HomeLocation = {
+      label: address.split(',')[0]?.trim() || address,
+      address,
+      latitude: input.geocode?.latitude ?? null,
+      longitude: input.geocode?.longitude ?? null,
+      resolvedName: input.geocode?.resolvedName ?? null,
+      geocodedOn: input.geocode ? input.geocodedOn : null,
+    }
+    validateHomeLocation(home)
+    await this.putSetting('home_location', home)
+    if (homeIsLocated(home)) {
+      await this.db.transaction(async (tx) => {
+        for (const trip of await this.listTrips()) {
+          if (trip.packageId || trip.retiredAt || homeIsLocated(trip.home)) continue
+          const after = { ...trip, home }
+          await tx.update(tripsTable).set({ home }).where(eq(tripsTable.id, trip.id))
+          await this.recordTripChange(tx, { trip_id: trip.id, before: tripEventShape(trip), after: tripEventShape(after) })
+        }
+      })
+    }
+    return home
+  }
+
+  async blackoutDates(): Promise<BlackoutRange[]> {
+    return this.getSetting<BlackoutRange[]>('trip_blackout_dates', [])
+  }
+
+  async setBlackoutDates(ranges: readonly BlackoutRange[]): Promise<void> {
+    const tidy = ranges.map((r) => ({ ...r, label: r.label.trim() }))
+    validateBlackoutDates(tidy)
+    await this.putSetting('trip_blackout_dates', tidy)
+  }
+
+  async packTemplate(): Promise<string[]> {
+    const stored = await this.getSetting<string[] | null>('trip_pack_template', null)
+    return stored ?? [...DEFAULT_PACK_TEMPLATE]
+  }
+
+  async setPackTemplate(labels: readonly string[]): Promise<void> {
+    const tidy = labels.map((l) => l.trim()).filter((l) => l !== '')
+    validatePackTemplate(tidy)
+    await this.putSetting('trip_pack_template', tidy)
+  }
+
+  // -- planning plumbing
+
+  /** A trip that can still be planned: not put away. A trip that is a plan is still planned -- the money is what froze. */
+  private async tripForPlanning(tx: Conn, tripId: Id): Promise<Trip> {
+    const trip = await this.tripInHousehold(tx, tripId)
+    if (trip.retiredAt) throw new EngineError('This trip has been put away.')
+    return trip
+  }
+
+  private async daysOf(tx: Conn, tripId: Id): Promise<TripDay[]> {
+    const rows = await tx.select().from(tripDaysTable).where(eq(tripDaysTable.tripId, tripId))
+    return rows.map(toTripDay).sort((a, b) => a.date.localeCompare(b.date))
+  }
+
+  private async reservationsOf(tx: Conn, tripId: Id): Promise<TripReservation[]> {
+    const rows = await tx.select().from(tripReservationsTable).where(eq(tripReservationsTable.tripId, tripId))
+    return sortReservations(rows.map(toReservation))
+  }
+
+  private async tasksOf(tx: Conn, tripId: Id): Promise<TripTask[]> {
+    const rows = await tx.select().from(tripTasksTable).where(eq(tripTasksTable.tripId, tripId))
+    return sortTasks(rows.map(toTask))
+  }
+
+  private async dayInTrip(tx: Conn, tripId: Id, dayId: Id): Promise<TripDay> {
+    const [row] = await tx.select().from(tripDaysTable).where(and(eq(tripDaysTable.id, dayId), eq(tripDaysTable.tripId, tripId)))
+    if (!row) throw new EngineError('No such day on this trip')
+    return toTripDay(row)
+  }
+
+  private async reservationInTrip(tx: Conn, tripId: Id, reservationId: Id): Promise<TripReservation> {
+    const [row] = await tx
+      .select()
+      .from(tripReservationsTable)
+      .where(and(eq(tripReservationsTable.id, reservationId), eq(tripReservationsTable.tripId, tripId)))
+    if (!row) throw new EngineError('No such reservation on this trip')
+    return toReservation(row)
+  }
+
+  private async taskInTrip(tx: Conn, tripId: Id, taskId: Id): Promise<TripTask> {
+    const [row] = await tx.select().from(tripTasksTable).where(and(eq(tripTasksTable.id, taskId), eq(tripTasksTable.tripId, tripId)))
+    if (!row) throw new EngineError('No such to-do on this trip')
+    return toTask(row)
+  }
+
+  private async setTaskDone(tripId: Id, taskId: Id, doneOn: CivilDate | null): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await this.tripForPlanning(tx, tripId)
+      const before = await this.taskInTrip(tx, tripId, taskId)
+      if (before.doneOn === doneOn) return
+      const after = { ...before, doneOn }
+      await tx.update(tripTasksTable).set({ doneOn }).where(eq(tripTasksTable.id, taskId))
+      await this.recordTripChange(tx, { trip_id: tripId, task_id: taskId, before: taskEventShape(before), after: taskEventShape(after) })
+    })
+  }
+
+  /**
+   * Bring the day rows in line with the trip's dates. A person's change of
+   * dates is logged with the days it added and removed; a first-time cut
+   * for an old trip is not, since nobody did anything.
+   */
+  private async applyDayCut(tx: Conn, trip: Trip, log: boolean): Promise<void> {
+    const cut = cutDays(trip, await this.daysOf(tx, trip.id))
+    for (const day of cut.remove) {
+      if (log) await this.recordTripChange(tx, { trip_id: trip.id, day_id: day.id, before: dayEventShape(day), after: null })
+      await tx.delete(tripDaysTable).where(eq(tripDaysTable.id, day.id))
+    }
+    for (const k of cut.keep) {
+      if (k.day.sort !== k.sort) await tx.update(tripDaysTable).set({ sort: k.sort }).where(eq(tripDaysTable.id, k.day.id))
+    }
+    if (cut.add.length > 0) {
+      const rows = await tx
+        .insert(tripDaysTable)
+        .values(cut.add.map((a) => ({ tripId: trip.id, date: a.date, park: a.park, sort: a.sort })))
+        .returning()
+      if (log) {
+        for (const row of rows) {
+          const day = toTripDay(row)
+          await this.recordTripChange(tx, { trip_id: trip.id, day_id: day.id, before: null, after: dayEventShape(day) })
+        }
+      }
+    }
+  }
+
+  /** The generated to-dos, merged over what is there. Each row that changes is logged. */
+  private async refreshTimeline(tx: Conn, trip: Trip): Promise<void> {
+    const variants = (await tx.select().from(tripVariantsTable).where(eq(tripVariantsTable.tripId, trip.id))).map(toVariant)
+    const variant = planningVariant(trip, variants)
+    const lines = variant ? await this.linesOf(tx, variant.id) : []
+    const generated = bookingTimeline(trip, variant, this.today(), { packTemplate: await this.packTemplate() })
+    const merge = mergeTimeline(generated, await this.tasksOf(tx, trip.id))
+    // A generated to-do points at the part it books or pays for, when the way has one.
+    const lineFor = (category: TripLineCategory | null): Id | null => {
+      if (!category) return null
+      const candidates = lines.filter((l) => l.category === category)
+      return (candidates.find((l) => tripLineTotalCents(l) > 0) ?? candidates[0])?.id ?? null
+    }
+    for (const task of merge.remove) {
+      await this.recordTripChange(tx, { trip_id: trip.id, task_id: task.id, before: taskEventShape(task), after: null })
+      await tx.delete(tripTasksTable).where(eq(tripTasksTable.id, task.id))
+    }
+    for (const { task, patch } of merge.update) {
+      const after = { ...task, ...patch }
+      await tx.update(tripTasksTable).set(patch).where(eq(tripTasksTable.id, task.id))
+      await this.recordTripChange(tx, { trip_id: trip.id, task_id: task.id, before: taskEventShape(task), after: taskEventShape(after) })
+    }
+    // A to-do the timeline still owns points at the part the way now has:
+    // the tickets to-do made before any way was priced finds its line.
+    const wanted = new Map(generated.map((g) => [g.key, g]))
+    for (const task of await this.tasksOf(tx, trip.id)) {
+      if (!task.generated || task.doneOn || !task.key) continue
+      const fresh = wanted.get(task.key)
+      if (!fresh) continue
+      const lineId = lineFor(fresh.category)
+      if (lineId === task.lineId) continue
+      await tx.update(tripTasksTable).set({ lineId }).where(eq(tripTasksTable.id, task.id))
+      await this.recordTripChange(tx, { trip_id: trip.id, task_id: task.id, before: taskEventShape(task), after: taskEventShape({ ...task, lineId }) })
+    }
+    if (merge.add.length > 0) {
+      const rows = await tx
+        .insert(tripTasksTable)
+        .values(
+          merge.add.map((g, i) => ({
+            tripId: trip.id,
+            kind: g.kind,
+            label: g.label,
+            dueOn: g.dueOn,
+            link: null,
+            lineId: lineFor(g.category),
+            sort: i,
+            generated: true,
+            key: g.key,
+          })),
+        )
+        .returning()
+      for (const row of rows) {
+        const task = toTask(row)
+        await this.recordTripChange(tx, { trip_id: trip.id, task_id: task.id, before: null, after: taskEventShape(task) })
+      }
+    }
   }
 
   // -- trip plumbing: every read is household-scoped through the trip row
@@ -2632,24 +3216,42 @@ export class Engine {
     return [...kept, ...added]
   }
 
+  /**
+   * Make the variant's rows match the rebuilt parts. A part that is still
+   * there (same category and name) keeps its row and its id, so a
+   * reservation or to-do counted against it still points at it after the
+   * choices change or a fetch refreshes a figure; parts that went are
+   * deleted, new ones inserted.
+   */
   private async replaceLines(tx: Conn, variantId: Id, lines: readonly DefaultLine[]): Promise<void> {
-    await tx.delete(tripLinesTable).where(eq(tripLinesTable.variantId, variantId))
-    if (lines.length === 0) return
-    await tx.insert(tripLinesTable).values(
-      lines.map((l) => ({
-        variantId,
-        category: l.category,
-        label: l.label,
-        quantity: l.quantity,
-        unitAmountCents: l.unitAmountCents,
-        dueDate: l.dueDate,
-        reserveAccountId: l.reserveAccountId,
-        source: l.source,
-        asOf: l.asOf,
-        note: l.note,
-        sort: l.sort,
-      })),
-    )
+    const existing = await this.linesOf(tx, variantId)
+    const pool = new Map<string, TripLine[]>()
+    for (const l of existing) {
+      const key = `${l.category}|${l.label}`
+      pool.set(key, [...(pool.get(key) ?? []), l])
+    }
+    const values = (l: DefaultLine) => ({
+      category: l.category,
+      label: l.label,
+      quantity: l.quantity,
+      unitAmountCents: l.unitAmountCents,
+      dueDate: l.dueDate,
+      reserveAccountId: l.reserveAccountId,
+      source: l.source,
+      asOf: l.asOf,
+      note: l.note,
+      sort: l.sort,
+    })
+    const inserts: (ReturnType<typeof values> & { variantId: Id })[] = []
+    for (const l of lines) {
+      const match = pool.get(`${l.category}|${l.label}`)?.shift()
+      if (match) await tx.update(tripLinesTable).set(values(l)).where(eq(tripLinesTable.id, match.id))
+      else inserts.push({ variantId, ...values(l) })
+    }
+    for (const leftover of pool.values()) {
+      for (const l of leftover) await tx.delete(tripLinesTable).where(eq(tripLinesTable.id, l.id))
+    }
+    if (inserts.length > 0) await tx.insert(tripLinesTable).values(inserts)
   }
 
   private async rebuildVariants(tx: Conn, trip: Trip): Promise<void> {
@@ -2819,6 +3421,105 @@ function toTripLine(r: typeof tripLinesTable.$inferSelect): TripLine {
     note: r.note,
     sort: r.sort,
   }
+}
+
+/** The way the plan follows: the one that went to Plans, else the first priced. */
+function planningVariant<V extends TripVariant>(trip: Trip, variants: readonly V[]): V | null {
+  return variants.find((v) => v.id === trip.chosenVariantId) ?? variants[0] ?? null
+}
+
+function tidyReservation(r: Omit<TripReservation, 'id' | 'tripId'>): Omit<TripReservation, 'id' | 'tripId'> {
+  return {
+    date: r.date,
+    time: r.time?.trim() || null,
+    kind: r.kind,
+    name: r.name.trim(),
+    park: r.park ?? null,
+    confirmation: r.confirmation?.trim() || null,
+    party: r.party,
+    perPersonCents: r.perPersonCents ?? null,
+    lineId: r.lineId ?? null,
+    note: r.note?.trim() || null,
+  }
+}
+
+function toTripDay(r: typeof tripDaysTable.$inferSelect): TripDay {
+  const plan = (r.plan as Partial<TripDay['plan']> | null) ?? {}
+  return {
+    id: r.id,
+    tripId: r.tripId,
+    date: r.date as CivilDate,
+    park: r.park,
+    plan: { notes: typeof plan.notes === 'string' ? plan.notes : '', ropeDrop: plan.ropeDrop === true },
+    sort: r.sort,
+  }
+}
+
+function toReservation(r: typeof tripReservationsTable.$inferSelect): TripReservation {
+  return {
+    id: r.id,
+    tripId: r.tripId,
+    date: r.date as CivilDate,
+    time: r.time,
+    kind: r.kind,
+    name: r.name,
+    park: r.park,
+    confirmation: r.confirmation,
+    party: r.party,
+    perPersonCents: r.perPersonCents,
+    lineId: r.lineId,
+    note: r.note,
+  }
+}
+
+function toTask(r: typeof tripTasksTable.$inferSelect): TripTask {
+  return {
+    id: r.id,
+    tripId: r.tripId,
+    kind: r.kind,
+    label: r.label,
+    dueOn: r.dueOn as CivilDate,
+    doneOn: (r.doneOn as CivilDate | null) ?? null,
+    link: r.link,
+    lineId: r.lineId,
+    sort: r.sort,
+    generated: r.generated,
+    key: r.key,
+  }
+}
+
+function toCrowdLevel(r: typeof crowdLevelsTable.$inferSelect): CrowdLevel {
+  return {
+    destination: r.destination as TripDestination,
+    date: r.date as CivilDate,
+    park: r.park,
+    level: r.level,
+    source: r.source,
+    fetchedOn: r.fetchedOn as CivilDate,
+  }
+}
+
+function dayEventShape(d: TripDay) {
+  return { date: d.date, park: d.park, plan: d.plan }
+}
+
+function reservationEventShape(r: TripReservation) {
+  return {
+    date: r.date,
+    time: r.time,
+    kind: r.kind,
+    name: r.name,
+    park: r.park,
+    confirmation: r.confirmation,
+    party: r.party,
+    per_person_cents: r.perPersonCents,
+    line_id: r.lineId,
+    note: r.note,
+  }
+}
+
+function taskEventShape(t: TripTask) {
+  return { kind: t.kind, label: t.label, due_on: t.dueOn, done_on: t.doneOn, link: t.link, line_id: t.lineId, generated: t.generated, key: t.key }
 }
 
 function tripEventShape(t: Trip) {

@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'vitest'
-import { fetchDrive, fetchGasPrice, GAS_PRICE_CSV_URL, osrmRouteUrl } from '../trip-fetch'
+import { beforeEach, describe, expect, it } from 'vitest'
+import {
+  fetchCrowdCalendar,
+  fetchDrive,
+  fetchGasPrice,
+  GAS_PRICE_CSV_URL,
+  geocodeAddress,
+  osrmRouteUrl,
+  pullCrowdCalendar,
+  resetGeocoder,
+  userAgent,
+} from '../trip-fetch'
+import { CROWD_SOURCES } from '@/domain'
 
 const home = { label: 'Home', latitude: 41.8781, longitude: -87.6298 }
 
@@ -43,5 +54,107 @@ describe('the gas price fetch', () => {
   it('throws on an error status and returns nothing for a page that is not the CSV', async () => {
     await expect(fetchGasPrice(respond('nope', 500))).rejects.toThrow('500')
     expect(await fetchGasPrice(respond('<html>blocked</html>'))).toBeNull()
+  })
+})
+
+describe('the user agent', () => {
+  it('names the app and the version, as the public services ask', () => {
+    expect(userAgent('0.4.0')).toBe('BallastFinance/0.4.0 (self-hosted family planner)')
+    expect(userAgent(undefined)).toBe('BallastFinance/dev (self-hosted family planner)')
+  })
+})
+
+describe('finding home on the map', () => {
+  beforeEach(() => resetGeocoder())
+
+  const found = JSON.stringify([{ lat: '41.8781136', lon: '-87.6297982', display_name: 'Chicago, Cook County, Illinois, United States' }])
+
+  it('asks Nominatim for one jsonv2 result with our user agent, and reads the point', async () => {
+    const calls: { url: string; headers: Record<string, string> }[] = []
+    const fake = (async (url: string, init?: RequestInit) => {
+      calls.push({ url, headers: init?.headers as Record<string, string> })
+      return new Response(found)
+    }) as unknown as typeof fetch
+    const clock = { now: () => 10_000, sleep: async () => {} }
+    expect(await geocodeAddress('233 S Wacker Dr, Chicago, IL', fake, clock)).toEqual({
+      latitude: 41.8781136,
+      longitude: -87.6297982,
+      resolvedName: 'Chicago, Cook County, Illinois, United States',
+    })
+    expect(calls[0]!.url).toBe('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=233%20S%20Wacker%20Dr%2C%20Chicago%2C%20IL')
+    expect(calls[0]!.headers['user-agent']).toMatch(/^BallastFinance\/\S+ \(self-hosted family planner\)$/)
+  })
+
+  it('the same address again comes from memory; two different ones are a second apart', async () => {
+    let asked = 0
+    const fake = (async () => {
+      asked += 1
+      return new Response(found)
+    }) as unknown as typeof fetch
+    let now = 10_000
+    const slept: number[] = []
+    const clock = { now: () => now, sleep: async (ms: number) => { slept.push(ms); now += ms } }
+    await geocodeAddress('1 First St', fake, clock)
+    await geocodeAddress('  1 first st ', fake, clock)
+    expect(asked).toBe(1)
+    now += 300
+    await geocodeAddress('2 Second St', fake, clock)
+    expect(asked).toBe(2)
+    expect(slept).toEqual([700])
+  })
+
+  it('an error status throws for the screen; a page that is not a result, or nothing found, is nothing', async () => {
+    await expect(geocodeAddress('x', respond('slow down', 429))).rejects.toThrow('429')
+    expect(await geocodeAddress('y', respond('<html>blocked</html>'), { now: () => 0, sleep: async () => {} })).toBeNull()
+    expect(await geocodeAddress('z', respond('[]'), { now: () => 0, sleep: async () => {} })).toBeNull()
+  })
+})
+
+describe('checking how busy', () => {
+  const thrill = CROWD_SOURCES[0]!
+  const undercover = CROWD_SOURCES[1]!
+  const page = (month: string) =>
+    `<script>window.__CROWD__ = {"parks":{"magic_kingdom":[{"date":"${month}-12","crowd_level":7}],"epcot":[{"date":"${month}-12","crowd_level":4}]}}</script>`
+
+  it("fetches one source's page for a month with our user agent and reads it with that source's parser", async () => {
+    let asked = ''
+    let agent = ''
+    const fake = (async (url: string, init?: RequestInit) => {
+      asked = url
+      agent = (init?.headers as Record<string, string>)['user-agent'] ?? ''
+      return new Response(page('2027-06'))
+    }) as unknown as typeof fetch
+    const got = await fetchCrowdCalendar(thrill, 'wdw', '2027-06', fake)
+    expect(asked).toBe(thrill.url('wdw', '2027-06'))
+    expect(agent).toContain('BallastFinance/')
+    expect(got.levels).toHaveLength(2)
+    expect(got.reason).toBeNull()
+    await expect(fetchCrowdCalendar(thrill, 'wdw', '2027-06', respond('no', 403))).rejects.toThrow('Thrill Data answered 403')
+  })
+
+  it('tries the sources in order: the first that reads every month wins, and each failure is a line for the screen', async () => {
+    const fake = (async (url: string) => {
+      if (url.startsWith('https://www.thrill-data.com')) return new Response('<html>Access denied</html>', { status: 403 })
+      return new Response(page(url.includes('2027-06') ? '2027-06' : '2027-07'))
+    }) as unknown as typeof fetch
+    const got = await pullCrowdCalendar('wdw', ['2027-06', '2027-07'], fake)
+    expect(got.source?.key).toBe('undercover_tourist')
+    expect(got.levels).toHaveLength(4)
+    expect(got.notes).toEqual(['Thrill Data: Thrill Data answered 403', 'Undercover Tourist: 4 park-days read.'])
+  })
+
+  it('every source unreadable is no source, with every reason, never a throw', async () => {
+    const got = await pullCrowdCalendar('wdw', ['2027-06'], respond('<html>captive portal</html>'))
+    expect(got.source).toBeNull()
+    expect(got.levels).toEqual([])
+    expect(got.notes).toEqual([
+      'Thrill Data: Nothing on the page read as a crowd calendar.',
+      'Undercover Tourist: Nothing on the page read as a crowd calendar.',
+    ])
+    // A source that reads one month but not the next does not half-win.
+    const partial = (async (url: string) => new Response(url.includes('2027-06') ? page('2027-06') : 'nope')) as unknown as typeof fetch
+    const half = await pullCrowdCalendar('wdw', ['2027-06', '2027-07'], partial, [undercover])
+    expect(half.source).toBeNull()
+    expect(half.notes[0]).toContain('Undercover Tourist: Nothing on the page')
   })
 })

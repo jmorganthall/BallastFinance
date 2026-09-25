@@ -53,7 +53,8 @@ repo still has to know them. Everything else: read the document.
 | F | Equity and next home: homes and vehicles, weekly mortgage rate, "What could we buy?" (§15, PRD rev 26) | Built |
 | Trip-A/B | Trip planner, Disney first: trips, ways to do it, the usual figures, the drive and gas-price fetches, "Add to Plans" (§16, PRD rev 35) | Built |
 | Trip-C | Favourite dining list (§16) | Not built |
+| Trip-D | Planning the trip: candidate weeks and how busy they are (crowd calendar, D23), the booking timeline and checklist, the days, reservations with confirmations, home as an address found on the map once (D22–D24, PRD rev 37) | Built |
 
-Phases A–D, F and Trip-A/B are implemented and tested. What remains before v1 is done is
+Phases A–D, F and Trip-A/B/D are implemented and tested. What remains before v1 is done is
 verification against reality, not more building — see the PRD's acceptance
 criteria (§12) and the open items (§13).
