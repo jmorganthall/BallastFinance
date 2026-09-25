@@ -21,6 +21,8 @@ import {
   reserveAccounts as reserveAccountsTable,
   settings as settingsTable,
   crowdLevels as crowdLevelsTable,
+  dvcListings as dvcListingsTable,
+  schoolDaysOff as schoolDaysOffTable,
   tripDays as tripDaysTable,
   tripLines as tripLinesTable,
   tripReservations as tripReservationsTable,
@@ -181,7 +183,30 @@ import {
   type TripReservation,
   type TripTask,
   type WeekComparisonRow,
+  addMonths,
+  bestWeeks,
+  DEFAULT_HORIZON_MONTHS,
+  DVC_LISTING_SOURCES,
+  DEFAULT_WEEK_WEIGHTS,
+  diffDaysOff,
+  listingWindow,
+  listingsForTrip,
+  schoolYearOf,
+  validateDayOff,
+  validateDvcListing,
+  validateHorizonMonths,
+  validateSchoolCalendarSources,
+  validateWeekWeights,
+  type BestWeeks,
+  type DayOffInput,
+  type DvcListing,
+  type ParsedListings,
+  type SchoolCalendarSource,
+  type SchoolDayOff,
+  type WeekWeights,
 } from '@/domain'
+import { fetchSchoolCalendarIcal, pullDvcListings } from '@/server/trip-fetch'
+import { readerEnabled, readerSourceName, readStructured, type ReaderDeps } from '@/server/reader'
 
 export class EngineError extends Error {}
 
@@ -208,6 +233,44 @@ export interface CrowdPull {
   notes: string[]
 }
 
+/**
+ * A school calendar as a feed or the reader gave it, held for the person to
+ * look at before it is kept (D25, D27). Kept, it becomes days off with this
+ * source and link.
+ */
+export interface SchoolCalendarPending {
+  label: string
+  /** 'ical' or 'read:<model>'. */
+  source: string
+  sourceUrl: string
+  /** The year as the document names it; a feed does not say, so each day's is worked out from its date. */
+  schoolYear: string | null
+  items: DayOffInput[]
+  readOn: CivilDate
+  notes: string[]
+}
+
+/** DVC rooms a broker had, held for the person to look at before they are kept (D26). */
+export interface DvcPull {
+  /** The source key, or 'read:<model>' when the reader read the page. */
+  source: string
+  label: string
+  url: string
+  from: CivilDate
+  to: CivilDate
+  listings: ParsedListings['listings']
+  seenOn: CivilDate
+  notes: string[]
+}
+
+/** What "Read it" or "Check what DVC brokers have" came back with: something to look at, or nothing with the reasons. */
+export type ReadOutcome = { ok: true; count: number } | { ok: false; notes: string[] }
+
+/** The reader's helpers a test can replace: the fetches, and the reader itself. */
+export interface ReadDeps extends ReaderDeps {
+  read?: typeof readStructured
+}
+
 /** Everything the planning sections of the trip screen show (D22): facts, plus the derivation module's views of them. */
 export interface TripPlanView {
   trip: Trip
@@ -223,6 +286,13 @@ export interface TripPlanView {
   blackoutDates: BlackoutRange[]
   packTemplate: string[]
   pendingPull: CrowdPull | null
+  /** The top ten dates across the horizon, with the reasons (D25). */
+  bestWeeks: BestWeeks
+  horizonMonths: number
+  weekWeights: WeekWeights
+  /** What a broker had for the trip's dates, two days either side (D26). */
+  dvcListings: DvcListing[]
+  pendingDvcPull: DvcPull | null
 }
 
 /** Everything the trip screen shows: facts, plus each way's price tag from the derivation module. */
@@ -2700,7 +2770,16 @@ export class Engine {
       this.pendingCrowdPull(),
     ])
     const variant = planningVariant(trip, variants)
-    const crowdLevels = await this.crowdLevels(trip.destination, addDays(trip.startDate, -7 * 3), addDays(trip.endDate, 7 * 3))
+    const today = this.today()
+    const [horizonMonths, weekWeights, daysOff, pendingDvcPull] = await Promise.all([this.horizonMonths(), this.weekWeights(), this.schoolDaysOff(), this.pendingDvcPull()])
+    // One read of the crowd levels covers the ±3 weeks and the whole horizon the best-weeks list looks across.
+    const from = addDays(trip.startDate, -7 * 3)
+    const to = addDays(trip.endDate, 7 * 3)
+    const horizonEnd = addDays(addMonths(today, horizonMonths), compareDates(trip.endDate, trip.startDate) + 7)
+    const crowdLevels = await this.crowdLevels(trip.destination, compareDates(today, from) < 0 ? today : from, compareDates(horizonEnd, to) > 0 ? horizonEnd : to)
+    const listingDates = listingWindow(trip)
+    const dvcListings = listingsForTrip(await this.dvcListings(listingDates.from, listingDates.to), trip)
+    const pricing = { trip, variant, lines: variant?.lines ?? [], referencePrices, drive, gasPrice: gas, maxDriveMinutes, today }
     return {
       trip,
       variant,
@@ -2709,24 +2788,39 @@ export class Engine {
       reservations,
       money: reservationMoney(reservations),
       tasks,
-      weeks: weekComparison({
-        trip,
-        variant,
-        lines: variant?.lines ?? [],
-        days,
-        crowdLevels,
-        referencePrices,
-        drive,
-        gasPrice: gas,
-        maxDriveMinutes,
-        blackoutDates,
-        today: this.today(),
-      }),
+      weeks: weekComparison({ ...pricing, days, crowdLevels, blackoutDates }),
       crowdLevels,
       blackoutDates,
       packTemplate,
       pendingPull,
+      bestWeeks: bestWeeks({ ...pricing, days, crowdLevels, daysOff, blackoutDates, horizonMonths, weights: weekWeights }),
+      horizonMonths,
+      weekWeights,
+      dvcListings,
+      pendingDvcPull,
     }
+  }
+
+  /** The top ten dates for a trip (D25): the facts gathered here, the choosing in the derivation module. */
+  async bestWeeks(tripId: Id): Promise<BestWeeks> {
+    const view = await this.tripPlanView(tripId)
+    if (!view) throw new EngineError('No such trip in this household')
+    return view.bestWeeks
+  }
+
+  /**
+   * "Use these dates" (D25): a window of the trip's own length moves the
+   * whole trip, days and unconfirmed reservations with it; a long weekend
+   * of another length sets the first and last day, and the days are cut
+   * afresh.
+   */
+  async useDates(tripId: Id, dates: { startDate: CivilDate; endDate: CivilDate }): Promise<void> {
+    const trip = await this.tripInHousehold(this.db, tripId)
+    if (compareDates(dates.endDate, dates.startDate) === compareDates(trip.endDate, trip.startDate)) {
+      await this.shiftTrip(tripId, dates.startDate)
+      return
+    }
+    await this.updateTrip(tripId, { startDate: dates.startDate, endDate: dates.endDate })
   }
 
   /** The trip's day rows, in date order. A trip from before they existed gets them now; nothing else changes. */
@@ -2998,6 +3092,323 @@ export class Engine {
     const tidy = labels.map((l) => l.trim()).filter((l) => l !== '')
     validatePackTemplate(tidy)
     await this.putSetting('trip_pack_template', tidy)
+  }
+
+  // -- the school calendar (D25): the household's own days off, and where they come from
+
+  /** Days off school, in date order; within a range when one is given. */
+  async schoolDaysOff(range?: { from: CivilDate; to: CivilDate }): Promise<SchoolDayOff[]> {
+    const where = range
+      ? and(eq(schoolDaysOffTable.householdId, this.householdId), gte(schoolDaysOffTable.date, range.from), lte(schoolDaysOffTable.date, range.to))
+      : eq(schoolDaysOffTable.householdId, this.householdId)
+    const rows = await this.db.select().from(schoolDaysOffTable).where(where)
+    return rows.map(toSchoolDayOff).sort((a, b) => compareDates(a.date, b.date) || a.label.localeCompare(b.label))
+  }
+
+  /** A day off typed by hand. The same date and name again is the same fact, not a second row. */
+  async addSchoolDayOff(input: { date: CivilDate; label: string; schoolYear?: string | null }): Promise<SchoolDayOff> {
+    const label = input.label.trim()
+    const schoolYear = input.schoolYear?.trim() || schoolYearOf(input.date)
+    validateDayOff({ date: input.date, label, schoolYear })
+    return this.db.transaction(async (tx) => {
+      const [have] = await tx
+        .select()
+        .from(schoolDaysOffTable)
+        .where(and(eq(schoolDaysOffTable.householdId, this.householdId), eq(schoolDaysOffTable.date, input.date), eq(schoolDaysOffTable.label, label)))
+      if (have) return toSchoolDayOff(have)
+      const [row] = await tx
+        .insert(schoolDaysOffTable)
+        .values({ householdId: this.householdId, date: input.date, label, schoolYear, source: 'typed', sourceUrl: null, recordedOn: this.today() })
+        .returning()
+      await this.recordSchoolCalendarChange(tx, { added: [{ date: input.date, label }], removed: [], source: 'typed', source_url: null })
+      return toSchoolDayOff(row!)
+    })
+  }
+
+  async removeSchoolDayOff(dayOffId: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .delete(schoolDaysOffTable)
+        .where(and(eq(schoolDaysOffTable.id, dayOffId), eq(schoolDaysOffTable.householdId, this.householdId)))
+        .returning()
+      if (!row) throw new EngineError('No such day off in this household')
+      await this.recordSchoolCalendarChange(tx, { added: [], removed: [{ date: row.date, label: row.label }], source: row.source, source_url: row.sourceUrl })
+    })
+  }
+
+  /**
+   * A calendar brought in whole (D25, D27): what it lists and is not here
+   * yet is added; what this same source and link gave before and the
+   * calendar no longer lists is taken away. Days typed by hand or from
+   * another source are never touched. The same calendar again changes
+   * nothing and records nothing, so an import is safe to repeat.
+   */
+  async importSchoolCalendar(input: { items: readonly DayOffInput[]; source: string; sourceUrl: string | null; schoolYear?: string | null }): Promise<{ added: number; removed: number }> {
+    const source = input.source.trim()
+    if (!source) throw new EngineError('An import needs to say where it came from.')
+    const items = input.items.map((i) => ({ date: i.date, label: i.label.trim() }))
+    for (const i of items) validateDayOff({ ...i, schoolYear: input.schoolYear?.trim() || schoolYearOf(i.date) })
+    return this.db.transaction(async (tx) => {
+      const existing = (await tx.select().from(schoolDaysOffTable).where(eq(schoolDaysOffTable.householdId, this.householdId))).map(toSchoolDayOff)
+      const diff = diffDaysOff(existing, items)
+      const mine = new Set(existing.filter((e) => e.source === source && (e.sourceUrl ?? null) === (input.sourceUrl ?? null)).map((e) => `${e.date}|${e.label.toLowerCase()}`))
+      const remove = diff.remove.filter((r) => mine.has(`${r.date}|${r.label.toLowerCase()}`))
+      if (diff.add.length === 0 && remove.length === 0) return { added: 0, removed: 0 }
+      for (const d of diff.add) {
+        await tx
+          .insert(schoolDaysOffTable)
+          .values({
+            householdId: this.householdId,
+            date: d.date,
+            label: d.label,
+            schoolYear: input.schoolYear?.trim() || schoolYearOf(d.date),
+            source,
+            sourceUrl: input.sourceUrl,
+            recordedOn: this.today(),
+          })
+          .onConflictDoNothing()
+      }
+      for (const r of remove) {
+        await tx
+          .delete(schoolDaysOffTable)
+          .where(and(eq(schoolDaysOffTable.householdId, this.householdId), eq(schoolDaysOffTable.date, r.date), eq(schoolDaysOffTable.label, r.label)))
+      }
+      await this.recordSchoolCalendarChange(tx, {
+        added: diff.add,
+        removed: remove.map((r) => ({ date: r.date, label: r.label })),
+        source,
+        source_url: input.sourceUrl,
+      })
+      return { added: diff.add.length, removed: remove.length }
+    })
+  }
+
+  async schoolCalendarSources(): Promise<SchoolCalendarSource[]> {
+    return this.getSetting<SchoolCalendarSource[]>('school_calendar_sources', [])
+  }
+
+  async setSchoolCalendarSources(sources: readonly SchoolCalendarSource[]): Promise<void> {
+    const tidy = sources.map((s) => ({ label: s.label.trim(), url: s.url.trim(), kind: s.kind }))
+    validateSchoolCalendarSources(tidy)
+    await this.putSetting('school_calendar_sources', tidy)
+  }
+
+  async horizonMonths(): Promise<number> {
+    return this.getSetting<number>('trip_horizon_months', DEFAULT_HORIZON_MONTHS)
+  }
+
+  async setHorizonMonths(months: number): Promise<void> {
+    validateHorizonMonths(months)
+    await this.putSetting('trip_horizon_months', months)
+  }
+
+  async weekWeights(): Promise<WeekWeights> {
+    const stored = await this.getSetting<Partial<WeekWeights> | null>('trip_week_weights', null)
+    return { ...DEFAULT_WEEK_WEIGHTS, ...(stored ?? {}) }
+  }
+
+  async setWeekWeights(weights: WeekWeights): Promise<void> {
+    validateWeekWeights(weights)
+    await this.putSetting('trip_week_weights', weights)
+  }
+
+  /**
+   * "Read it" on a calendar source (D25, D27). A feed is read by the iCal
+   * parser; a PDF or a page has no parser, so only the reader can read it,
+   * and only when the action says so (`fallbackToReader`, set after the
+   * parser path came back empty, or at once when no parser applies). What
+   * was read is held for the person to look at; nothing is a day off until
+   * they keep it.
+   */
+  async readSchoolCalendarSource(index: number, options: { fallbackToReader: boolean } & ReadDeps): Promise<ReadOutcome> {
+    const sources = await this.schoolCalendarSources()
+    const source = sources[index]
+    if (!source) throw new EngineError('No such calendar source.')
+    const notes: string[] = []
+    const fetchImpl = options.fetchImpl ?? fetch
+    const read = options.read ?? readStructured
+    if (source.kind === 'ical') {
+      try {
+        const items = await fetchSchoolCalendarIcal(source.url, fetchImpl)
+        if (items.length > 0) {
+          await this.stashSchoolCalendar({ label: source.label, source: 'ical', sourceUrl: source.url, schoolYear: null, items, readOn: this.today(), notes: [`${source.label}: ${items.length} days read from the feed.`] })
+          return { ok: true, count: items.length }
+        }
+        notes.push(`${source.label}: nothing in the feed read as a day off.`)
+      } catch (error) {
+        notes.push(`${source.label}: ${(error as Error).message}`)
+      }
+    } else {
+      notes.push(`${source.label}: a ${source.kind === 'pdf' ? 'PDF' : 'web page'} has no fixed shape, so only the reader can read it.`)
+    }
+    if (!options.fallbackToReader) {
+      await this.stashSchoolCalendar(null)
+      return { ok: false, notes }
+    }
+    if (!readerEnabled(options.env)) {
+      await this.stashSchoolCalendar(null)
+      return { ok: false, notes: [...notes, 'Add a reader key in the environment to read PDFs and pages.'] }
+    }
+    const result = await read({ source: { url: source.url }, shape: 'school_calendar' }, options)
+    if (!result.ok) {
+      await this.stashSchoolCalendar(null)
+      return { ok: false, notes: [...notes, result.reason] }
+    }
+    const calendar = result.value as { schoolYear: string; daysOff: DayOffInput[] }
+    if (calendar.daysOff.length === 0) {
+      await this.stashSchoolCalendar(null)
+      return { ok: false, notes: [...notes, `The reader found no days off in ${source.label}.`] }
+    }
+    await this.stashSchoolCalendar({
+      label: source.label,
+      source: readerSourceName(result.model),
+      sourceUrl: source.url,
+      schoolYear: calendar.schoolYear,
+      items: calendar.daysOff,
+      readOn: this.today(),
+      notes: [...notes, `The reader read ${calendar.daysOff.length} days off from ${source.label}.`],
+    })
+    return { ok: true, count: calendar.daysOff.length }
+  }
+
+  async pendingSchoolCalendar(): Promise<SchoolCalendarPending | null> {
+    const stored = await this.getSetting<SchoolCalendarPending | false | null>('trip_school_calendar_read', null)
+    return stored && typeof stored === 'object' && Array.isArray(stored.items) ? stored : null
+  }
+
+  /** Hold a read calendar for the person to look at. A cleared hold is stored as false: a setting's value is never null. */
+  async stashSchoolCalendar(pending: SchoolCalendarPending | null): Promise<void> {
+    await this.putSetting('trip_school_calendar_read', pending ?? false)
+  }
+
+  /** "Keep these": the held calendar becomes days off with its source and link, and the hold is cleared. */
+  async keepSchoolCalendar(): Promise<{ added: number; removed: number }> {
+    const pending = await this.pendingSchoolCalendar()
+    if (!pending) throw new EngineError('There is nothing waiting to be kept.')
+    const done = await this.importSchoolCalendar({ items: pending.items, source: pending.source, sourceUrl: pending.sourceUrl, schoolYear: pending.schoolYear })
+    await this.stashSchoolCalendar(null)
+    return done
+  }
+
+  // -- DVC listings (D26): reference data, household-independent, written only here
+
+  async dvcListings(from: CivilDate, to: CivilDate): Promise<DvcListing[]> {
+    const rows = await this.db
+      .select()
+      .from(dvcListingsTable)
+      .where(and(gte(dvcListingsTable.checkIn, from), lte(dvcListingsTable.checkIn, to)))
+    return rows.map(toDvcListing)
+  }
+
+  /**
+   * Keep what a broker had, one row per source, resort, room, check-in and
+   * nights; the same room seen again from the same source updates its
+   * price, points and the day it was seen. Recorded in the log once per
+   * pull: which source, how many rooms. Never a trip line: the lodging
+   * figure stays what a person typed.
+   */
+  async recordDvcListings(listings: ParsedListings['listings'], meta: { source: string; sourceUrl: string; seenOn: CivilDate }): Promise<number> {
+    for (const l of listings) validateDvcListing(l)
+    if (listings.length === 0) return 0
+    if (!meta.source.trim() || !/^https?:\/\//.test(meta.sourceUrl)) throw new EngineError('A listing needs to say where it came from.')
+    await this.db.transaction(async (tx) => {
+      for (const l of listings) {
+        await tx
+          .insert(dvcListingsTable)
+          .values({ source: meta.source, resort: l.resort.trim(), room: l.room.trim(), checkIn: l.checkIn, nights: l.nights, points: l.points, priceCents: l.priceCents, sourceUrl: meta.sourceUrl, seenOn: meta.seenOn })
+          .onConflictDoUpdate({
+            target: [dvcListingsTable.source, dvcListingsTable.resort, dvcListingsTable.room, dvcListingsTable.checkIn, dvcListingsTable.nights],
+            set: { points: l.points, priceCents: l.priceCents, sourceUrl: meta.sourceUrl, seenOn: meta.seenOn },
+          })
+      }
+      const dates = listings.map((l) => l.checkIn).sort()
+      await this.recordTripChange(tx, {
+        dvc_listings: { source: meta.source, source_url: meta.sourceUrl, count: listings.length, from: dates[0], to: dates[dates.length - 1], seen_on: meta.seenOn },
+      })
+    })
+    return listings.length
+  }
+
+  /**
+   * "Check what DVC brokers have" (D26, D27): the broker sources in order
+   * for the trip's dates two days either side; when every parser came back
+   * empty and the action allows it, the reader reads the first source's
+   * page. What came back is held for the person to look at.
+   */
+  async checkDvcListings(tripId: Id, options: { fallbackToReader: boolean } & ReadDeps): Promise<ReadOutcome> {
+    const trip = await this.tripInHousehold(this.db, tripId)
+    const window = listingWindow(trip)
+    const fetchImpl = options.fetchImpl ?? fetch
+    const read = options.read ?? readStructured
+    const pulled = await pullDvcListings(window, fetchImpl)
+    if (pulled.source && pulled.url) {
+      await this.stashDvcPull({ source: pulled.source.key, label: pulled.source.label, url: pulled.url, from: window.from, to: window.to, listings: pulled.listings, seenOn: this.today(), notes: pulled.notes })
+      return { ok: true, count: pulled.listings.length }
+    }
+    const notes = [...pulled.notes]
+    if (!options.fallbackToReader) {
+      await this.stashDvcPull(null)
+      return { ok: false, notes }
+    }
+    if (!readerEnabled(options.env)) {
+      await this.stashDvcPull(null)
+      return { ok: false, notes: [...notes, 'Add a reader key in the environment to read pages the app cannot.'] }
+    }
+    const first = DVC_LISTING_SOURCES[0]!
+    const url = first.url(window)
+    const result = await read({ source: { url }, shape: 'dvc_listings', instruction: `Only rooms with a check-in between ${window.from} and ${window.to} matter.` }, options)
+    if (!result.ok) {
+      await this.stashDvcPull(null)
+      return { ok: false, notes: [...notes, result.reason] }
+    }
+    const listings = (result.value as { listings: ParsedListings['listings'] }).listings.filter((l) => l.checkIn >= window.from && l.checkIn <= window.to)
+    if (listings.length === 0) {
+      await this.stashDvcPull(null)
+      return { ok: false, notes: [...notes, `The reader found no rooms for those dates on ${first.label}.`] }
+    }
+    await this.stashDvcPull({
+      source: readerSourceName(result.model),
+      label: first.label,
+      url,
+      from: window.from,
+      to: window.to,
+      listings,
+      seenOn: this.today(),
+      notes: [...notes, `The reader read ${listings.length} rooms from ${first.label}.`],
+    })
+    return { ok: true, count: listings.length }
+  }
+
+  async pendingDvcPull(): Promise<DvcPull | null> {
+    const stored = await this.getSetting<DvcPull | false | null>('trip_dvc_pull', null)
+    return stored && typeof stored === 'object' && Array.isArray(stored.listings) ? stored : null
+  }
+
+  async stashDvcPull(pull: DvcPull | null): Promise<void> {
+    await this.putSetting('trip_dvc_pull', pull ?? false)
+  }
+
+  /** "Keep these": the held listings become dated facts, and the hold is cleared. */
+  async keepDvcPull(): Promise<number> {
+    const pull = await this.pendingDvcPull()
+    if (!pull) throw new EngineError('There is nothing waiting to be kept.')
+    const kept = await this.recordDvcListings(pull.listings, { source: pull.source, sourceUrl: pull.url, seenOn: pull.seenOn })
+    await this.stashDvcPull(null)
+    return kept
+  }
+
+  private async recordSchoolCalendarChange(
+    tx: Conn,
+    payload: { added: DayOffInput[]; removed: { date: CivilDate; label: string }[]; source: string; source_url: string | null },
+  ): Promise<void> {
+    await tx.insert(events).values({
+      householdId: this.householdId,
+      kind: 'school_calendar_changed',
+      occurredAt: this.today(),
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload,
+    })
   }
 
   // -- planning plumbing
@@ -3485,6 +3896,33 @@ function toTask(r: typeof tripTasksTable.$inferSelect): TripTask {
     sort: r.sort,
     generated: r.generated,
     key: r.key,
+  }
+}
+
+function toSchoolDayOff(r: typeof schoolDaysOffTable.$inferSelect): SchoolDayOff {
+  return {
+    id: r.id,
+    householdId: r.householdId,
+    date: r.date as CivilDate,
+    label: r.label,
+    schoolYear: r.schoolYear,
+    source: r.source,
+    sourceUrl: r.sourceUrl,
+    recordedOn: r.recordedOn as CivilDate,
+  }
+}
+
+function toDvcListing(r: typeof dvcListingsTable.$inferSelect): DvcListing {
+  return {
+    resort: r.resort,
+    room: r.room,
+    checkIn: r.checkIn as CivilDate,
+    nights: r.nights,
+    points: r.points,
+    priceCents: r.priceCents,
+    sourceUrl: r.sourceUrl,
+    source: r.source,
+    seenOn: r.seenOn as CivilDate,
   }
 }
 

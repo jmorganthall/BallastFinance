@@ -32,9 +32,9 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `reader-shapes.ts` holds the zod shapes the reader may answer with |
 | `src/db/` | Drizzle schema and the connection. Facts only |
-| `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts` and `trip-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, and two public crowd calendars; public, key-free, each switchable off by env, every request with the app's own User-Agent) |
+| `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts` and `trip-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page; public, key-free, each switchable off by env, every request with the app's own User-Agent). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
 | `drizzle/` | Migrations. `0001` is the append-only enforcement — read it before touching events |
 | `scripts/` | Bootstrap, seed, backup, quickstart, and the Disney demo for checking against the spreadsheet |
@@ -109,6 +109,36 @@ principles, and they are non-negotiable.
   `homeIsLocated()` before measuring a drive. The two crowd sites and
   Nominatim are unreachable from the build sandbox: every parser is tested on
   hand-written fixtures, never a live page.
+- **The When section proposes dates** (PRD §16, D25–D26, rev 38). Every
+  window of the trip's length across a horizon (`trip_horizon_months`, 12)
+  plus every long weekend a federal holiday or a day off school makes, each
+  scored and the top ten shown with reasons. The formula is documented at the
+  top of `src/domain/trip-when.ts`: quiet, then cheap, then no school missed
+  (`trip_week_weights`, 3/2/1), each part normalised across the candidates,
+  price among candidates of the same length, a blackout excludes. Federal
+  holidays are computed with the observed-day rules. `school_days_off`
+  (migration 0013) is the household's own calendar — typed, imported from an
+  iCal feed, or read by the reader — and every change to it is a
+  `school_calendar_changed` event; a school year is taken to run from its
+  first listed day off to its last, and with no calendar at all every
+  weekday counts as school. `dvc_listings` is household-independent
+  reference data like `crowd_levels`: what a broker had on a date, shown
+  beside the lodging line and never the line itself, never in money math.
+  Both pulls are held in a setting and shown before they are kept.
+- **The reader is the only model call, and the last resort** (PRD §16, D27).
+  `src/server/reader.ts` is the one module that knows a language model
+  exists. It is off unless `READER_API_KEY`, `READER_BASE_URL` and
+  `READER_MODEL` are set in the environment — never in the database, never on
+  a screen beyond a notice that it is off. Structured first: an engine method
+  that can fall back takes a `fallbackToReader` flag, and the action sets it
+  only after the parser path returned nothing (a PDF or a page has no parser,
+  so the action sets it at once). The request carries a strict JSON schema
+  from `src/domain/reader-shapes.ts` and the reply is validated there or
+  refused. What it read is held in a setting and shown to a person before
+  anything is stored; a stored fact carries source `read:<model>`, the URL
+  and the date. It never touches money math and never runs on a schedule.
+  Do not import it anywhere but the engine, and do not add a second caller.
+  Unreachable from the sandbox: tested with a fake fetch only.
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software. The trip planner's
   usual figures are a constant in `src/domain/trip.ts`, laid over by a
@@ -117,7 +147,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 588 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 635 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

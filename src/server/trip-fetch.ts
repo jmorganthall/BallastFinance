@@ -7,6 +7,11 @@
  * - The gas price: the weekly US regular average from FRED's public CSV.
  * - Where home is: the address geocoded once, on save, through Nominatim.
  * - How busy: a public crowd calendar, on a button press, shown before kept.
+ * - Days off school: the district's iCal feed, when it has one (D25).
+ * - What DVC brokers have: a broker's public availability page, on a button
+ *   press, shown before kept (D26). Not Disney's page, and not the members'
+ *   tool behind a login. The reader (reader.ts) is the fallback, never the
+ *   first choice, and only the action decides to ask it.
  *
  * Nothing Disney sells is fetched: there is no public API and the terms
  * forbid scraping. Flights and rentals are typed too (no open API remains).
@@ -26,18 +31,24 @@
 import {
   CROWD_SOURCES,
   DESTINATIONS,
+  DVC_LISTING_SOURCES,
   GAS_PRICE_SERIES,
   nominatimUrl,
   parseGasPriceCsv,
+  parseIcal,
   parseNominatim,
   parseOsrmRoute,
   type CivilDate,
   type CrowdSource,
+  type DayOffInput,
   type DriveEstimate,
   type GasPrice,
   type GeocodeResult,
+  type ListingSource,
+  type ListingSourceArgs,
   type LocatedHome,
   type ParsedCrowd,
+  type ParsedListings,
   type TripDestination,
 } from '@/domain'
 
@@ -205,4 +216,75 @@ export async function pullCrowdCalendar(
     return { source, levels, notes }
   }
   return { source: null, levels: [], notes }
+}
+
+// ---------------------------------------------------------------- the school calendar (D25) and DVC listings (D26)
+
+/**
+ * An iCal feed of the district's days off, read by the domain parser. An
+ * error status is thrown; a page that is not a calendar is nothing.
+ */
+export async function fetchSchoolCalendarIcal(url: string, fetchImpl: typeof fetch = fetch): Promise<DayOffInput[]> {
+  const response = await fetchImpl(url, {
+    signal: AbortSignal.timeout(20_000),
+    headers: { accept: 'text/calendar, text/plain', 'user-agent': userAgent() },
+  })
+  if (!response.ok) throw new Error(`The calendar feed answered ${response.status}`)
+  return parseIcal(await response.text())
+}
+
+export interface ListingFetch extends ParsedListings {
+  source: ListingSource
+  url: string
+}
+
+/** One broker source, one window of dates: the page read by that source's own parser. */
+export async function fetchDvcListings(source: ListingSource, args: ListingSourceArgs, fetchImpl: typeof fetch = fetch): Promise<ListingFetch> {
+  const url = source.url(args)
+  const response = await fetchImpl(url, {
+    signal: AbortSignal.timeout(20_000),
+    headers: { accept: 'text/html, application/json', 'user-agent': userAgent() },
+  })
+  if (!response.ok) throw new Error(`${source.label} answered ${response.status}`)
+  const parsed = source.parse(await response.text())
+  return { source, url, ...parsed }
+}
+
+export interface ListingPullResult {
+  /** The source that gave something, or null when none did. */
+  source: ListingSource | null
+  url: string | null
+  listings: ParsedListings['listings']
+  /** What each source said, in order tried, for the screen. */
+  notes: string[]
+}
+
+/**
+ * The broker sources in order (D26): the first that reads as a list of
+ * rooms for the dates asked wins. Each source's failure is a line for the
+ * screen, never an exception. Nothing from any of them is the fallback's
+ * cue: the action decides whether to ask the reader.
+ */
+export async function pullDvcListings(
+  args: ListingSourceArgs,
+  fetchImpl: typeof fetch = fetch,
+  sources: readonly ListingSource[] = DVC_LISTING_SOURCES,
+): Promise<ListingPullResult> {
+  const notes: string[] = []
+  for (const source of sources) {
+    try {
+      const got = await fetchDvcListings(source, args, fetchImpl)
+      // The parser keeps every row it read; the window is applied here so a confirmed-reservations page is narrowed the same way.
+      const listings = got.listings.filter((l) => l.checkIn >= args.from && l.checkIn <= args.to)
+      if (listings.length === 0) {
+        notes.push(`${source.label}: ${got.reason ?? 'nothing for those dates'}`)
+        continue
+      }
+      notes.push(`${source.label}: ${listings.length} rooms read.`)
+      return { source, url: got.url, listings, notes }
+    } catch (error) {
+      notes.push(`${source.label}: ${(error as Error).message}`)
+    }
+  }
+  return { source: null, url: null, listings: [], notes }
 }

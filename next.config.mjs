@@ -15,7 +15,8 @@ const nextConfig = {
     // arrives separately, as BALLAST_BUILD_SHA from the image build.
     BALLAST_VERSION: version,
   },
-  serverExternalPackages: ['postgres'],
+  // unpdf ships an ESM build that reads import.meta, which webpack cannot bundle; loaded from node_modules at runtime instead.
+  serverExternalPackages: ['postgres', 'unpdf'],
   // Declared explicitly rather than inferred from tsconfig paths, so the bundler
   // and the typechecker cannot disagree about what "@/" means.
   webpack(config) {

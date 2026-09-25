@@ -24,9 +24,12 @@ import {
   addVariantAction,
   checkCrowdsAction,
   checkDriveAction,
+  checkDvcListingsAction,
   checkGasPriceAction,
   discardCrowdPullAction,
+  discardDvcPullAction,
   keepCrowdPullAction,
+  keepDvcPullAction,
   rebuildTimelineAction,
   removeReservationAction,
   removeTaskAction,
@@ -42,6 +45,7 @@ import {
   updateTripDayAction,
   updateTripLineAction,
   updateVariantAction,
+  useDatesAction,
   useDriveAction,
   useGasPriceAction,
   useWeekAction,
@@ -55,6 +59,8 @@ import {
   crowdWord,
   describeSource,
   dollarsForInput,
+  DVC_LISTING_SOURCES,
+  type DvcListing,
   formatCents,
   headCount,
   homeIsLocated,
@@ -109,12 +115,37 @@ function crowdSourceName(source: string): string {
   return CROWD_SOURCES.find((s) => s.key === source)?.label ?? source
 }
 
+/** Which broker a listing came from, or that the reader read it. */
+function listingSourceName(source: string): string {
+  if (source.startsWith('read:')) return 'read from the broker page'
+  return DVC_LISTING_SOURCES.find((s) => s.key === source)?.label ?? source
+}
+
+/** A listing, as a dated fact: resort, room, dates, points and price, and when a broker had it. */
+function ListingRow({ listing }: { listing: Omit<DvcListing, 'source' | 'sourceUrl' | 'seenOn'> & Partial<Pick<DvcListing, 'source' | 'seenOn'>> }) {
+  return (
+    <li className="py-1.5 text-sm">
+      <span className="flex items-baseline justify-between gap-3">
+        <span className="min-w-0">
+          {listing.resort}, {listing.room}
+        </span>
+        <span className="shrink-0 font-medium">{listing.priceCents === null ? 'price not shown' : <Money cents={listing.priceCents} />}</span>
+      </span>
+      <span className="block text-xs text-[var(--color-ink-soft)]">
+        {shortDate(listing.checkIn)}, {listing.nights} {listing.nights === 1 ? 'night' : 'nights'}
+        {listing.points !== null ? ` · ${listing.points} points` : ''}
+        {listing.seenOn && listing.source ? ` · what a broker had on ${humanDate(listing.seenOn)} (${listingSourceName(listing.source)})` : ''}
+      </span>
+    </li>
+  )
+}
+
 export default async function TripPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string; saved?: string; drive?: string; gas?: string; crowds?: string }>
+  searchParams: Promise<{ error?: string; saved?: string; drive?: string; gas?: string; crowds?: string; dvc?: string }>
 }) {
   const { id } = await params
   const { error, saved, drive: pendingDrive, gas: pendingGas } = await searchParams
@@ -272,6 +303,42 @@ export default async function TripPage({
         </Card>
       ) : null}
 
+      {plan.pendingDvcPull && planning ? (
+        <Card className="mb-4 bg-[var(--color-accent-soft)]">
+          <h2 className="font-semibold">What {plan.pendingDvcPull.label} had on {humanDate(plan.pendingDvcPull.seenOn)}</h2>
+          <p className="mt-1 text-sm">
+            {plan.pendingDvcPull.listings.length} {plan.pendingDvcPull.listings.length === 1 ? 'room' : 'rooms'} with a check-in from{' '}
+            {shortDate(plan.pendingDvcPull.from)} to {shortDate(plan.pendingDvcPull.to)}. Keep them as a note beside where you stay? The
+            lodging figure in the price tag stays what you typed.
+            {plan.pendingDvcPull.source.startsWith('read:') ? ' The reader read this page, so check a figure before you lean on it.' : ''}
+          </p>
+          <ul className="mt-2 max-h-64 divide-y divide-[var(--color-line)] overflow-y-auto">
+            {plan.pendingDvcPull.listings.map((l) => (
+              <ListingRow key={`${l.resort}|${l.room}|${l.checkIn}|${l.nights}`} listing={l} />
+            ))}
+          </ul>
+          <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
+            {plan.pendingDvcPull.notes.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+          <div className="mt-3 flex gap-2">
+            <form action={keepDvcPullAction} className="flex-1">
+              <input type="hidden" name="trip_id" value={trip.id} />
+              <button type="submit" className={primaryButton}>
+                Keep these
+              </button>
+            </form>
+            <form action={discardDvcPullAction} className="flex-1">
+              <input type="hidden" name="trip_id" value={trip.id} />
+              <button type="submit" className={secondaryButton}>
+                Not now
+              </button>
+            </form>
+          </div>
+        </Card>
+      ) : null}
+
       <Card className="mb-4">
         <p className="text-sm">
           <strong>{trip.travelers.map((t) => t.name).join(', ')}</strong>
@@ -350,6 +417,50 @@ export default async function TripPage({
             : 'No crowd calendar yet for these dates'
         }
       >
+        <h3 className="font-semibold">Best weeks</h3>
+        <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+          The ten best dates from {shortDate(plan.bestWeeks.horizonFrom)} to {shortDate(plan.bestWeeks.horizonTo)},{' '}
+          {plan.bestWeeks.horizonTo.slice(0, 4)}: every {nights}-night window, and every long weekend a holiday or a day
+          off school makes. Quiet first, then cheap, then no school missed.
+          {plan.bestWeeks.excludedByBlackout > 0 ? ` ${plan.bestWeeks.excludedByBlackout} left out for weeks you cannot go.` : ''}
+          {plan.bestWeeks.daysOffKnown ? '' : ' No school calendar yet, so every weekday counts as school; add one under Trips.'}
+        </p>
+        {plan.bestWeeks.top.length === 0 ? (
+          <p className="mb-4 text-sm text-[var(--color-ink-soft)]">Every window ahead runs into a week you cannot go.</p>
+        ) : (
+          <ol className="mb-4 divide-y divide-[var(--color-line)]">
+            {plan.bestWeeks.top.map((c, i) => (
+              <li key={`${c.startDate}|${c.endDate}`} className={`flex items-start justify-between gap-3 py-2 ${c.current ? 'bg-[var(--color-accent-soft)]' : ''}`}>
+                <div className="min-w-0 text-sm">
+                  <span className="font-medium">
+                    {i + 1}. {shortDate(c.startDate)} – {shortDate(c.endDate)}, {c.endDate.slice(0, 4)}
+                  </span>
+                  <span className="text-[var(--color-ink-soft)]">
+                    {' '}
+                    · {weekdayName(c.startDate)}, {c.nights} {c.nights === 1 ? 'night' : 'nights'}
+                  </span>
+                  <span className="block text-xs text-[var(--color-ink-soft)]">{c.reasons.join(' · ')}</span>
+                </div>
+                <div className="shrink-0 text-right">
+                  <Money cents={c.priceCents} className="block text-sm" />
+                  {editable && !c.current ? (
+                    <form action={useDatesAction} className="mt-1">
+                      <input type="hidden" name="trip_id" value={trip.id} />
+                      <input type="hidden" name="start_date" value={c.startDate} />
+                      <input type="hidden" name="end_date" value={c.endDate} />
+                      <button type="submit" className={smallButton}>
+                        Use these dates
+                      </button>
+                    </form>
+                  ) : c.current ? (
+                    <span className="text-xs text-[var(--color-ink-soft)]">this trip</span>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+        <h3 className="font-semibold">A few weeks either side</h3>
         <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
           The same trip a few weeks either side: how busy the parks are on{' '}
           {parkDays > 0 ? 'the park days' : 'each day'}, what it costs, and what it runs into. How busy is 1 (quiet)
@@ -417,8 +528,9 @@ export default async function TripPage({
           </table>
         </div>
         <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
-          &ldquo;Use this week&rdquo; moves the whole trip, days and unconfirmed reservations with it. Weeks you cannot go
-          are set under Trips.
+          &ldquo;Use this week&rdquo; and &ldquo;Use these dates&rdquo; move the whole trip, days and unconfirmed reservations
+          with it; a long weekend of another length sets the first and last day afresh. Weeks you cannot go, the school
+          calendar and how the best weeks are picked are set under Trips.
         </p>
       </Section>
 
@@ -816,6 +928,29 @@ export default async function TripPage({
                             <LineRow key={line.id} line={line} tripId={trip.id} today={today} editable={editable} accounts={accounts} />
                           ))}
                         </ul>
+                        {group.category === 'lodging' && variant.choices.lodging === 'dvc_rental' && planning ? (
+                          <div className="mt-2 rounded-xl bg-[var(--color-surface)] p-3">
+                            <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
+                              What a DVC broker had for these dates, two days either side: a note beside the figure above, never
+                              the figure itself. Read from the broker&apos;s public page when you press the button.
+                            </p>
+                            {plan.dvcListings.length > 0 ? (
+                              <ul className="mt-2 divide-y divide-[var(--color-line)]">
+                                {plan.dvcListings.map((l) => (
+                                  <ListingRow key={`${l.source}|${l.resort}|${l.room}|${l.checkIn}|${l.nights}`} listing={l} />
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="mt-2 text-sm text-[var(--color-ink-soft)]">Nothing read yet.</p>
+                            )}
+                            <form action={checkDvcListingsAction} className="mt-2">
+                              <input type="hidden" name="trip_id" value={trip.id} />
+                              <button type="submit" className={secondaryButton}>
+                                Check what DVC brokers have
+                              </button>
+                            </form>
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                     {editable ? (

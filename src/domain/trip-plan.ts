@@ -525,6 +525,34 @@ function rangesOverlap(aFrom: CivilDate, aTo: CivilDate, bFrom: CivilDate, bTo: 
   return compareDates(aFrom, bTo) <= 0 && compareDates(bFrom, aTo) <= 0
 }
 
+/** The inputs that price a window: the trip, its way, its parts as they stand, and the household's figures. */
+export type WindowPricingInput = Pick<WeekComparisonInput, 'trip' | 'variant' | 'lines' | 'referencePrices' | 'drive' | 'gasPrice' | 'maxDriveMinutes' | 'today'>
+
+/**
+ * The trip's parts re-dated to a window: the default parts fresh for those
+ * dates with every typed figure carried over by name, and the parts a
+ * person added kept as they are, whatever the week. Nothing priced without
+ * a way to do it.
+ */
+export function priceWindowLines(input: WindowPricingInput, window: Pick<Trip, 'startDate' | 'endDate'>): DefaultLine[] {
+  if (!input.variant) return []
+  const shifted: Trip = { ...input.trip, startDate: window.startDate, endDate: window.endDate }
+  const fresh = defaultLines(shifted, input.variant, {
+    referencePrices: input.referencePrices,
+    drive: input.drive ?? null,
+    gasPrice: input.gasPrice ?? null,
+    maxDriveMinutes: input.maxDriveMinutes,
+    today: input.today,
+  })
+  const lines = input.lines ?? []
+  return [...keepTypedLines(lines.filter((l) => !isAddedLine(l)), fresh), ...lines.filter(isAddedLine)]
+}
+
+/** What the trip would come to on other dates, all in: parts, promotion and cushion. */
+export function priceWindowCents(input: WindowPricingInput, window: Pick<Trip, 'startDate' | 'endDate'>): Cents {
+  return variantPrice(priceWindowLines(input, window), contingencyBasisPoints(input.referencePrices)).totalCents
+}
+
 /**
  * One row per candidate week (D22): how busy, what it costs, what getting
  * there costs, and what it runs into. The park days are the trip's own,
@@ -532,7 +560,7 @@ function rangesOverlap(aFrom: CivilDate, aTo: CivilDate, bFrom: CivilDate, bTo: 
  * typed figure carried over.
  */
 export function weekComparison(input: WeekComparisonInput): WeekComparisonRow[] {
-  const { trip, variant, today } = input
+  const { trip, today } = input
   const weeks = input.candidateWeeks ?? candidateWeeks(trip)
   const percent = contingencyBasisPoints(input.referencePrices)
   const planned = (input.days ?? []).filter((d) => d.park !== 'rest' && d.park !== 'travel')
@@ -549,19 +577,7 @@ export function weekComparison(input: WeekComparisonInput): WeekComparisonRow[] 
     const average = levels.length > 0 ? Math.round((levels.reduce((s, l) => s + l, 0) / levels.length) * 10) / 10 : null
     const worst = levels.length > 0 ? Math.ceil(Math.max(...levels)) : null
 
-    let priced: DefaultLine[] = []
-    if (variant) {
-      const fresh = defaultLines(shifted, variant, {
-        referencePrices: input.referencePrices,
-        drive: input.drive ?? null,
-        gasPrice: input.gasPrice ?? null,
-        maxDriveMinutes: input.maxDriveMinutes,
-        today,
-      })
-      // Default parts carry their typed figures over by name; parts a person added are theirs whatever the week.
-      const lines = input.lines ?? []
-      priced = [...keepTypedLines(lines.filter((l) => !isAddedLine(l)), fresh), ...lines.filter(isAddedLine)]
-    }
+    const priced = priceWindowLines(input, shifted)
     const price = variantPrice(priced, percent)
     const travelCents = priced.filter((l) => l.category === 'travel').reduce((s, l) => s + Math.max(0, lineTotalCents(l)), 0)
     const blackouts = input.blackoutDates.filter((b) => rangesOverlap(week.startDate, week.endDate, b.from, b.to)).map((b) => b.label)

@@ -2,15 +2,54 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   fetchCrowdCalendar,
   fetchDrive,
+  fetchDvcListings,
   fetchGasPrice,
+  fetchSchoolCalendarIcal,
   GAS_PRICE_CSV_URL,
   geocodeAddress,
   osrmRouteUrl,
   pullCrowdCalendar,
+  pullDvcListings,
   resetGeocoder,
   userAgent,
 } from '../trip-fetch'
-import { CROWD_SOURCES } from '@/domain'
+import { CROWD_SOURCES, DVC_LISTING_SOURCES } from '@/domain'
+
+describe('the school calendar feed and the DVC listing pulls', () => {
+  it('reads an iCal feed into days off and throws on an error status', async () => {
+    const ics = 'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART;VALUE=DATE:20270118\r\nSUMMARY:MLK Day\r\nEND:VEVENT\r\nEND:VCALENDAR'
+    let asked = ''
+    const fake = (async (url: string, init: RequestInit) => {
+      asked = `${url} ${(init.headers as Record<string, string>)['user-agent']}`
+      return new Response(ics)
+    }) as unknown as typeof fetch
+    expect(await fetchSchoolCalendarIcal('https://district.example/cal.ics', fake)).toEqual([{ date: '2027-01-18', label: 'MLK Day' }])
+    expect(asked).toContain('https://district.example/cal.ics BallastFinance/')
+    await expect(fetchSchoolCalendarIcal('https://district.example/cal.ics', respond('nope', 500))).rejects.toThrow('500')
+    expect(await fetchSchoolCalendarIcal('https://district.example/cal.ics', respond('<html>login</html>'))).toEqual([])
+  })
+
+  it('tries the broker sources in order, keeps only check-ins in the window, and notes every failure', async () => {
+    const page = `<script>[{"resort":"Bay Lake Tower","room":"Studio","checkIn":"2027-06-12","nights":5,"points":100,"price":2000},{"resort":"Late","room":"Studio","checkIn":"2027-07-12","nights":5,"points":100,"price":2000}]</script>`
+    const window = { from: '2027-06-10', to: '2027-06-21' }
+    let calls = 0
+    const fake = (async (url: string) => {
+      calls += 1
+      return url.includes('confirmed') ? new Response(page) : new Response('busy', { status: 503 })
+    }) as unknown as typeof fetch
+    const got = await pullDvcListings(window, fake)
+    expect(calls).toBe(2)
+    expect(got.source?.key).toBe('dvc_rental_store_confirmed')
+    expect(got.listings).toEqual([{ resort: 'Bay Lake Tower', room: 'Studio', checkIn: '2027-06-12', nights: 5, points: 100, priceCents: 200_000 }])
+    expect(got.notes).toEqual(['DVC Rental Store: DVC Rental Store answered 503', 'DVC Rental Store confirmed reservations: 1 rooms read.'])
+    const none = await pullDvcListings(window, respond('<html>Sign in</html>'))
+    expect(none.source).toBeNull()
+    expect(none.notes).toHaveLength(2)
+    const one = await fetchDvcListings(DVC_LISTING_SOURCES[0]!, window, respond(page))
+    expect(one.url).toBe('https://dvcrentalstore.com/guests/check-dvc-availability/?check_in=2027-06-10&check_out=2027-06-21')
+    expect(one.listings).toHaveLength(2)
+  })
+})
 
 const home = { label: 'Home', latitude: 41.8781, longitude: -87.6298 }
 
