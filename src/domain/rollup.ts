@@ -13,6 +13,7 @@
 import {
   componentsForLineItem,
   driftAdjustmentComponent,
+  isComponentActive,
   shouldHaveSaved,
   shouldHaveSavedForItem,
   evenPaceCents,
@@ -42,6 +43,12 @@ export interface DerivationInput {
   lineItems: readonly LineItem[]
   changes?: readonly LineItemChange[]
   driftAdjustments?: readonly DriftAdjustment[]
+  /**
+   * Bumps and cuts offered but not yet marked done. They never touch a live
+   * figure; they only price `AccountView.pendingWeekly`, the number the
+   * transfer becomes once the person does what the to-do asks.
+   */
+  pendingDriftAdjustments?: readonly DriftAdjustment[]
   /** Cycle starts and opening balances, per item. Absent means "since commit, from $0". */
   cycleStarts?: readonly LineItemCycle[]
   /**
@@ -112,6 +119,13 @@ export interface AccountView {
   account: ReserveAccount
   /** The number to set the recurring transfer to. */
   weekly: WeeklyBreakdown
+  /**
+   * What `weekly` becomes once every open bump or cut for this account is
+   * marked done, or null when nothing is waiting. Shown next to the to-do so
+   * "add $18.54 a week" and "set the transfer to $240" are one instruction,
+   * not two; it moves nothing until the person confirms.
+   */
+  pendingWeekly: WeeklyBreakdown | null
   /** What this account should hold today across all active packages. */
   shouldHaveSavedCents: Cents
   /** Still to be set aside before every active item in this account is funded. */
@@ -230,8 +244,10 @@ export function accountViews(input: DerivationInput): AccountView[] {
   const { today, accounts, packages, lineItems } = input
   const changes = input.changes ?? []
   const adjustments = input.driftAdjustments ?? []
+  const pendingAdjustments = input.pendingDriftAdjustments ?? []
   const cycles = input.cycleStarts ?? []
   const packagesById = new Map(packages.map((p) => [p.id, p]))
+  const roundUp = input.transferRoundUpCents ?? 0
 
   return accounts.map((account) => {
     const items: LineItemView[] = []
@@ -250,9 +266,18 @@ export function accountViews(input: DerivationInput): AccountView[] {
         .map(driftAdjustmentComponent),
     ]
 
+    // Priced separately and never merged into `components`: an open ask must
+    // not move the live number, the should-hold figure, or a check-in's drift.
+    const pending = pendingAdjustments
+      .filter((a) => a.reserveAccountId === account.id)
+      .map(driftAdjustmentComponent)
+      .filter((c) => isComponentActive(c, today))
+
     return {
       account,
-      weekly: weeklyBreakdown(components, today, input.transferRoundUpCents ?? 0),
+      weekly: weeklyBreakdown(components, today, roundUp),
+      pendingWeekly:
+        pending.length > 0 ? weeklyBreakdown([...components, ...pending], today, roundUp) : null,
       shouldHaveSavedCents: items.reduce((s, v) => s + v.shouldHaveSavedCents, 0),
       outstandingCents: items.reduce((s, v) => s + v.remainingCents, 0),
       items,
@@ -302,49 +327,86 @@ export function whatIfCommit(input: DerivationInput, packageId: Id): WhatIfLine[
     .sort((a, b) => b.addedPerWeekCents - a.addedPerWeekCents)
 }
 
-/** Drift at a check-in: confirmed balance minus what the plan says should be there. */
+/**
+ * Where an account stands at a check-in: the confirmed balance against what
+ * the plan says should be there, net of what is already on the way (D18).
+ * A bump running or waiting, a cut, or an open one-time move will change the
+ * balance without anyone being asked again, so the gap this reports is only
+ * what nothing yet covers.
+ */
 export interface Drift {
   accountId: Id
   expectedCents: Cents
   confirmedCents: Cents
-  /** Negative = behind pace, positive = ahead. */
+  /** What open bumps, cuts and one-time moves will still deliver after the balance date. */
+  committedCents: Cents
+  /** Negative = behind pace, positive = ahead, after `committedCents` is counted. */
   driftCents: Cents
 }
 
 export function computeDrift(args: {
   account: AccountView
   confirmedCents: Cents
+  /** From `committedAfter`. Absent means nothing is on the way. */
+  committedCents?: Cents
 }): Drift {
+  const committedCents = args.committedCents ?? 0
   return {
     accountId: args.account.account.id,
     expectedCents: args.account.shouldHaveSavedCents,
     confirmedCents: args.confirmedCents,
-    driftCents: args.confirmedCents - args.account.shouldHaveSavedCents,
+    committedCents,
+    driftCents: args.confirmedCents - args.account.shouldHaveSavedCents + committedCents,
   }
 }
 
-/** Catch-up options offered when a check-in finds the account behind (PRD §5). */
+/**
+ * Catch-up options offered when a check-in finds the account behind (PRD §5).
+ *
+ * The shortfall arrives net of everything already on the way, including any
+ * bump or one-time move still waiting on the to-do list. Accepting an option
+ * of the same kind as a waiting ask REPLACES that ask (D18), so the option is
+ * sized to cover the waiting one's amount as well as the extra -- otherwise
+ * replacing "$18.54 a week" with "$6.46 a week" would lose the difference.
+ * `replacesCents` says how much of the option is the ask it stands in for.
+ */
 export interface CatchUpOption {
   kind: 'one_time' | 'rate_bump'
   amountCents: Cents
   perWeekCents?: Cents
   weeks?: number
   endDate?: CivilDate
+  /** The waiting ask of this kind that accepting this one replaces; zero when none. */
+  replacesCents: Cents
 }
 
 export function catchUpOptions(args: {
   shortfallCents: Cents
   today: CivilDate
   overWeeks: number
+  /** A bump still waiting on the to-do list, at its full amount. */
+  pendingBumpCents?: Cents
+  /** A one-time catch-up move still waiting, at its full amount. */
+  pendingMoveCents?: Cents
 }): CatchUpOption[] {
   const { shortfallCents, overWeeks } = args
   if (shortfallCents <= 0) return []
+  const pendingBumpCents = Math.max(0, args.pendingBumpCents ?? 0)
+  const pendingMoveCents = Math.max(0, args.pendingMoveCents ?? 0)
   const weeks = Math.max(1, overWeeks)
-  const perWeekCents = Math.ceil(shortfallCents / weeks)
+  const bumpCents = shortfallCents + pendingBumpCents
+  const perWeekCents = Math.ceil(bumpCents / weeks)
   const endDate = addWeeks(args.today, weeks)
   return [
-    { kind: 'one_time', amountCents: shortfallCents },
-    { kind: 'rate_bump', amountCents: shortfallCents, perWeekCents, weeks, endDate },
+    { kind: 'one_time', amountCents: shortfallCents + pendingMoveCents, replacesCents: pendingMoveCents },
+    {
+      kind: 'rate_bump',
+      amountCents: bumpCents,
+      perWeekCents,
+      weeks,
+      endDate,
+      replacesCents: pendingBumpCents,
+    },
   ]
 }
 
@@ -370,6 +432,8 @@ export interface AheadOption {
   pauses?: boolean
   /** Extra this option does not use up, which simply stays as a cushion. */
   leftoverCents?: Cents
+  /** The waiting ask of this kind that accepting this one replaces (D18); zero when none. */
+  replacesCents: Cents
 }
 
 export function aheadOptions(args: {
@@ -380,30 +444,45 @@ export function aheadOptions(args: {
   overWeeks: number
   /** The longest a pause is ever offered for. */
   maxWeeks?: number
+  /** A cut still waiting on the to-do list, at its full (positive) amount. */
+  pendingCutCents?: Cents
+  /** A move-out still waiting on the to-do list, at its full (positive) amount. */
+  pendingMoveOutCents?: Cents
 }): AheadOption[] {
   const { extraCents, weeklyCents } = args
   if (extraCents <= 0) return []
+  const pendingCutCents = Math.max(0, args.pendingCutCents ?? 0)
+  const pendingMoveOutCents = Math.max(0, args.pendingMoveOutCents ?? 0)
 
-  const options: AheadOption[] = [{ kind: 'one_time_out', amountCents: extraCents }]
+  const options: AheadOption[] = [
+    {
+      kind: 'one_time_out',
+      amountCents: extraCents + pendingMoveOutCents,
+      replacesCents: pendingMoveOutCents,
+    },
+  ]
   // Nothing is being set aside, so there is nothing to ease off.
   if (weeklyCents <= 0) return options
 
+  // A cut that replaces a waiting cut covers what that one was going to take
+  // off as well, since the waiting one disappears once this is accepted.
+  const toCut = extraCents + pendingCutCents
   const overWeeks = Math.max(1, args.overWeeks)
   const maxWeeks = Math.max(overWeeks, args.maxWeeks ?? 52)
 
   let perWeekCents: Cents
   let weeks: number
-  if (extraCents <= weeklyCents * overWeeks) {
+  if (toCut <= weeklyCents * overWeeks) {
     // A trim over the usual window. Rounded DOWN, the opposite of an accrual:
     // an under-cut leaves the account a few cents ahead, an over-cut would
     // leave it behind, and the household rule is to err on having more.
     weeks = overWeeks
-    perWeekCents = Math.floor(extraCents / weeks)
+    perWeekCents = Math.floor(toCut / weeks)
   } else {
     // More extra than the window can absorb: pause the set-aside entirely for
     // as many whole weeks as the extra covers, up to a limit. Whole weeks
     // only, so a pause is a real pause and never a transfer of a few cents.
-    weeks = Math.min(maxWeeks, Math.floor(extraCents / weeklyCents))
+    weeks = Math.min(maxWeeks, Math.floor(toCut / weeklyCents))
     perWeekCents = weeklyCents
   }
   if (perWeekCents <= 0 || weeks <= 0) return options
@@ -416,7 +495,8 @@ export function aheadOptions(args: {
     weeks,
     endDate: addWeeks(args.today, weeks),
     pauses: perWeekCents === weeklyCents,
-    leftoverCents: extraCents - amountCents,
+    leftoverCents: toCut - amountCents,
+    replacesCents: pendingCutCents,
   })
   return options
 }

@@ -49,6 +49,8 @@ import {
   validateDebtInputs,
   validateDebtRates,
   snowballLadder,
+  driftAdjustmentsFrom,
+  openCommitmentsFor,
   outstandingInstructions,
   packageViews,
   todayIn,
@@ -57,6 +59,8 @@ import {
   type AccountView,
   type CivilDate,
   type DerivationInput,
+  type EndedInstruction,
+  type OpenCommitments,
   type Id,
   type IntakeProblem,
   type LineItem,
@@ -828,13 +832,13 @@ export class Engine {
 
   /** Load every fact the derivation module needs, in one place. */
   async derivationInput(): Promise<DerivationInput> {
-    const [accounts, packages, lineItems, changes, driftAdjustments, cycleStarts, transferRoundUpCents] =
+    const [accounts, packages, lineItems, changes, adjustments, cycleStarts, transferRoundUpCents] =
       await Promise.all([
         this.listReserveAccounts(),
         this.listPackages(),
         this.listLineItems(),
         this.listLineItemChanges(),
-        this.acceptedDriftAdjustments(),
+        this.driftAdjustments(),
         this.listCycleStarts(),
         this.transferRoundUpCents(),
       ])
@@ -844,7 +848,8 @@ export class Engine {
       packages,
       lineItems,
       changes,
-      driftAdjustments,
+      driftAdjustments: adjustments.accepted,
+      pendingDriftAdjustments: adjustments.pending,
       cycleStarts,
       transferRoundUpCents,
     }
@@ -986,33 +991,49 @@ export class Engine {
   }
 
   /**
-   * Accepted rate bumps and cuts, as account-level catch-up components. Only a
-   * CONFIRMED instruction counts: an offer the user never acted on must not
-   * move the weekly number in either direction. A cut is the same component
-   * with its sign flipped: the instruction stores a positive "take this much
-   * off", the accrual math sees a negative delivery.
+   * Rate bumps and cuts as account-level catch-up components, split into the
+   * ones a human has marked done and the ones still waiting. Only `accepted`
+   * moves the weekly number: an offer the user never acted on must not change
+   * it in either direction. `pending` only prices what the number becomes
+   * once the to-do is done (`AccountView.pendingWeekly`).
    */
-  async acceptedDriftAdjustments(): Promise<DriftAdjustment[]> {
-    const [issued, confirmed] = await Promise.all([
+  async driftAdjustments(): Promise<{ accepted: DriftAdjustment[]; pending: DriftAdjustment[] }> {
+    const [issued, confirmed, ended] = await Promise.all([
       this.listIssuedInstructions(),
       this.listConfirmedInstructions(),
+      this.listEndedInstructions(),
     ])
-    const confirmedIds = new Set(confirmed.map((c) => c.instructionId))
+    return driftAdjustmentsFrom({ issued, confirmed, ended })
+  }
 
-    return issued
-      .filter(
-        (i) =>
-          (i.type === 'rate_bump' || i.type === 'rate_cut') &&
-          confirmedIds.has(i.instructionId) &&
-          i.endsOn,
-      )
-      .map((i) => ({
-        id: i.instructionId,
-        reserveAccountId: i.targetId,
-        amountCents: i.type === 'rate_cut' ? -i.amountCents : i.amountCents,
-        startDate: i.issuedOn,
-        endDate: i.endsOn!,
-      }))
+  /**
+   * Per account, everything still on the way that a check-in must size its
+   * offer net of (D18): bumps and cuts running or waiting, and one-time
+   * catch-up moves or move-outs still on the to-do list. The screen hands
+   * this to the domain; it works nothing out for itself.
+   */
+  async openCommitmentsByAccount(): Promise<Map<Id, OpenCommitments>> {
+    const [accounts, adjustments, outstanding] = await Promise.all([
+      this.listReserveAccounts(),
+      this.driftAdjustments(),
+      this.outstandingInstructions(),
+    ])
+    return new Map(
+      accounts.map((account) => [
+        account.id,
+        openCommitmentsFor({
+          reserveAccountId: account.id,
+          accepted: adjustments.accepted,
+          pending: adjustments.pending,
+          outstanding,
+        }),
+      ]),
+    )
+  }
+
+  /** The confirmed bumps and cuts: the only ones the live figures read. */
+  async acceptedDriftAdjustments(): Promise<DriftAdjustment[]> {
+    return (await this.driftAdjustments()).accepted
   }
 
   // ---------------------------------------------------------------- close-out
@@ -1127,11 +1148,59 @@ export class Engine {
     })
   }
 
+  /**
+   * End an instruction early (D18). An open ask is withdrawn; a confirmed bump
+   * or cut stops today, and the numbers change the moment this is recorded,
+   * because changing the transfer back is something the person has already
+   * done in the bank. Nothing is edited: the issued and confirmed events stay,
+   * and every derivation folds this one in.
+   *
+   * Only an instruction this household issued can be ended. The lookup goes
+   * through the household-bound read, so ending someone else's is not a
+   * permission to check but a thing that cannot be said.
+   */
+  async endInstruction(input: { instructionId: Id }): Promise<void> {
+    const [issued, ended] = await Promise.all([
+      this.listIssuedInstructions(),
+      this.listEndedInstructions(),
+    ])
+    if (!issued.some((i) => i.instructionId === input.instructionId)) {
+      throw new Error('No such instruction in this household.')
+    }
+    if (ended.some((e) => e.instructionId === input.instructionId)) {
+      throw new Error('That instruction has already been ended.')
+    }
+    await this.db.insert(events).values({
+      householdId: this.householdId,
+      kind: 'instruction_ended',
+      occurredAt: this.today(),
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload: { instruction_id: input.instructionId },
+    })
+  }
+
+  async listEndedInstructions(): Promise<EndedInstruction[]> {
+    const rows = await this.db
+      .select()
+      .from(events)
+      .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_ended')))
+
+    return rows.map((row) => {
+      const p = row.payload as { instruction_id: Id }
+      return { instructionId: p.instruction_id, endedOn: row.occurredAt as CivilDate }
+    })
+  }
+
   async listIssuedInstructions(): Promise<IssuedInstruction[]> {
+    // In the order recorded: two asks of the same kind issued the same day
+    // are settled by which came later (D18), and that must not depend on
+    // how the rows happen to come back.
     const rows = await this.db
       .select()
       .from(events)
       .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_issued')))
+      .orderBy(events.recordedAt, events.id)
 
     return rows.map((row) => {
       const p = row.payload as {
@@ -1179,11 +1248,12 @@ export class Engine {
   }
 
   async outstandingInstructions(): Promise<OutstandingInstruction[]> {
-    const [issued, confirmed] = await Promise.all([
+    const [issued, confirmed, ended] = await Promise.all([
       this.listIssuedInstructions(),
       this.listConfirmedInstructions(),
+      this.listEndedInstructions(),
     ])
-    return outstandingInstructions({ issued, confirmed, today: this.today() })
+    return outstandingInstructions({ issued, confirmed, ended, today: this.today() })
   }
 
   // ---------------------------------------------------------------- allocation

@@ -11,17 +11,23 @@ import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import { WeeklyNumber } from '@/components/weekly-number'
-import { formatCents, instructionSentence, respreadEquivalentPerWeekCents } from '@/domain'
-import { confirmInstructionAction, confirmSpendAction } from '@/server/actions'
+import {
+  formatCents,
+  instructionSentence,
+  respreadEquivalentPerWeekCents,
+  runningAdjustments,
+} from '@/domain'
+import { confirmInstructionAction, confirmSpendAction, endInstructionAction } from '@/server/actions'
 
 export const dynamic = 'force-dynamic'
 
 export default async function ThisWeekPage() {
   const { engine, viewer } = await requireEngine()
-  const [accounts, outstanding, closeOuts] = await Promise.all([
+  const [accounts, outstanding, closeOuts, commitments] = await Promise.all([
     engine.accountViews(),
     engine.outstandingInstructions(),
     engine.closeOutPrompts(),
+    engine.openCommitmentsByAccount(),
   ])
   const today = engine.today()
 
@@ -30,9 +36,26 @@ export default async function ThisWeekPage() {
   const dueNow = outstanding.filter((i) => i.dueNow)
   const comingUp = outstanding.filter((i) => !i.dueNow)
 
-  const withWork = accounts.filter((a) => a.weekly.transferPerWeekCents !== 0)
+  // An account with a running bump or cut stays on the screen even when the
+  // cut pauses its transfer entirely: the card is where it gets stopped (D18).
+  const withWork = accounts.filter(
+    (a) =>
+      a.weekly.transferPerWeekCents !== 0 ||
+      runningAdjustments({ running: commitments.get(a.account.id)?.running ?? [], today }).length > 0,
+  )
   const grandTotal = withWork.reduce((s, a) => s + a.weekly.transferPerWeekCents, 0)
   const shouldHold = accounts.reduce((s, a) => s + a.shouldHaveSavedCents, 0)
+
+  // An open bump or cut moves nothing until it is marked done. The engine has
+  // already priced what "done" turns each transfer into (pendingWeekly); the
+  // screen only has to put that number next to the ask, so the to-do and the
+  // account card read as one instruction instead of two that do not add up.
+  const byAccount = new Map(accounts.map((a) => [a.account.id, a]))
+  const anyPending = accounts.some((a) => a.pendingWeekly !== null)
+  const grandTotalOnceDone = withWork.reduce(
+    (s, a) => s + (a.pendingWeekly ?? a.weekly).transferPerWeekCents,
+    0,
+  )
 
   const firstName = viewer.name?.split(' ')[0] ?? 'there'
 
@@ -103,26 +126,55 @@ export default async function ThisWeekPage() {
             To do
           </h2>
           <ul className="space-y-3">
-            {dueNow.map((instruction) => (
+            {dueNow.map((instruction) => {
+              const dated = instruction.type === 'rate_bump' || instruction.type === 'rate_cut'
+              const target = dated ? byAccount.get(instruction.targetId) : undefined
+              const onceDone = target?.pendingWeekly
+              return (
               <li key={instruction.instructionId}>
                 <Card>
                   <p className="text-sm">{instructionSentence(instruction)}</p>
+                  {target && onceDone ? (
+                    <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                      That makes the {target.account.name} transfer{' '}
+                      <strong>{formatCents(onceDone.transferPerWeekCents)} per week</strong>
+                      {' '}(it is {formatCents(target.weekly.transferPerWeekCents)} now). The
+                      numbers below change once you mark this done.
+                    </p>
+                  ) : null}
                   {instruction.note ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
                   ) : null}
-                  <form action={confirmInstructionAction} className="mt-3">
-                    <input
-                      type="hidden"
-                      name="instruction_id"
-                      value={instruction.instructionId}
-                    />
-                    <button
-                      type="submit"
-                      className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
-                    >
-                      Done
-                    </button>
-                  </form>
+                  <div className="mt-3 flex gap-2">
+                    <form action={confirmInstructionAction} className="flex-1">
+                      <input
+                        type="hidden"
+                        name="instruction_id"
+                        value={instruction.instructionId}
+                      />
+                      <button
+                        type="submit"
+                        className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+                      >
+                        Done
+                      </button>
+                    </form>
+                    {/* Withdraws the ask (PRD D18): it leaves the list and stops
+                        counting as on the way. Nothing in the bank changes. */}
+                    <form action={endInstructionAction}>
+                      <input
+                        type="hidden"
+                        name="instruction_id"
+                        value={instruction.instructionId}
+                      />
+                      <button
+                        type="submit"
+                        className="rounded-lg px-3 py-2 text-sm text-[var(--color-ink-soft)] underline"
+                      >
+                        Not doing this
+                      </button>
+                    </form>
+                  </div>
                   {instruction.ageInDays > 6 ? (
                     <p className="mt-2 text-xs text-[var(--color-behind)]">
                       Asked {instruction.ageInDays} days ago.
@@ -130,7 +182,8 @@ export default async function ThisWeekPage() {
                   ) : null}
                 </Card>
               </li>
-            ))}
+              )
+            })}
           </ul>
         </section>
       ) : null}
@@ -151,19 +204,34 @@ export default async function ThisWeekPage() {
                   {instruction.note ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
                   ) : null}
-                  <form action={confirmInstructionAction} className="mt-3">
-                    <input
-                      type="hidden"
-                      name="instruction_id"
-                      value={instruction.instructionId}
-                    />
-                    <button
-                      type="submit"
-                      className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium text-[var(--color-ink-soft)]"
-                    >
-                      Done early
-                    </button>
-                  </form>
+                  <div className="mt-3 flex gap-2">
+                    <form action={confirmInstructionAction} className="flex-1">
+                      <input
+                        type="hidden"
+                        name="instruction_id"
+                        value={instruction.instructionId}
+                      />
+                      <button
+                        type="submit"
+                        className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium text-[var(--color-ink-soft)]"
+                      >
+                        Done early
+                      </button>
+                    </form>
+                    <form action={endInstructionAction}>
+                      <input
+                        type="hidden"
+                        name="instruction_id"
+                        value={instruction.instructionId}
+                      />
+                      <button
+                        type="submit"
+                        className="rounded-lg px-3 py-2 text-sm text-[var(--color-ink-soft)] underline"
+                      >
+                        Not doing this
+                      </button>
+                    </form>
+                  </div>
                 </Card>
               </li>
             ))}
@@ -191,6 +259,11 @@ export default async function ThisWeekPage() {
             <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
               Your accounts should hold <Money cents={shouldHold} /> in total today.
             </p>
+            {anyPending && grandTotalOnceDone !== grandTotal ? (
+              <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                Once the to-dos above are done: <Money cents={grandTotalOnceDone} /> / week.
+              </p>
+            ) : null}
           </Card>
 
           <ul className="space-y-4">
@@ -204,6 +277,13 @@ export default async function ThisWeekPage() {
                 remainingCents: outstanding,
                 asOf: today,
                 dueDate: soonest ?? today,
+              })
+              // Every bump or cut the person has confirmed and that is still
+              // changing this transfer, with the day it was going to run to,
+              // so any of them can be stopped today (PRD D18).
+              const running = runningAdjustments({
+                running: commitments.get(view.account.id)?.running ?? [],
+                today,
               })
 
               return (
@@ -245,6 +325,41 @@ export default async function ThisWeekPage() {
                       <strong>{view.account.name}</strong> to{' '}
                       <strong>{formatCents(view.weekly.transferPerWeekCents)} per week</strong>.
                     </p>
+                    {view.pendingWeekly ? (
+                      <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                        Waiting on you: a to-do above changes this. Once you mark it done, set
+                        the transfer to{' '}
+                        <strong>{formatCents(view.pendingWeekly.transferPerWeekCents)} per week</strong>{' '}
+                        instead, and the figures here will show it.
+                      </p>
+                    ) : null}
+
+                    {running.length > 0 ? (
+                      <ul className="mt-3 space-y-2 border-t border-[var(--color-line)] pt-3 text-sm">
+                        {running.map((r) => (
+                          <li key={r.instructionId} className="flex items-center justify-between gap-3">
+                            <span>
+                              {r.perWeekCents > 0
+                                ? `Catching up: ${formatCents(r.perWeekCents)} a week extra`
+                                : `Easing off: ${formatCents(-r.perWeekCents)} a week less`}
+                              <span className="block text-xs text-[var(--color-ink-soft)]">
+                                Until {humanDate(r.endDate)}. Stopping it changes the number above today;
+                                set the transfer back in Capital One 360 to match.
+                              </span>
+                            </span>
+                            <form action={endInstructionAction}>
+                              <input type="hidden" name="instruction_id" value={r.instructionId} />
+                              <button
+                                type="submit"
+                                className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium"
+                              >
+                                Stop this
+                              </button>
+                            </form>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
                   </Card>
                 </li>
               )

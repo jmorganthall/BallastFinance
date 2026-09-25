@@ -52,7 +52,7 @@ export function WeeklyNumber({
             ) : (
               <span key={group.endDate}>
                 {' + '}
-                <Hint detail="Added when the plan changed. It stops on its own at the date shown, and the ongoing amount is what remains.">
+                <Hint detail="Added when a plan changed, or when you agreed at a check-in to catch up and marked it done. It stops on its own at the date shown, and the ongoing amount is what remains.">
                   <Money cents={group.perWeekCents} /> extra until {humanDate(group.endDate)}
                 </Hint>
               </span>

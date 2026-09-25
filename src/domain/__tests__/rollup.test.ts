@@ -11,8 +11,9 @@ import {
   whatIfCommit,
   type DerivationInput,
 } from '../rollup'
+import { committedAfter, openCommitmentsFor } from '../instructions'
 import type { CivilDate } from '../dates'
-import type { LineItem, Package, ReserveAccount } from '../types'
+import type { DriftAdjustment, LineItem, Package, ReserveAccount } from '../types'
 
 const TODAY: CivilDate = '2026-09-19'
 
@@ -264,6 +265,66 @@ describe('drift and catch-up', () => {
     expect(catchUpOptions({ shortfallCents: -500, today: TODAY, overWeeks: 8 })).toEqual([])
   })
 
+  describe('net of what is already on the way (D18)', () => {
+    const bump = (over: Partial<DriftAdjustment> = {}): DriftAdjustment => ({
+      id: 'bump',
+      reserveAccountId: annual.id,
+      amountCents: 14832, // $18.54 a week over 8 transfer weeks
+      startDate: '2026-11-21',
+      endDate: '2027-01-16',
+      ...over,
+    })
+    const commitmentsWith = (running: DriftAdjustment[], pending: DriftAdjustment[] = []) =>
+      openCommitmentsFor({ reserveAccountId: annual.id, accepted: running, pending, outstanding: [] })
+
+    it('counts what is on the way toward the gap', () => {
+      const [view] = accountViews(input)
+      const drift = computeDrift({ account: view!, confirmedCents: view!.shouldHaveSavedCents - 19000, committedCents: 14832 })
+      expect(drift.committedCents).toBe(14832)
+      expect(drift.driftCents).toBe(-19000 + 14832)
+      // Without the figure nothing changes: the old callers still get the raw gap.
+      expect(computeDrift({ account: view!, confirmedCents: view!.shouldHaveSavedCents - 19000 }).driftCents).toBe(-19000)
+    })
+
+    it('never offers the same catch-up twice: bump confirmed the same day, balance unchanged', () => {
+      // The bug: $148.32 short on Nov 21, the bump accepted and marked done that
+      // day, and the check-in revisited with the same balance still offered it.
+      const [view] = accountViews(input)
+      const balance = view!.shouldHaveSavedCents - 14832
+      const committed = committedAfter({ commitments: commitmentsWith([bump()]), from: '2026-11-21' })
+      expect(committed).toBe(14832)
+      const drift = computeDrift({ account: view!, confirmedCents: balance, committedCents: committed })
+      expect(drift.driftCents).toBe(0)
+      expect(catchUpOptions({ shortfallCents: -drift.driftCents, today: '2026-11-21', overWeeks: 8 })).toEqual([])
+    })
+
+    it('counts only what a half-delivered bump will still add', () => {
+      // Four of eight Saturdays done by Dec 19: $74.16 in the bank, $74.16 to come.
+      const committed = committedAfter({ commitments: commitmentsWith([bump()]), from: '2026-12-19' })
+      expect(committed).toBe(14832 - 7416)
+      // An offered-but-unanswered bump counts in full as well.
+      expect(committedAfter({ commitments: commitmentsWith([], [bump({ id: 'ask' })]), from: '2026-12-19' })).toBe(7416)
+    })
+
+    it('sizes a fresh offer to replace a waiting one of the same kind, not to sit under it', () => {
+      // $60 more short than the $148.32 bump still waiting covers. Moving money
+      // once leaves the bump waiting, so it is just the $60; a new bump replaces
+      // the waiting one, so it carries the whole $208.32.
+      const options = catchUpOptions({ shortfallCents: 6000, today: '2026-11-21', overWeeks: 8, pendingBumpCents: 14832 })
+      expect(options[0]).toEqual({ kind: 'one_time', amountCents: 6000, replacesCents: 0 })
+      expect(options[1]).toMatchObject({ kind: 'rate_bump', amountCents: 20832, perWeekCents: 2604, replacesCents: 14832 })
+      const moveWaiting = catchUpOptions({ shortfallCents: 6000, today: '2026-11-21', overWeeks: 8, pendingMoveCents: 5000 })
+      expect(moveWaiting[0]).toEqual({ kind: 'one_time', amountCents: 11000, replacesCents: 5000 })
+      expect(moveWaiting[1]).toMatchObject({ amountCents: 6000, replacesCents: 0 })
+    })
+
+    it('does the same for a cut or move-out already waiting', () => {
+      const options = aheadOptions({ extraCents: 6000, weeklyCents: 5000, today: '2026-11-21', overWeeks: 8, pendingCutCents: 8000, pendingMoveOutCents: 1000 })
+      expect(options[0]).toEqual({ kind: 'one_time_out', amountCents: 7000, replacesCents: 1000 })
+      expect(options[1]).toMatchObject({ kind: 'rate_cut', amountCents: 14000, perWeekCents: 1750, replacesCents: 8000 })
+    })
+  })
+
   it('folds an accepted rate bump into the account weekly number', () => {
     const withAdjustment: DerivationInput = {
       ...input,
@@ -281,6 +342,47 @@ describe('drift and catch-up', () => {
     const after = accountViews(withAdjustment)[0]!.weekly.totalPerWeekCents
     expect(after).toBeGreaterThan(before)
     expect(accountViews(withAdjustment)[0]!.weekly.catchUp).toHaveLength(1)
+  })
+
+  it('prices an offered bump as what the number becomes, without moving anything live', () => {
+    const offered: DerivationInput = {
+      ...input,
+      transferRoundUpCents: 1000,
+      pendingDriftAdjustments: [
+        {
+          id: 'ask-1',
+          reserveAccountId: annual.id,
+          amountCents: 14832, // $18.54 a week over 8 transfer weeks
+          startDate: '2026-11-21',
+          endDate: '2027-01-16',
+        },
+      ],
+    }
+    const before = accountViews({ ...input, transferRoundUpCents: 1000 })[0]!
+    const after = accountViews(offered)[0]!
+
+    // Nothing a human has not confirmed touches the live figures.
+    expect(before.pendingWeekly).toBeNull()
+    expect(after.weekly).toEqual(before.weekly)
+    expect(after.shouldHaveSavedCents).toBe(before.shouldHaveSavedCents)
+    expect(after.outstandingCents).toBe(before.outstandingCents)
+
+    // But the screen can say what "done" turns the transfer into.
+    expect(after.pendingWeekly).not.toBeNull()
+    expect(after.pendingWeekly!.ongoingPerWeekCents).toBe(before.weekly.ongoingPerWeekCents)
+    expect(after.pendingWeekly!.catchUp).toContainEqual({ endDate: '2027-01-16', perWeekCents: 1854 })
+    expect(after.pendingWeekly!.totalPerWeekCents).toBe(before.weekly.totalPerWeekCents + 1854)
+    expect(after.pendingWeekly!.transferPerWeekCents % 1000).toBe(0)
+  })
+
+  it('ignores an offered bump whose window has already closed', () => {
+    const stale: DerivationInput = {
+      ...input,
+      pendingDriftAdjustments: [
+        { id: 'old', reserveAccountId: annual.id, amountCents: 5000, startDate: '2026-06-01', endDate: '2026-08-01' },
+      ],
+    }
+    expect(accountViews(stale)[0]!.pendingWeekly).toBeNull()
   })
 })
 
@@ -515,7 +617,7 @@ describe('ahead of the plan', () => {
     expect(options).toHaveLength(2)
 
     const [out, cut] = options
-    expect(out).toEqual({ kind: 'one_time_out', amountCents: 19000 })
+    expect(out).toEqual({ kind: 'one_time_out', amountCents: 19000, replacesCents: 0 })
 
     expect(cut!.kind).toBe('rate_cut')
     expect(cut!.perWeekCents).toBe(2375) // $190 over 8 weeks

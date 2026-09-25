@@ -91,6 +91,13 @@ export const eventKindEnum = pgEnum('event_kind', [
   'asset_added',
   'asset_changed',
   'asset_removed',
+  /**
+   * A person ended an instruction early (PRD D18, rev 28; migration 0010):
+   * withdrew an open ask, or stopped a running bump or cut that day. The
+   * issued and confirmed events stay as they were; this one closes the
+   * window, and everything derived reads the earlier end.
+   */
+  'instruction_ended',
 ])
 
 /**
