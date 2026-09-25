@@ -103,6 +103,12 @@ export const eventKindEnum = pgEnum('event_kind', [
   // of doing it became the plan.
   'trip_changed',
   'trip_sent',
+  /**
+   * The household's school calendar changed (migration 0013, PRD §16 D25):
+   * days off typed, removed, or imported from a feed, a PDF or a page. The
+   * payload says what was added and removed and where it came from.
+   */
+  'school_calendar_changed',
 ])
 
 export const tripLineCategoryEnum = pgEnum('trip_line_category', [
@@ -527,6 +533,57 @@ export const crowdLevels = pgTable(
   (t) => [
     uniqueIndex('crowd_levels_key_idx').on(t.destination, t.date, t.park, t.source),
     check('crowd_levels_level_range', sql`${t.level} between 1 and 10`),
+  ],
+)
+
+/**
+ * A day students do not attend school (D25): the household's own fact, with
+ * where it came from -- typed, an iCal feed, or the reader ("read:<model>")
+ * -- and a school-year label. Long weekends and school days missed are
+ * computed from these; nothing derived is stored.
+ */
+export const schoolDaysOff = pgTable(
+  'school_days_off',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    date: date('date').notNull(),
+    label: text('label').notNull(),
+    schoolYear: text('school_year').notNull(),
+    source: text('source').notNull(),
+    sourceUrl: text('source_url'),
+    recordedOn: date('recorded_on').notNull(),
+  },
+  (t) => [uniqueIndex('school_days_off_key_idx').on(t.householdId, t.date, t.label)],
+)
+
+/**
+ * A DVC room a broker had on a date (D26): resort, room, check-in, nights,
+ * points and price, as their public page listed it, with the source and the
+ * day it was read. Reference data shared across households like crowd
+ * levels, still written only through the engine; shown beside the lodging
+ * line, never the line itself, and never used in money math.
+ */
+export const dvcListings = pgTable(
+  'dvc_listings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    source: text('source').notNull(),
+    resort: text('resort').notNull(),
+    room: text('room').notNull(),
+    checkIn: date('check_in').notNull(),
+    nights: integer('nights').notNull(),
+    points: integer('points'),
+    priceCents: cents('price_cents'),
+    sourceUrl: text('source_url').notNull(),
+    seenOn: date('seen_on').notNull(),
+  },
+  (t) => [
+    uniqueIndex('dvc_listings_key_idx').on(t.source, t.resort, t.room, t.checkIn, t.nights),
+    check('dvc_listings_nights_range', sql`${t.nights} between 1 and 60`),
+    check('dvc_listings_price_not_negative', sql`${t.priceCents} is null or ${t.priceCents} >= 0`),
   ],
 )
 

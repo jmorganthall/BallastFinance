@@ -8,13 +8,33 @@ import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, PageHeader, Pill } from '@/components/ui'
 import {
+  addSchoolDayOffAction,
   createTripAction,
+  discardSchoolCalendarAction,
+  keepSchoolCalendarAction,
+  readSchoolCalendarSourceAction,
+  removeSchoolDayOffAction,
   saveBlackoutDatesAction,
   saveHomeAddressAction,
   savePackTemplateAction,
   saveReferencePricesAction,
+  saveSchoolCalendarSourcesAction,
+  saveWeekSettingsAction,
 } from '@/server/actions'
-import { dollarsForInput, headCount, homeIsLocated, percentForInput, referenceFreshness, sourceName, type Trip } from '@/domain'
+import { readerEnabled } from '@/server/reader'
+import {
+  dollarsForInput,
+  headCount,
+  homeIsLocated,
+  percentForInput,
+  referenceFreshness,
+  shortDate,
+  sourceName,
+  weekdayName,
+  type SchoolCalendarSourceKind,
+  type SchoolDayOff,
+  type Trip,
+} from '@/domain'
 import { TravelerFields } from './traveler-fields'
 
 export const dynamic = 'force-dynamic'
@@ -24,6 +44,23 @@ const input =
 const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white'
 const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium'
 const sectionTitle = 'mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
+const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium'
+
+const SOURCE_KIND_WORDS: Record<SchoolCalendarSourceKind, string> = { ical: 'Calendar feed (.ics)', pdf: 'PDF', page: 'Web page' }
+
+/** Where a day off came from, in a word or two. */
+function dayOffSourceName(source: string): string {
+  if (source === 'typed') return 'typed'
+  if (source === 'ical') return 'from the feed'
+  if (source.startsWith('read:')) return 'read from the document'
+  return source
+}
+
+function bySchoolYear(days: readonly SchoolDayOff[]): { schoolYear: string; days: SchoolDayOff[] }[] {
+  const groups = new Map<string, SchoolDayOff[]>()
+  for (const d of days) groups.set(d.schoolYear, [...(groups.get(d.schoolYear) ?? []), d])
+  return [...groups].map(([schoolYear, list]) => ({ schoolYear, days: list })).sort((a, b) => a.schoolYear.localeCompare(b.schoolYear))
+}
 
 function tripStatus(trip: Trip): { tone: 'neutral' | 'accent' | 'ahead'; label: string } {
   if (trip.retiredAt) return { tone: 'neutral', label: 'Put away' }
@@ -38,14 +75,20 @@ export default async function TripsPage({
 }) {
   const { error, saved } = await searchParams
   const { engine } = await requireEngine()
-  const [trips, prices, home, blackouts, packTemplate, today] = await Promise.all([
+  const [trips, prices, home, blackouts, packTemplate, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights] = await Promise.all([
     engine.listTrips(),
     engine.referencePrices(),
     engine.homeLocation(),
     engine.blackoutDates(),
     engine.packTemplate(),
     Promise.resolve(engine.today()),
+    engine.schoolDaysOff(),
+    engine.schoolCalendarSources(),
+    engine.pendingSchoolCalendar(),
+    engine.horizonMonths(),
+    engine.weekWeights(),
   ])
+  const readerOn = readerEnabled()
   const open = trips.filter((t) => !t.retiredAt)
   const putAway = trips.filter((t) => t.retiredAt)
   const stale = prices.filter((p) => referenceFreshness(p, today).stale)
@@ -224,6 +267,184 @@ export default async function TripsPage({
           ))}
           <button type="submit" className={secondaryButton}>
             Save these weeks
+          </button>
+        </form>
+      </Card>
+
+      <h2 id="school" className={sectionTitle}>
+        School calendar
+      </h2>
+      {pendingCalendar ? (
+        <Card className="mb-3 bg-[var(--color-accent-soft)]">
+          <h3 className="font-semibold">Days off school, as {pendingCalendar.label} lists them</h3>
+          <p className="mt-1 text-sm">
+            {pendingCalendar.items.length} {pendingCalendar.items.length === 1 ? 'day' : 'days'}
+            {pendingCalendar.schoolYear ? ` for ${pendingCalendar.schoolYear}` : ''}, {dayOffSourceName(pendingCalendar.source)} on{' '}
+            {humanDate(pendingCalendar.readOn)}. Look them over; nothing is a day off until you keep
+            them.
+            {pendingCalendar.source.startsWith('read:') ? ' The reader can misread a table, so check the dates against the document.' : ''}
+          </p>
+          <ul className="mt-2 max-h-64 overflow-y-auto text-xs text-[var(--color-ink-soft)]">
+            {pendingCalendar.items.map((d) => (
+              <li key={`${d.date}|${d.label}`}>
+                {weekdayName(d.date).slice(0, 3)} {shortDate(d.date)}, {d.date.slice(0, 4)} · {d.label}
+              </li>
+            ))}
+            {pendingCalendar.notes.map((n) => (
+              <li key={n} className="mt-1 italic">
+                {n}
+              </li>
+            ))}
+          </ul>
+          <div className="mt-3 flex gap-2">
+            <form action={keepSchoolCalendarAction} className="flex-1">
+              <button type="submit" className={primaryButton}>
+                Keep these
+              </button>
+            </form>
+            <form action={discardSchoolCalendarAction} className="flex-1">
+              <button type="submit" className={secondaryButton}>
+                Not now
+              </button>
+            </form>
+          </div>
+        </Card>
+      ) : null}
+      <Card>
+        <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+          Days off school make long weekends, and a trip on a school day is a day missed. The best-weeks list on each trip
+          uses both. Type the days, or point at the district&apos;s calendar below and read it in.
+        </p>
+        {daysOff.length === 0 ? (
+          <p className="mb-3 text-sm text-[var(--color-ink-soft)]">
+            No days off yet, so every weekday counts as school. Federal holidays are already known.
+          </p>
+        ) : (
+          bySchoolYear(daysOff).map((group) => (
+            <div key={group.schoolYear} className="mb-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">{group.schoolYear}</h3>
+              <ul className="mt-1 divide-y divide-[var(--color-line)]">
+                {group.days.map((d) => (
+                  <li key={d.id} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                    <span className="min-w-0">
+                      {weekdayName(d.date).slice(0, 3)} {shortDate(d.date)}, {d.date.slice(0, 4)} · {d.label}
+                      <span className="block text-xs text-[var(--color-ink-soft)]">{dayOffSourceName(d.source)}</span>
+                    </span>
+                    <form action={removeSchoolDayOffAction}>
+                      <input type="hidden" name="day_off_id" value={d.id} />
+                      <button type="submit" className="text-xs text-[var(--color-behind)] underline underline-offset-4">
+                        Remove
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))
+        )}
+        <form action={addSchoolDayOffAction} className="grid grid-cols-[1fr_1.4fr_0.8fr_auto] items-end gap-2">
+          <label className="block text-xs text-[var(--color-ink-soft)]">
+            Date
+            <input name="date" type="date" required className={input} />
+          </label>
+          <label className="block text-xs text-[var(--color-ink-soft)]">
+            What
+            <input name="label" required placeholder="Teacher work day" className={input} />
+          </label>
+          <label className="block text-xs text-[var(--color-ink-soft)]">
+            School year
+            <input name="school_year" placeholder="2026-27" className={input} />
+          </label>
+          <button type="submit" className={smallButton}>
+            Add
+          </button>
+        </form>
+
+        <h3 className="mt-5 text-sm font-semibold">Where the calendar is</h3>
+        <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+          A district&apos;s calendar feed is read straight in. A PDF or a web page has no fixed shape, so those go to the
+          reader, which shows you what it found before anything is kept.
+          {readerOn
+            ? ''
+            : ' The reader is off on this machine: add a reader key in the environment to read PDFs and pages.'}
+        </p>
+        {calendarSources.length > 0 ? (
+          <ul className="mb-3 divide-y divide-[var(--color-line)]">
+            {calendarSources.map((s, i) => (
+              <li key={`${s.url}|${i}`} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <span className="min-w-0">
+                  {s.label}
+                  <span className="block truncate text-xs text-[var(--color-ink-soft)]">
+                    {SOURCE_KIND_WORDS[s.kind]} · {s.url}
+                  </span>
+                </span>
+                <form action={readSchoolCalendarSourceAction}>
+                  <input type="hidden" name="source_index" value={i} />
+                  <button type="submit" className={smallButton} disabled={s.kind !== 'ical' && !readerOn}>
+                    Read it
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        <form action={saveSchoolCalendarSourcesAction} className="space-y-2">
+          {[...calendarSources, { label: '', url: '', kind: 'ical' as SchoolCalendarSourceKind }].map((s, i) => (
+            <div key={i} className="grid grid-cols-[1fr_1.6fr_1fr] gap-2">
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Name
+                <input name="source_label" defaultValue={s.label} placeholder="District calendar" className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Link
+                <input name="source_url" type="url" defaultValue={s.url} placeholder="https://" className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Kind
+                <select name="source_kind" defaultValue={s.kind} className={input}>
+                  {(Object.keys(SOURCE_KIND_WORDS) as SchoolCalendarSourceKind[]).map((kind) => (
+                    <option key={kind} value={kind}>
+                      {SOURCE_KIND_WORDS[kind]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ))}
+          <button type="submit" className={secondaryButton}>
+            Save the calendar links
+          </button>
+        </form>
+      </Card>
+
+      <h2 id="best-weeks" className={sectionTitle}>
+        How the best weeks are picked
+      </h2>
+      <Card>
+        <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+          Each trip lists its ten best weeks across the months ahead: every week of the trip&apos;s length, and every long
+          weekend a holiday or a day off school makes. Quiet counts most, then cheap, then no school missed; a week you
+          cannot go is left out. Change the weights to say what matters more to you.
+        </p>
+        <form action={saveWeekSettingsAction} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <label className="block text-xs text-[var(--color-ink-soft)]">
+            Months ahead
+            <input name="horizon_months" inputMode="numeric" defaultValue={horizonMonths} className={input} />
+          </label>
+          <label className="block text-xs text-[var(--color-ink-soft)]">
+            Quiet matters
+            <input name="weight_busy" inputMode="decimal" defaultValue={weekWeights.busy} className={input} />
+          </label>
+          <label className="block text-xs text-[var(--color-ink-soft)]">
+            Cheap matters
+            <input name="weight_price" inputMode="decimal" defaultValue={weekWeights.price} className={input} />
+          </label>
+          <label className="block text-xs text-[var(--color-ink-soft)]">
+            School matters
+            <input name="weight_school" inputMode="decimal" defaultValue={weekWeights.school} className={input} />
+          </label>
+          <button type="submit" className={secondaryButton + ' col-span-2 sm:col-span-4'}>
+            Save how weeks are picked
           </button>
         </form>
       </Card>

@@ -871,12 +871,12 @@ function backToTrip(tripId: string, message: string | null, query: string = 'sav
 
 /** An engine or domain refusal becomes a message on the page; anything else is a real fault. */
 async function tripRefusalOf<T>(run: () => Promise<T>): Promise<{ value: T; message: null } | { value: null; message: string }> {
-  const { TripDataError, MoneyError, DateError } = await import('@/domain')
+  const { TripDataError, TripPlanError, MoneyError, DateError } = await import('@/domain')
   const { EngineError } = await import('@/server/engine')
   try {
     return { value: await run(), message: null }
   } catch (error) {
-    if (error instanceof TripDataError || error instanceof EngineError || error instanceof MoneyError || error instanceof DateError) {
+    if (error instanceof TripDataError || error instanceof TripPlanError || error instanceof EngineError || error instanceof MoneyError || error instanceof DateError) {
       return { value: null, message: error.message }
     }
     throw error
@@ -1442,4 +1442,145 @@ export async function rebuildTimelineAction(formData: FormData): Promise<void> {
   const tripId = String(formData.get('trip_id'))
   const done = await tripRefusalOf(() => engine.rebuildTimeline(tripId))
   backToTrip(tripId, done.message, 'saved=1#to-do')
+}
+
+// -- when to go (D25-D27): the school calendar, the best weeks, what DVC brokers have
+
+/** Back to the Trips page, with a message when something was refused, and an anchor to land on. */
+function backToTrips(message: string | null, query: string = 'saved=1', anchor: string = ''): never {
+  revalidatePath('/trips')
+  redirect(message ? `/trips?error=${encodeURIComponent(message)}${anchor}` : `/trips?${query}${anchor}`)
+}
+
+export async function addSchoolDayOffAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(async () => {
+    const date = String(formData.get('date') ?? '')
+    assertCivilDate(date)
+    await engine.addSchoolDayOff({ date, label: String(formData.get('label') ?? ''), schoolYear: String(formData.get('school_year') ?? '') || null })
+  })
+  backToTrips(done.message, 'saved=1', '#school')
+}
+
+export async function removeSchoolDayOffAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(() => engine.removeSchoolDayOff(String(formData.get('day_off_id'))))
+  backToTrips(done.message, 'saved=1', '#school')
+}
+
+export async function saveSchoolCalendarSourcesAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { SCHOOL_CALENDAR_SOURCE_KINDS, TripPlanError } = await import('@/domain')
+  const labels = formData.getAll('source_label').map(String)
+  const urls = formData.getAll('source_url').map(String)
+  const kinds = formData.getAll('source_kind').map(String)
+  const done = await tripRefusalOf(async () => {
+    const sources = labels
+      .map((label, i) => ({ label: label.trim(), url: (urls[i] ?? '').trim(), kind: (kinds[i] ?? '').trim() }))
+      .filter((s) => s.label !== '' || s.url !== '')
+      .map((s) => {
+        const kind = s.kind as (typeof SCHOOL_CALENDAR_SOURCE_KINDS)[number]
+        if (!SCHOOL_CALENDAR_SOURCE_KINDS.includes(kind)) throw new TripPlanError(`Say what kind of thing "${s.label || s.url}" links to.`)
+        return { label: s.label, url: s.url, kind }
+      })
+    await engine.setSchoolCalendarSources(sources)
+  })
+  backToTrips(done.message, 'saved=1', '#school')
+}
+
+/**
+ * "Read it" on a calendar source (D25, D27). Structured first: the parser
+ * path runs on its own, and only when it came back with nothing is the
+ * engine asked again with the reader allowed. What was read waits on the
+ * Trips page for the person to keep or not.
+ */
+export async function readSchoolCalendarSourceAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { tripFetchEnabled } = await import('@/server/trip-fetch')
+  const index = Number(formData.get('source_index'))
+  if (!tripFetchEnabled()) backToTrips('Looking things up is switched off on this machine (TRIP_FETCH=off). Type the days off instead.', 'saved=1', '#school')
+  const done = await tripRefusalOf(async () => {
+    const first = await engine.readSchoolCalendarSource(index, { fallbackToReader: false })
+    if (first.ok) return first
+    return engine.readSchoolCalendarSource(index, { fallbackToReader: true })
+  })
+  if (done.message !== null) backToTrips(done.message, 'saved=1', '#school')
+  if (!done.value.ok) backToTrips(`Nothing could be read. ${done.value.notes.join(' ')}`, 'saved=1', '#school')
+  backToTrips(null, 'read=1', '#school')
+}
+
+export async function keepSchoolCalendarAction(): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(() => engine.keepSchoolCalendar())
+  backToTrips(done.message, 'saved=1', '#school')
+}
+
+export async function discardSchoolCalendarAction(): Promise<void> {
+  const { engine } = await requireEngine()
+  await engine.stashSchoolCalendar(null)
+  backToTrips(null, 'saved=1', '#school')
+}
+
+export async function saveWeekSettingsAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { TripPlanError } = await import('@/domain')
+  const done = await tripRefusalOf(async () => {
+    const number = (name: string) => {
+      const raw = String(formData.get(name) ?? '').trim()
+      const n = Number(raw)
+      if (raw === '' || !Number.isFinite(n)) throw new TripPlanError('Every weight and the horizon need a number.')
+      return n
+    }
+    await engine.setHorizonMonths(number('horizon_months'))
+    await engine.setWeekWeights({ busy: number('weight_busy'), price: number('weight_price'), school: number('weight_school') })
+  })
+  backToTrips(done.message, 'saved=1', '#best-weeks')
+}
+
+/** "Use these dates" on a best week (D25): the same length moves the trip whole; a long weekend sets both ends. */
+export async function useDatesAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(async () => {
+    const startDate = String(formData.get('start_date') ?? '')
+    const endDate = String(formData.get('end_date') ?? '')
+    assertCivilDate(startDate)
+    assertCivilDate(endDate)
+    await engine.useDates(tripId, { startDate, endDate })
+  })
+  backToTrip(tripId, done.message)
+}
+
+/**
+ * "Check what DVC brokers have" (D26, D27): the broker parsers first, on
+ * their own; the reader only when every one of them came back empty. What
+ * came back waits on the trip screen for the person to keep or not.
+ */
+export async function checkDvcListingsAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { tripFetchEnabled } = await import('@/server/trip-fetch')
+  const tripId = String(formData.get('trip_id'))
+  if (!tripFetchEnabled()) backToTrip(tripId, 'Looking things up is switched off on this machine (TRIP_FETCH=off).')
+  const done = await tripRefusalOf(async () => {
+    const first = await engine.checkDvcListings(tripId, { fallbackToReader: false })
+    if (first.ok) return first
+    return engine.checkDvcListings(tripId, { fallbackToReader: true })
+  })
+  if (done.message !== null) backToTrip(tripId, done.message)
+  if (!done.value.ok) backToTrip(tripId, `No broker page could be read. ${done.value.notes.join(' ')}`)
+  backToTrip(tripId, null, 'dvc=1')
+}
+
+export async function keepDvcPullAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(() => engine.keepDvcPull())
+  backToTrip(tripId, done.message, 'saved=1#money')
+}
+
+export async function discardDvcPullAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  await engine.stashDvcPull(null)
+  backToTrip(tripId, null)
 }
