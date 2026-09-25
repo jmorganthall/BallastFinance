@@ -23,6 +23,7 @@ function view(over: { id: string; name: string; shouldHaveSavedCents: number; it
       active: true,
     },
     weekly: { totalPerWeekCents: 0, basePerWeekCents: 0, catchUpGroups: [], lines: [] } as unknown as AccountView['weekly'],
+    pendingWeekly: null,
     shouldHaveSavedCents: over.shouldHaveSavedCents,
     outstandingCents: 0,
     items: new Array(over.items ?? 1).fill(null) as unknown as AccountView['items'],

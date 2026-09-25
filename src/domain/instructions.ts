@@ -14,7 +14,7 @@
 
 import { accrualWeeksBetween, compareDates, type CivilDate } from './dates'
 import { ceilDiv, formatCents, type Cents } from './money'
-import type { Id } from './types'
+import type { DriftAdjustment, Id } from './types'
 
 export type InstructionType =
   | 'set_weekly_transfer'
@@ -121,6 +121,42 @@ export function outstandingInstructions(args: {
 
 function daysBetween(from: CivilDate, to: CivilDate): number {
   return Math.max(0, Math.round(compareDates(to, from)))
+}
+
+/**
+ * Dated bumps and cuts as account-level catch-up components, split by whether
+ * a human has said they did it.
+ *
+ * Only `accepted` moves the weekly number: an offer nobody acted on must not
+ * change a transfer in either direction (PRD: nothing is done until a human
+ * confirms it). `pending` exists so a screen can say what the number BECOMES
+ * once the open ask is done -- otherwise the to-do ("add $18.54 a week") and
+ * the account card ("set the transfer to $240") read as two instructions that
+ * do not add up, and the person cannot tell whether doing one changed anything.
+ *
+ * A cut is the same component with its sign flipped: the instruction stores a
+ * positive "take this much off", the accrual math sees a negative delivery.
+ */
+export function driftAdjustmentsFrom(args: {
+  issued: readonly IssuedInstruction[]
+  confirmed: readonly ConfirmedInstruction[]
+}): { accepted: DriftAdjustment[]; pending: DriftAdjustment[] } {
+  const done = new Set(args.confirmed.map((c) => c.instructionId))
+  const accepted: DriftAdjustment[] = []
+  const pending: DriftAdjustment[] = []
+  for (const i of args.issued) {
+    if (i.type !== 'rate_bump' && i.type !== 'rate_cut') continue
+    if (!i.endsOn) continue
+    const adjustment: DriftAdjustment = {
+      id: i.instructionId,
+      reserveAccountId: i.targetId,
+      amountCents: i.type === 'rate_cut' ? -i.amountCents : i.amountCents,
+      startDate: i.issuedOn,
+      endDate: i.endsOn,
+    }
+    ;(done.has(i.instructionId) ? accepted : pending).push(adjustment)
+  }
+  return { accepted, pending }
 }
 
 /**

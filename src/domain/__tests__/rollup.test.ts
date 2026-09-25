@@ -282,6 +282,47 @@ describe('drift and catch-up', () => {
     expect(after).toBeGreaterThan(before)
     expect(accountViews(withAdjustment)[0]!.weekly.catchUp).toHaveLength(1)
   })
+
+  it('prices an offered bump as what the number becomes, without moving anything live', () => {
+    const offered: DerivationInput = {
+      ...input,
+      transferRoundUpCents: 1000,
+      pendingDriftAdjustments: [
+        {
+          id: 'ask-1',
+          reserveAccountId: annual.id,
+          amountCents: 14832, // $18.54 a week over 8 transfer weeks
+          startDate: '2026-11-21',
+          endDate: '2027-01-16',
+        },
+      ],
+    }
+    const before = accountViews({ ...input, transferRoundUpCents: 1000 })[0]!
+    const after = accountViews(offered)[0]!
+
+    // Nothing a human has not confirmed touches the live figures.
+    expect(before.pendingWeekly).toBeNull()
+    expect(after.weekly).toEqual(before.weekly)
+    expect(after.shouldHaveSavedCents).toBe(before.shouldHaveSavedCents)
+    expect(after.outstandingCents).toBe(before.outstandingCents)
+
+    // But the screen can say what "done" turns the transfer into.
+    expect(after.pendingWeekly).not.toBeNull()
+    expect(after.pendingWeekly!.ongoingPerWeekCents).toBe(before.weekly.ongoingPerWeekCents)
+    expect(after.pendingWeekly!.catchUp).toContainEqual({ endDate: '2027-01-16', perWeekCents: 1854 })
+    expect(after.pendingWeekly!.totalPerWeekCents).toBe(before.weekly.totalPerWeekCents + 1854)
+    expect(after.pendingWeekly!.transferPerWeekCents % 1000).toBe(0)
+  })
+
+  it('ignores an offered bump whose window has already closed', () => {
+    const stale: DerivationInput = {
+      ...input,
+      pendingDriftAdjustments: [
+        { id: 'old', reserveAccountId: annual.id, amountCents: 5000, startDate: '2026-06-01', endDate: '2026-08-01' },
+      ],
+    }
+    expect(accountViews(stale)[0]!.pendingWeekly).toBeNull()
+  })
 })
 
 describe('cycles and opening balances', () => {

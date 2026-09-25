@@ -48,6 +48,7 @@ import {
   validateDebtInputs,
   validateDebtRates,
   snowballLadder,
+  driftAdjustmentsFrom,
   outstandingInstructions,
   packageViews,
   todayIn,
@@ -810,13 +811,13 @@ export class Engine {
 
   /** Load every fact the derivation module needs, in one place. */
   async derivationInput(): Promise<DerivationInput> {
-    const [accounts, packages, lineItems, changes, driftAdjustments, cycleStarts, transferRoundUpCents] =
+    const [accounts, packages, lineItems, changes, adjustments, cycleStarts, transferRoundUpCents] =
       await Promise.all([
         this.listReserveAccounts(),
         this.listPackages(),
         this.listLineItems(),
         this.listLineItemChanges(),
-        this.acceptedDriftAdjustments(),
+        this.driftAdjustments(),
         this.listCycleStarts(),
         this.transferRoundUpCents(),
       ])
@@ -826,7 +827,8 @@ export class Engine {
       packages,
       lineItems,
       changes,
-      driftAdjustments,
+      driftAdjustments: adjustments.accepted,
+      pendingDriftAdjustments: adjustments.pending,
       cycleStarts,
       transferRoundUpCents,
     }
@@ -968,33 +970,23 @@ export class Engine {
   }
 
   /**
-   * Accepted rate bumps and cuts, as account-level catch-up components. Only a
-   * CONFIRMED instruction counts: an offer the user never acted on must not
-   * move the weekly number in either direction. A cut is the same component
-   * with its sign flipped: the instruction stores a positive "take this much
-   * off", the accrual math sees a negative delivery.
+   * Rate bumps and cuts as account-level catch-up components, split into the
+   * ones a human has marked done and the ones still waiting. Only `accepted`
+   * moves the weekly number: an offer the user never acted on must not change
+   * it in either direction. `pending` only prices what the number becomes
+   * once the to-do is done (`AccountView.pendingWeekly`).
    */
-  async acceptedDriftAdjustments(): Promise<DriftAdjustment[]> {
+  async driftAdjustments(): Promise<{ accepted: DriftAdjustment[]; pending: DriftAdjustment[] }> {
     const [issued, confirmed] = await Promise.all([
       this.listIssuedInstructions(),
       this.listConfirmedInstructions(),
     ])
-    const confirmedIds = new Set(confirmed.map((c) => c.instructionId))
+    return driftAdjustmentsFrom({ issued, confirmed })
+  }
 
-    return issued
-      .filter(
-        (i) =>
-          (i.type === 'rate_bump' || i.type === 'rate_cut') &&
-          confirmedIds.has(i.instructionId) &&
-          i.endsOn,
-      )
-      .map((i) => ({
-        id: i.instructionId,
-        reserveAccountId: i.targetId,
-        amountCents: i.type === 'rate_cut' ? -i.amountCents : i.amountCents,
-        startDate: i.issuedOn,
-        endDate: i.endsOn!,
-      }))
+  /** The confirmed bumps and cuts: the only ones the live figures read. */
+  async acceptedDriftAdjustments(): Promise<DriftAdjustment[]> {
+    return (await this.driftAdjustments()).accepted
   }
 
   // ---------------------------------------------------------------- close-out

@@ -34,6 +34,17 @@ export default async function ThisWeekPage() {
   const grandTotal = withWork.reduce((s, a) => s + a.weekly.transferPerWeekCents, 0)
   const shouldHold = accounts.reduce((s, a) => s + a.shouldHaveSavedCents, 0)
 
+  // An open bump or cut moves nothing until it is marked done. The engine has
+  // already priced what "done" turns each transfer into (pendingWeekly); the
+  // screen only has to put that number next to the ask, so the to-do and the
+  // account card read as one instruction instead of two that do not add up.
+  const byAccount = new Map(accounts.map((a) => [a.account.id, a]))
+  const anyPending = accounts.some((a) => a.pendingWeekly !== null)
+  const grandTotalOnceDone = withWork.reduce(
+    (s, a) => s + (a.pendingWeekly ?? a.weekly).transferPerWeekCents,
+    0,
+  )
+
   const firstName = viewer.name?.split(' ')[0] ?? 'there'
 
   return (
@@ -103,10 +114,22 @@ export default async function ThisWeekPage() {
             To do
           </h2>
           <ul className="space-y-3">
-            {dueNow.map((instruction) => (
+            {dueNow.map((instruction) => {
+              const dated = instruction.type === 'rate_bump' || instruction.type === 'rate_cut'
+              const target = dated ? byAccount.get(instruction.targetId) : undefined
+              const onceDone = target?.pendingWeekly
+              return (
               <li key={instruction.instructionId}>
                 <Card>
                   <p className="text-sm">{instructionSentence(instruction)}</p>
+                  {target && onceDone ? (
+                    <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                      That makes the {target.account.name} transfer{' '}
+                      <strong>{formatCents(onceDone.transferPerWeekCents)} per week</strong>
+                      {' '}(it is {formatCents(target.weekly.transferPerWeekCents)} now). The
+                      numbers below change once you mark this done.
+                    </p>
+                  ) : null}
                   {instruction.note ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
                   ) : null}
@@ -130,7 +153,8 @@ export default async function ThisWeekPage() {
                   ) : null}
                 </Card>
               </li>
-            ))}
+              )
+            })}
           </ul>
         </section>
       ) : null}
@@ -191,6 +215,11 @@ export default async function ThisWeekPage() {
             <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
               Your accounts should hold <Money cents={shouldHold} /> in total today.
             </p>
+            {anyPending && grandTotalOnceDone !== grandTotal ? (
+              <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                Once the to-dos above are done: <Money cents={grandTotalOnceDone} /> / week.
+              </p>
+            ) : null}
           </Card>
 
           <ul className="space-y-4">
@@ -245,6 +274,14 @@ export default async function ThisWeekPage() {
                       <strong>{view.account.name}</strong> to{' '}
                       <strong>{formatCents(view.weekly.transferPerWeekCents)} per week</strong>.
                     </p>
+                    {view.pendingWeekly ? (
+                      <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                        Waiting on you: a to-do above changes this. Once you mark it done, set
+                        the transfer to{' '}
+                        <strong>{formatCents(view.pendingWeekly.transferPerWeekCents)} per week</strong>{' '}
+                        instead, and the figures here will show it.
+                      </p>
+                    ) : null}
                   </Card>
                 </li>
               )

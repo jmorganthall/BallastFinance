@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  driftAdjustmentsFrom,
   instructionSentence,
   outstandingInstructions,
   type IssuedInstruction,
@@ -117,6 +118,31 @@ describe('outstanding instructions', () => {
     const odd = { issuedOn: '2026-11-21', endsOn: '2026-12-12', amountCents: 100 } // 3 weeks
     expect(instructionSentence(issued({ instructionId: 'b2', type: 'rate_bump', ...odd }))).toContain('$0.34 a week')
     expect(instructionSentence(issued({ instructionId: 'c2', type: 'rate_cut', ...odd }))).toContain('$0.33 a week')
+  })
+
+  it('splits bumps and cuts into done and still waiting, and flips the sign of a cut', () => {
+    const dated = { issuedOn: '2026-11-21', endsOn: '2027-01-16', amountCents: 19000 }
+    const { accepted, pending } = driftAdjustmentsFrom({
+      issued: [
+        issued({ instructionId: 'bump-done', type: 'rate_bump', ...dated }),
+        issued({ instructionId: 'bump-open', type: 'rate_bump', ...dated }),
+        issued({ instructionId: 'cut-done', type: 'rate_cut', ...dated, targetId: 'acct-lt' }),
+        // Not a dated change to the weekly figure: never an adjustment.
+        issued({ instructionId: 'transfer' }),
+        issued({ instructionId: 'move', type: 'one_time_move', amountCents: 500 }),
+      ],
+      confirmed: [
+        { instructionId: 'bump-done', confirmedOn: '2026-11-22' },
+        { instructionId: 'cut-done', confirmedOn: '2026-11-22' },
+      ],
+    })
+    expect(accepted).toEqual([
+      { id: 'bump-done', reserveAccountId: 'acct-annual', amountCents: 19000, startDate: '2026-11-21', endDate: '2027-01-16' },
+      { id: 'cut-done', reserveAccountId: 'acct-lt', amountCents: -19000, startDate: '2026-11-21', endDate: '2027-01-16' },
+    ])
+    expect(pending).toEqual([
+      { id: 'bump-open', reserveAccountId: 'acct-annual', amountCents: 19000, startDate: '2026-11-21', endDate: '2027-01-16' },
+    ])
   })
 
   it('says what a share-out move is for, and names the day for one held back', () => {

@@ -13,6 +13,7 @@
 import {
   componentsForLineItem,
   driftAdjustmentComponent,
+  isComponentActive,
   shouldHaveSaved,
   shouldHaveSavedForItem,
   evenPaceCents,
@@ -42,6 +43,12 @@ export interface DerivationInput {
   lineItems: readonly LineItem[]
   changes?: readonly LineItemChange[]
   driftAdjustments?: readonly DriftAdjustment[]
+  /**
+   * Bumps and cuts offered but not yet marked done. They never touch a live
+   * figure; they only price `AccountView.pendingWeekly`, the number the
+   * transfer becomes once the person does what the to-do asks.
+   */
+  pendingDriftAdjustments?: readonly DriftAdjustment[]
   /** Cycle starts and opening balances, per item. Absent means "since commit, from $0". */
   cycleStarts?: readonly LineItemCycle[]
   /**
@@ -112,6 +119,13 @@ export interface AccountView {
   account: ReserveAccount
   /** The number to set the recurring transfer to. */
   weekly: WeeklyBreakdown
+  /**
+   * What `weekly` becomes once every open bump or cut for this account is
+   * marked done, or null when nothing is waiting. Shown next to the to-do so
+   * "add $18.54 a week" and "set the transfer to $240" are one instruction,
+   * not two; it moves nothing until the person confirms.
+   */
+  pendingWeekly: WeeklyBreakdown | null
   /** What this account should hold today across all active packages. */
   shouldHaveSavedCents: Cents
   /** Still to be set aside before every active item in this account is funded. */
@@ -230,8 +244,10 @@ export function accountViews(input: DerivationInput): AccountView[] {
   const { today, accounts, packages, lineItems } = input
   const changes = input.changes ?? []
   const adjustments = input.driftAdjustments ?? []
+  const pendingAdjustments = input.pendingDriftAdjustments ?? []
   const cycles = input.cycleStarts ?? []
   const packagesById = new Map(packages.map((p) => [p.id, p]))
+  const roundUp = input.transferRoundUpCents ?? 0
 
   return accounts.map((account) => {
     const items: LineItemView[] = []
@@ -250,9 +266,18 @@ export function accountViews(input: DerivationInput): AccountView[] {
         .map(driftAdjustmentComponent),
     ]
 
+    // Priced separately and never merged into `components`: an open ask must
+    // not move the live number, the should-hold figure, or a check-in's drift.
+    const pending = pendingAdjustments
+      .filter((a) => a.reserveAccountId === account.id)
+      .map(driftAdjustmentComponent)
+      .filter((c) => isComponentActive(c, today))
+
     return {
       account,
-      weekly: weeklyBreakdown(components, today, input.transferRoundUpCents ?? 0),
+      weekly: weeklyBreakdown(components, today, roundUp),
+      pendingWeekly:
+        pending.length > 0 ? weeklyBreakdown([...components, ...pending], today, roundUp) : null,
       shouldHaveSavedCents: items.reduce((s, v) => s + v.shouldHaveSavedCents, 0),
       outstandingCents: items.reduce((s, v) => s + v.remainingCents, 0),
       items,
