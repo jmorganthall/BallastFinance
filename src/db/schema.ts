@@ -98,7 +98,26 @@ export const eventKindEnum = pgEnum('event_kind', [
    * window, and everything derived reads the earlier end.
    */
   'instruction_ended',
+  // The trip planner (migration 0011, PRD §16). Every figure on a trip is a
+  // stated fact, so every change to one is kept; the send records which way
+  // of doing it became the plan.
+  'trip_changed',
+  'trip_sent',
 ])
+
+export const tripLineCategoryEnum = pgEnum('trip_line_category', [
+  'travel',
+  'lodging',
+  'tickets',
+  'lightning_lane',
+  'dining',
+  'photos',
+  'souvenirs',
+  'promotion',
+  'contingency',
+])
+/** Where a trip figure came from: a person, a quote they read, or one of the two fetches (PRD D20). */
+export const tripLineSourceEnum = pgEnum('trip_line_source', ['typed', 'quote', 'fetched'])
 
 /**
  * How the system learned an actual (commercial-path seam 2). Manual entry is
@@ -303,6 +322,90 @@ export const debts = pgTable(
 )
 
 /**
+ * A trip the household is pricing (PRD §16, D19): a planner module's own
+ * object, not core. It holds who is going and when; each way of doing it is a
+ * trip_variants row with its parts in trip_lines. Once a way is sent to Plans
+ * the package is the truth and the trip only records which one went, when.
+ */
+export const trips = pgTable(
+  'trips',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    destination: text('destination').notNull().default('wdw'),
+    startDate: date('start_date').notNull(),
+    endDate: date('end_date').notNull(),
+    /** [{name, band: 'adult'|'child'|'infant'}] */
+    travelers: jsonb('travelers').notNull().default(sql`'[]'::jsonb`),
+    /** {label, latitude, longitude}: copied from the household setting when the trip is made. */
+    home: jsonb('home'),
+    /** {mpg, seats} */
+    car: jsonb('car'),
+    /** The way of doing it that became the plan. No foreign key: the variant table points here. */
+    chosenVariantId: uuid('chosen_variant_id'),
+    packageId: uuid('package_id').references(() => packages.id, { onDelete: 'set null' }),
+    sentOn: date('sent_on'),
+    createdAt: date('created_at').notNull(),
+    retiredAt: date('retired_at'),
+  },
+  (t) => [
+    index('trips_household_idx').on(t.householdId),
+    check('trips_dates_in_order', sql`${t.endDate} >= ${t.startDate}`),
+  ],
+)
+
+export const tripVariants = pgTable(
+  'trip_variants',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tripId: uuid('trip_id')
+      .notNull()
+      .references(() => trips.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** {travel, lodging, lightningLane, dining, parkDays, promotion?} */
+    choices: jsonb('choices').notNull(),
+    createdAt: date('created_at').notNull(),
+  },
+  (t) => [index('trip_variants_trip_idx').on(t.tripId)],
+)
+
+/**
+ * One part of one way of doing the trip: a stated figure with its date and
+ * where it came from. Quantity x figure is computed on read, never stored.
+ */
+export const tripLines = pgTable(
+  'trip_lines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    variantId: uuid('variant_id')
+      .notNull()
+      .references(() => tripVariants.id, { onDelete: 'cascade' }),
+    category: tripLineCategoryEnum('category').notNull(),
+    label: text('label').notNull(),
+    quantity: integer('quantity').notNull().default(1),
+    /** Negative only for a deal. */
+    unitAmountCents: cents('unit_amount_cents').notNull(),
+    dueDate: date('due_date').notNull(),
+    reserveAccountId: uuid('reserve_account_id').references(() => reserveAccounts.id, { onDelete: 'set null' }),
+    source: tripLineSourceEnum('source').notNull().default('typed'),
+    asOf: date('as_of').notNull(),
+    note: text('note'),
+    sort: integer('sort').notNull().default(0),
+  },
+  (t) => [
+    index('trip_lines_variant_idx').on(t.variantId),
+    check('trip_lines_quantity_not_negative', sql`${t.quantity} >= 0`),
+    check(
+      'trip_lines_sign_matches_category',
+      sql`(${t.category} = 'promotion' and ${t.unitAmountCents} <= 0) or (${t.category} <> 'promotion' and ${t.unitAmountCents} >= 0)`,
+    ),
+  ],
+)
+
+/**
  * The append-only event log (PRD §3). Current state is a fold over these, and
  * the audit trail is free. Append-only is enforced at the database role as well
  * as in code (PRD §10) -- see the migration that revokes UPDATE and DELETE.
@@ -349,6 +452,21 @@ export const householdsRelations = relations(households, ({ many }) => ({
   packages: many(packages),
   debts: many(debts),
   assets: many(assets),
+  trips: many(trips),
+}))
+
+export const tripsRelations = relations(trips, ({ one, many }) => ({
+  household: one(households, { fields: [trips.householdId], references: [households.id] }),
+  variants: many(tripVariants),
+}))
+
+export const tripVariantsRelations = relations(tripVariants, ({ one, many }) => ({
+  trip: one(trips, { fields: [tripVariants.tripId], references: [trips.id] }),
+  lines: many(tripLines),
+}))
+
+export const tripLinesRelations = relations(tripLines, ({ one }) => ({
+  variant: one(tripVariants, { fields: [tripLines.variantId], references: [tripVariants.id] }),
 }))
 
 export const packagesRelations = relations(packages, ({ one, many }) => ({

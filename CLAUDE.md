@@ -32,9 +32,9 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db` |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract |
 | `src/db/` | Drizzle schema and the connection. Facts only |
-| `src/server/` | The service layer, session bridge, server actions, scheduled jobs |
+| `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts` and `trip-fetch.ts` are the only outbound data calls (FRED CSVs and the OSRM router; public, key-free, each switchable off by env) |
 | `src/app/` | Screens. They render; they do not calculate |
 | `drizzle/` | Migrations. `0001` is the append-only enforcement — read it before touching events |
 | `scripts/` | Bootstrap, seed, backup, quickstart, and the Disney demo for checking against the spreadsheet |
@@ -81,13 +81,24 @@ principles, and they are non-negotiable.
   KBB do not license their values to an app like this. The mortgage rate is the
   one outbound data call (`src/server/market-rate.ts`, FRED's public CSV), and
   what it returns is refused unless it reads as a plausible rate.
+- **A trip is a planner module, not core** (PRD §16, D19). `trips`,
+  `trip_variants` and `trip_lines` are the module's own facts; the core never
+  reads them, and the trip never touches weekly math. "Add to Plans" goes
+  through `createPackageFromIntake` like the manual builder, with
+  `module: 'trip'`, and after that the trip is read-only: the plan is the
+  truth. Nothing Disney sells is fetched (D20); every cost is a dated,
+  sourced figure a person stated, and a typed figure is never overwritten by
+  the drive or gas-price fetch. The cushion and the price tag are computed,
+  never stored.
 - **Nothing is seeded but the household and the allowlist.** Account names
-  belong to a family's real bank, not to the software.
+  belong to a family's real bank, not to the software. The trip planner's
+  usual figures are a constant in `src/domain/trip.ts`, laid over by a
+  household setting, not a seed.
 
 ## Working on it
 
 ```bash
-npm test            # 448 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 527 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

@@ -10,6 +10,7 @@ import { redirect } from 'next/navigation'
 import { requireEngine } from '@/server/session'
 import {
   INTAKE_CONTRACT_VERSION,
+  assertCivilDate,
   describeRecurrence,
   recurrenceOf,
   type Recurrence,
@@ -857,4 +858,323 @@ export async function saveHomeBuyingAction(formData: FormData): Promise<void> {
       await engine.setTypedMortgageRate(typedBasisPoints)
     }),
   )
+}
+
+// ---------------------------------------------------------------- trips (PRD §16)
+
+/** Back to a trip, with a message when something was refused. */
+function backToTrip(tripId: string, message: string | null, query: string = 'saved=1'): never {
+  revalidatePath('/trips')
+  revalidatePath(`/trips/${tripId}`)
+  redirect(message ? `/trips/${tripId}?error=${encodeURIComponent(message)}` : `/trips/${tripId}?${query}`)
+}
+
+/** An engine or domain refusal becomes a message on the page; anything else is a real fault. */
+async function tripRefusalOf<T>(run: () => Promise<T>): Promise<{ value: T; message: null } | { value: null; message: string }> {
+  const { TripDataError, MoneyError, DateError } = await import('@/domain')
+  const { EngineError } = await import('@/server/engine')
+  try {
+    return { value: await run(), message: null }
+  } catch (error) {
+    if (error instanceof TripDataError || error instanceof EngineError || error instanceof MoneyError || error instanceof DateError) {
+      return { value: null, message: error.message }
+    }
+    throw error
+  }
+}
+
+function tripFacts(formData: FormData) {
+  const field = (name: string) => String(formData.get(name) ?? '').trim()
+  const names = formData.getAll('traveler_name').map(String)
+  const bands = formData.getAll('traveler_band').map(String)
+  const travelers = names
+    .map((name, i) => ({ name: name.trim(), band: (bands[i] ?? 'adult') as 'adult' | 'child' | 'infant' }))
+    .filter((t) => t.name !== '')
+  const mpg = field('car_mpg')
+  const seats = field('car_seats')
+  const car = mpg === '' && seats === '' ? null : { mpg: Number(mpg), seats: Number(seats || '5') }
+  return { name: field('name'), startDate: field('start_date'), endDate: field('end_date'), travelers, car }
+}
+
+export async function createTripAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const facts = tripFacts(formData)
+  const made = await tripRefusalOf(async () => {
+    assertCivilDate(facts.startDate)
+    assertCivilDate(facts.endDate)
+    return engine.createTrip(facts)
+  })
+  if (made.message !== null) {
+    revalidatePath('/trips')
+    redirect(`/trips?error=${encodeURIComponent(made.message)}`)
+  }
+  revalidatePath('/trips')
+  redirect(`/trips/${made.value.id}`)
+}
+
+export async function updateTripAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const facts = tripFacts(formData)
+  const done = await tripRefusalOf(async () => {
+    assertCivilDate(facts.startDate)
+    assertCivilDate(facts.endDate)
+    await engine.updateTrip(tripId, facts)
+  })
+  backToTrip(tripId, done.message)
+}
+
+export async function retireTripAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(() => engine.retireTrip(tripId))
+  if (done.message !== null) backToTrip(tripId, done.message)
+  revalidatePath('/trips')
+  redirect('/trips')
+}
+
+function variantChoices(formData: FormData) {
+  const field = (name: string) => String(formData.get(name) ?? '').trim()
+  const promoName = field('promo_name')
+  return {
+    name: field('name'),
+    choices: {
+      travel: field('travel') === 'fly' ? ('fly' as const) : ('drive' as const),
+      lodging: (['disney_resort', 'dvc_rental', 'rental'].includes(field('lodging')) ? field('lodging') : 'disney_resort') as
+        | 'disney_resort'
+        | 'dvc_rental'
+        | 'rental',
+      lightningLane: (['none', 'multi_pass', 'premier'].includes(field('lightning_lane')) ? field('lightning_lane') : 'none') as
+        | 'none'
+        | 'multi_pass'
+        | 'premier',
+      dining: field('dining') === 'plan' ? ('plan' as const) : ('out_of_pocket' as const),
+      parkDays: Number(field('park_days') || '0'),
+      promo:
+        promoName === ''
+          ? null
+          : { name: promoName, percent: field('promo_percent'), amount: field('promo_amount'), category: field('promo_category'), bookBy: field('promo_book_by') },
+    },
+  }
+}
+
+async function choicesWithPromotion(raw: ReturnType<typeof variantChoices>['choices']) {
+  const { parseAmountOrNull, parsePercentOrNull, TripDataError, TRIP_LINE_CATEGORIES } = await import('@/domain')
+  const { promo, ...choices } = raw
+  if (!promo) return choices
+  const percent = promo.percent === '' ? null : parsePercentOrNull(promo.percent)
+  const amount = promo.amount === '' ? null : parseAmountOrNull(promo.amount)
+  if (promo.percent !== '' && percent === null) throw new TripDataError('Enter the deal as a percent, like 25.')
+  if (promo.amount !== '' && amount === null) throw new TripDataError('Enter the deal as an amount, like 500.')
+  const category = promo.category as (typeof TRIP_LINE_CATEGORIES)[number]
+  if (!TRIP_LINE_CATEGORIES.includes(category)) throw new TripDataError('Say what the deal applies to.')
+  assertCivilDate(promo.bookBy)
+  return {
+    ...choices,
+    promotion: {
+      name: promo.name,
+      ...(percent !== null ? { percentOffBasisPoints: percent } : {}),
+      ...(amount !== null ? { amountOffCents: amount } : {}),
+      appliesToCategory: category,
+      bookBy: promo.bookBy,
+    },
+  }
+}
+
+export async function addVariantAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const input = variantChoices(formData)
+  const done = await tripRefusalOf(async () => {
+    await engine.addVariant(tripId, { name: input.name, choices: await choicesWithPromotion(input.choices) })
+  })
+  backToTrip(tripId, done.message)
+}
+
+export async function updateVariantAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const variantId = String(formData.get('variant_id'))
+  const input = variantChoices(formData)
+  const done = await tripRefusalOf(async () => {
+    await engine.updateVariant(tripId, variantId, { name: input.name, choices: await choicesWithPromotion(input.choices) })
+  })
+  backToTrip(tripId, done.message)
+}
+
+export async function removeVariantAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(() => engine.removeVariant(tripId, String(formData.get('variant_id'))))
+  backToTrip(tripId, done.message)
+}
+
+export async function updateTripLineAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull, TripDataError } = await import('@/domain')
+  const tripId = String(formData.get('trip_id'))
+  const field = (name: string) => String(formData.get(name) ?? '').trim()
+  const done = await tripRefusalOf(async () => {
+    const amount = parseAmountOrNull(field('unit_amount'))
+    if (amount === null) throw new TripDataError('Enter the figure as an amount, like 185.')
+    const quantity = Number(field('quantity') || '1')
+    const dueDate = field('due_date')
+    assertCivilDate(dueDate)
+    const account = field('reserve_account')
+    await engine.updateTripLine(tripId, String(formData.get('line_id')), {
+      unitAmountCents: field('category') === 'promotion' ? -Math.abs(amount) || 0 : amount,
+      quantity: Number.isInteger(quantity) ? quantity : -1,
+      dueDate,
+      reserveAccountId: account === '' ? null : account,
+      note: field('note'),
+    })
+  })
+  backToTrip(tripId, done.message)
+}
+
+export async function addTripLineAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull, TripDataError, TRIP_LINE_CATEGORIES } = await import('@/domain')
+  const tripId = String(formData.get('trip_id'))
+  const field = (name: string) => String(formData.get(name) ?? '').trim()
+  const done = await tripRefusalOf(async () => {
+    const amount = parseAmountOrNull(field('unit_amount'))
+    if (amount === null) throw new TripDataError('Enter the figure as an amount, like 185.')
+    const dueDate = field('due_date')
+    assertCivilDate(dueDate)
+    const category = field('category') as (typeof TRIP_LINE_CATEGORIES)[number]
+    if (!TRIP_LINE_CATEGORIES.includes(category)) throw new TripDataError('Pick which part of the trip this is.')
+    const quantity = Number(field('quantity') || '1')
+    await engine.addTripLine(tripId, String(formData.get('variant_id')), {
+      category,
+      label: field('label'),
+      quantity: Number.isInteger(quantity) ? quantity : -1,
+      unitAmountCents: category === 'promotion' ? -Math.abs(amount) || 0 : amount,
+      dueDate,
+      reserveAccountId: field('reserve_account') === '' ? null : field('reserve_account'),
+      note: field('note'),
+    })
+  })
+  backToTrip(tripId, done.message)
+}
+
+export async function removeTripLineAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(() => engine.removeTripLine(tripId, String(formData.get('line_id'))))
+  backToTrip(tripId, done.message)
+}
+
+/**
+ * Look the drive up and show it before anything is stored. The figure comes
+ * back in the URL for the person to accept; a failure is a message, never
+ * a crash (PRD §16).
+ */
+export async function checkDriveAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { fetchDrive, tripFetchEnabled } = await import('@/server/trip-fetch')
+  const tripId = String(formData.get('trip_id'))
+  if (!tripFetchEnabled()) {
+    backToTrip(tripId, 'Looking things up is switched off on this machine (TRIP_FETCH=off). Type the miles and hours instead.')
+  }
+  const trip = (await engine.listTrips()).find((t) => t.id === tripId)
+  if (!trip) backToTrip(tripId, 'No such trip.')
+  if (!trip.home) backToTrip(tripId, 'Set where home is first, under Trips.')
+  let drive: Awaited<ReturnType<typeof fetchDrive>> = null
+  try {
+    drive = await fetchDrive(trip.home, trip.destination, engine.today())
+  } catch (error) {
+    backToTrip(tripId, `Could not look up the drive: ${(error as Error).message}`)
+  }
+  if (!drive) backToTrip(tripId, 'The route service did not answer with a drive. Try again later, or type the miles and hours.')
+  backToTrip(tripId, null, `drive=${drive.miles}:${drive.minutes}`)
+}
+
+export async function useDriveAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const miles = Number(formData.get('miles'))
+  const minutes = Number(formData.get('minutes'))
+  const done = await tripRefusalOf(() => engine.recordDriveEstimate(tripId, { miles, minutes, fetchedOn: engine.today() }))
+  backToTrip(tripId, done.message)
+}
+
+export async function checkGasPriceAction(formData: FormData): Promise<void> {
+  await requireEngine()
+  const { fetchGasPrice, tripFetchEnabled } = await import('@/server/trip-fetch')
+  const tripId = String(formData.get('trip_id'))
+  if (!tripFetchEnabled()) {
+    backToTrip(tripId, 'Looking things up is switched off on this machine (TRIP_FETCH=off). Type a gas price instead.')
+  }
+  let gas: Awaited<ReturnType<typeof fetchGasPrice>> = null
+  try {
+    gas = await fetchGasPrice()
+  } catch (error) {
+    backToTrip(tripId, `Could not look up the gas price: ${(error as Error).message}`)
+  }
+  if (!gas) backToTrip(tripId, 'FRED did not answer with a gas price. Try again later, or type one.')
+  backToTrip(tripId, null, `gas=${gas.centsPerGallon}:${gas.observationDate}`)
+}
+
+export async function useGasPriceAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull, TripDataError } = await import('@/domain')
+  const tripId = String(formData.get('trip_id'))
+  const done = await tripRefusalOf(async () => {
+    const cents = parseAmountOrNull(String(formData.get('dollars_per_gallon') ?? ''))
+    if (cents === null) throw new TripDataError('Enter the gas price in dollars a gallon, like 3.05.')
+    const observationDate = String(formData.get('observation_date') || engine.today())
+    assertCivilDate(observationDate)
+    await engine.recordGasPrice({ centsPerGallon: cents, observationDate })
+  })
+  backToTrip(tripId, done.message)
+}
+
+/** Add to Plans: the one-way handoff (PRD §16). */
+export async function sendToPlansAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const variantId = String(formData.get('variant_id'))
+  const account = String(formData.get('reserve_account') ?? '')
+  if (account === '') backToTrip(tripId, 'Pick the account the trip saves into.')
+  const sent = await tripRefusalOf(() => engine.sendVariantToPlans(tripId, variantId, { defaultAccountId: account }))
+  if (sent.message !== null) backToTrip(tripId, sent.message)
+  if (!sent.value.ok) backToTrip(tripId, sent.value.problems.map((p) => p.message).join(' '))
+  revalidatePath('/')
+  revalidatePath('/packages')
+  revalidatePath('/trips')
+  revalidatePath(`/trips/${tripId}`)
+  redirect(`/packages/${sent.value.packageId}`)
+}
+
+export async function saveReferencePricesAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull, parsePercentOrNull, TripDataError } = await import('@/domain')
+  const field = (name: string) => String(formData.get(name) ?? '').trim()
+  const done = await tripRefusalOf(async () => {
+    const current = await engine.referencePrices()
+    const next = current.map((price) => {
+      const raw = field(`amount_${price.key}`)
+      const amount = price.unit === 'percent' ? parsePercentOrNull(raw) : parseAmountOrNull(raw)
+      if (amount === null) throw new TripDataError(`"${price.label}" needs a number.`)
+      const typedDate = field(`as_of_${price.key}`)
+      // A changed figure was checked today unless a date was typed with it.
+      const asOf = typedDate !== '' ? typedDate : amount !== price.amountCents ? engine.today() : price.asOf
+      assertCivilDate(asOf)
+      return { ...price, amountCents: amount, asOf, sourceUrl: field(`source_${price.key}`) || null }
+    })
+    await engine.setReferencePrices(next)
+  })
+  revalidatePath('/trips')
+  redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
+}
+
+export async function saveHomeLocationAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const field = (name: string) => String(formData.get(name) ?? '').trim()
+  const done = await tripRefusalOf(() =>
+    engine.setHomeLocation({ label: field('label'), latitude: Number(field('latitude')), longitude: Number(field('longitude')) }),
+  )
+  revalidatePath('/trips')
+  redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
 }
