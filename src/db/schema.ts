@@ -119,6 +119,29 @@ export const tripLineCategoryEnum = pgEnum('trip_line_category', [
 /** Where a trip figure came from: a person, a quote they read, or one of the two fetches (PRD D20). */
 export const tripLineSourceEnum = pgEnum('trip_line_source', ['typed', 'quote', 'fetched'])
 
+// Planning a trip (migration 0012, PRD §16 D22-D23). What a day is for, what
+// kind of booking a reservation is, what kind of to-do a task is.
+export const tripParkEnum = pgEnum('trip_park', [
+  'magic_kingdom',
+  'epcot',
+  'hollywood_studios',
+  'animal_kingdom',
+  'water_park',
+  'other',
+  'rest',
+  'travel',
+])
+export const tripReservationKindEnum = pgEnum('trip_reservation_kind', [
+  'dining',
+  'lightning_lane',
+  'experience',
+  'flight',
+  'lodging',
+  'transport',
+  'other',
+])
+export const tripTaskKindEnum = pgEnum('trip_task_kind', ['book', 'pay', 'buy', 'pack', 'do'])
+
 /**
  * How the system learned an actual (commercial-path seam 2). Manual entry is
  * v1's only implementation; a feed becomes a second one when ingestion arrives,
@@ -406,6 +429,108 @@ export const tripLines = pgTable(
 )
 
 /**
+ * One date of a trip (PRD §16 D22): which park, or a rest or travel day, and
+ * the day's notes. One row per date from the first day to the last, cut
+ * again when the dates change. The planning tables are the module's own
+ * facts; the core never reads them and the weekly math never sees them.
+ */
+export const tripDays = pgTable(
+  'trip_days',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tripId: uuid('trip_id')
+      .notNull()
+      .references(() => trips.id, { onDelete: 'cascade' }),
+    date: date('date').notNull(),
+    park: tripParkEnum('park').notNull().default('rest'),
+    /** {notes, ropeDrop} */
+    plan: jsonb('plan').notNull().default(sql`'{"notes":"","ropeDrop":false}'::jsonb`),
+    sort: integer('sort').notNull().default(0),
+  },
+  (t) => [uniqueIndex('trip_days_trip_date_idx').on(t.tripId, t.date)],
+)
+
+/**
+ * Something booked for the trip, with its confirmation (D22). A cost per
+ * person is a fact; what it comes to is computed, and when it points at a
+ * part of the trip it is already counted there, never added twice.
+ */
+export const tripReservations = pgTable(
+  'trip_reservations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tripId: uuid('trip_id')
+      .notNull()
+      .references(() => trips.id, { onDelete: 'cascade' }),
+    date: date('date').notNull(),
+    /** "HH:MM", or null for an all-day booking. */
+    time: text('time'),
+    kind: tripReservationKindEnum('kind').notNull(),
+    name: text('name').notNull(),
+    park: tripParkEnum('park'),
+    confirmation: text('confirmation'),
+    party: integer('party').notNull().default(1),
+    perPersonCents: cents('per_person_cents'),
+    lineId: uuid('line_id').references(() => tripLines.id, { onDelete: 'set null' }),
+    note: text('note'),
+  },
+  (t) => [
+    index('trip_reservations_trip_idx').on(t.tripId, t.date),
+    check('trip_reservations_party_not_negative', sql`${t.party} >= 0`),
+    check('trip_reservations_cost_not_negative', sql`${t.perPersonCents} is null or ${t.perPersonCents} >= 0`),
+  ],
+)
+
+/**
+ * A to-do on the way to the trip (D22): what to book, pay, buy, pack or do,
+ * and when. The timeline generates most of them, with a stable key so a
+ * rebuild finds its own rows; a person's edit makes one theirs (generated
+ * false) and the timeline leaves it alone from then on.
+ */
+export const tripTasks = pgTable(
+  'trip_tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tripId: uuid('trip_id')
+      .notNull()
+      .references(() => trips.id, { onDelete: 'cascade' }),
+    kind: tripTaskKindEnum('kind').notNull().default('do'),
+    label: text('label').notNull(),
+    dueOn: date('due_on').notNull(),
+    doneOn: date('done_on'),
+    link: text('link'),
+    lineId: uuid('line_id').references(() => tripLines.id, { onDelete: 'set null' }),
+    sort: integer('sort').notNull().default(0),
+    generated: boolean('generated').notNull().default(false),
+    key: text('key'),
+  },
+  (t) => [index('trip_tasks_trip_idx').on(t.tripId, t.dueOn)],
+)
+
+/**
+ * How busy a park is on a date, 1 quiet to 10 packed (D23): a fetched fact
+ * with its source and the day it was fetched, or one a person typed.
+ * Reference data shared across households, still written only through the
+ * engine.
+ */
+export const crowdLevels = pgTable(
+  'crowd_levels',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    destination: text('destination').notNull().default('wdw'),
+    date: date('date').notNull(),
+    park: tripParkEnum('park').notNull(),
+    level: integer('level').notNull(),
+    source: text('source').notNull(),
+    fetchedOn: date('fetched_on').notNull(),
+  },
+  (t) => [
+    uniqueIndex('crowd_levels_key_idx').on(t.destination, t.date, t.park, t.source),
+    check('crowd_levels_level_range', sql`${t.level} between 1 and 10`),
+  ],
+)
+
+/**
  * The append-only event log (PRD §3). Current state is a fold over these, and
  * the audit trail is free. Append-only is enforced at the database role as well
  * as in code (PRD §10) -- see the migration that revokes UPDATE and DELETE.
@@ -458,6 +583,23 @@ export const householdsRelations = relations(households, ({ many }) => ({
 export const tripsRelations = relations(trips, ({ one, many }) => ({
   household: one(households, { fields: [trips.householdId], references: [households.id] }),
   variants: many(tripVariants),
+  days: many(tripDays),
+  reservations: many(tripReservations),
+  tasks: many(tripTasks),
+}))
+
+export const tripDaysRelations = relations(tripDays, ({ one }) => ({
+  trip: one(trips, { fields: [tripDays.tripId], references: [trips.id] }),
+}))
+
+export const tripReservationsRelations = relations(tripReservations, ({ one }) => ({
+  trip: one(trips, { fields: [tripReservations.tripId], references: [trips.id] }),
+  line: one(tripLines, { fields: [tripReservations.lineId], references: [tripLines.id] }),
+}))
+
+export const tripTasksRelations = relations(tripTasks, ({ one }) => ({
+  trip: one(trips, { fields: [tripTasks.tripId], references: [trips.id] }),
+  line: one(tripLines, { fields: [tripTasks.lineId], references: [tripLines.id] }),
 }))
 
 export const tripVariantsRelations = relations(tripVariants, ({ one, many }) => ({

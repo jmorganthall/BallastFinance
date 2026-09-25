@@ -33,10 +33,37 @@ export interface Traveler {
   band: TravelerBand
 }
 
+/**
+ * Where home is (D24): an address a person typed, and the point the geocoder
+ * resolved it to. Older settings hold only a label and a point; a newer one
+ * holds the address too, and may hold no point yet if the lookup failed --
+ * the address is kept, and the drive waits until it resolves.
+ */
 export interface HomeLocation {
   label: string
+  latitude: number | null
+  longitude: number | null
+  /** The address as typed. Absent on a home saved before D24. */
+  address?: string
+  /** The geocoder's name for the point it found, e.g. "Chicago, Cook County, Illinois, USA". */
+  resolvedName?: string | null
+  geocodedOn?: CivilDate | null
+}
+
+/** A home the drive can be looked up from: one with a point. */
+export interface LocatedHome extends HomeLocation {
   latitude: number
   longitude: number
+}
+
+export function homeIsLocated(home: HomeLocation | null | undefined): home is LocatedHome {
+  return (
+    !!home &&
+    typeof home.latitude === 'number' &&
+    typeof home.longitude === 'number' &&
+    Number.isFinite(home.latitude) &&
+    Number.isFinite(home.longitude)
+  )
 }
 
 export interface TripCar {
@@ -46,7 +73,7 @@ export interface TripCar {
 
 export type TripDestination = 'wdw'
 
-export const DESTINATIONS: Record<TripDestination, HomeLocation> = {
+export const DESTINATIONS: Record<TripDestination, LocatedHome> = {
   wdw: { label: 'Walt Disney World', latitude: 28.3852, longitude: -81.5639 },
 }
 
@@ -155,6 +182,15 @@ export interface TripLine {
 
 /** A line as the default builder produces it: everything but the ids the database assigns. */
 export type DefaultLine = Omit<TripLine, 'id' | 'variantId'>
+
+/**
+ * A part a person added sorts from here, above every default part, so a
+ * rebuild can tell the two apart: defaults are re-listed, added parts come
+ * along as they are.
+ */
+export const ADDED_LINE_SORT = 1000
+
+export const isAddedLine = (line: Pick<TripLine, 'sort'>): boolean => line.sort >= ADDED_LINE_SORT
 
 export type ReferenceUnit = 'per_person_per_day' | 'per_night' | 'per_point' | 'per_day' | 'flat' | 'per_person' | 'percent'
 
@@ -748,7 +784,7 @@ export function toIntake(args: {
 // ---------------------------------------------------------------- what came back from a fetch
 
 /** The setting key a drive is stored under: one per home and destination. */
-export function driveSettingKey(home: HomeLocation, destination: TripDestination): string {
+export function driveSettingKey(home: LocatedHome, destination: TripDestination): string {
   const text = `${home.latitude.toFixed(4)},${home.longitude.toFixed(4)}->${destination}`
   // FNV-1a, 32-bit: a stable short key, not a secret.
   let hash = 0x811c9dc5
@@ -818,8 +854,16 @@ export function validateGasPrice(gas: GasPrice): void {
 
 export function validateHomeLocation(home: HomeLocation): void {
   if (!home.label.trim()) throw new TripDataError('Home needs a label, like the town.')
-  if (!Number.isFinite(home.latitude) || home.latitude < -90 || home.latitude > 90) throw new TripDataError('Latitude is between -90 and 90.')
-  if (!Number.isFinite(home.longitude) || home.longitude < -180 || home.longitude > 180) throw new TripDataError('Longitude is between -180 and 180.')
+  const hasLat = home.latitude !== null && home.latitude !== undefined
+  const hasLon = home.longitude !== null && home.longitude !== undefined
+  if (hasLat !== hasLon) throw new TripDataError('A point needs both a latitude and a longitude.')
+  if (hasLat && (!Number.isFinite(home.latitude) || home.latitude! < -90 || home.latitude! > 90)) {
+    throw new TripDataError('Latitude is between -90 and 90.')
+  }
+  if (hasLon && (!Number.isFinite(home.longitude) || home.longitude! < -180 || home.longitude! > 180)) {
+    throw new TripDataError('Longitude is between -180 and 180.')
+  }
+  if (home.address !== undefined && !home.address.trim()) throw new TripDataError('Type the address home is at.')
 }
 
 // ---------------------------------------------------------------- words on screen

@@ -32,9 +32,9 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder |
 | `src/db/` | Drizzle schema and the connection. Facts only |
-| `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts` and `trip-fetch.ts` are the only outbound data calls (FRED CSVs and the OSRM router; public, key-free, each switchable off by env) |
+| `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts` and `trip-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, and two public crowd calendars; public, key-free, each switchable off by env, every request with the app's own User-Agent) |
 | `src/app/` | Screens. They render; they do not calculate |
 | `drizzle/` | Migrations. `0001` is the append-only enforcement — read it before touching events |
 | `scripts/` | Bootstrap, seed, backup, quickstart, and the Disney demo for checking against the spreadsheet |
@@ -90,6 +90,25 @@ principles, and they are non-negotiable.
   sourced figure a person stated, and a typed figure is never overwritten by
   the drive or gas-price fetch. The cushion and the price tag are computed,
   never stored.
+- **A trip is planned here, not only priced** (PRD §16, D22–D24, rev 37).
+  `trip_days`, `trip_reservations` and `trip_tasks` are the module's own
+  planning facts (migration 0012); every edit is a `trip_changed` event with
+  `day_id` / `reservation_id` / `task_id`. Once a trip is a plan its *money*
+  is read-only, but its days, reservations and to-dos go on being planned.
+  The booking timeline is regenerated with stable keys and never touches a
+  to-do a person edited (`generated = false`) or ticked. `crowd_levels` is
+  household-independent reference data (1 quiet – 10 packed, per date and
+  park, with source and fetched-on), still written only through the engine;
+  a pull is held in a setting and shown before it is kept, a typed level
+  always shows over a fetched one, and one older than 30 days is flagged.
+  TouringPlans is subscriber-only and never fetched. Home is an **address**
+  (D24): saving geocodes it once through Nominatim (one request a second,
+  cached), stores the address as typed with the point and the resolved name,
+  and a failed lookup keeps the address with no point, so the drive waits.
+  `HomeLocation.latitude/longitude` are therefore nullable; use
+  `homeIsLocated()` before measuring a drive. The two crowd sites and
+  Nominatim are unreachable from the build sandbox: every parser is tested on
+  hand-written fixtures, never a live page.
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software. The trip planner's
   usual figures are a constant in `src/domain/trip.ts`, laid over by a
@@ -98,7 +117,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 527 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 588 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
