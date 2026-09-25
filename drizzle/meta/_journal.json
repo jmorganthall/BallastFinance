@@ -64,6 +64,13 @@
       "when": 1790034859817,
       "tag": "0008_package_deleted_event",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790194465629,
+      "tag": "0009_asset_equity",
+      "breakpoints": true
     }
   ]
 }

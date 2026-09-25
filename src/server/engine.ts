@@ -13,6 +13,7 @@
 import { and, eq } from 'drizzle-orm'
 import { db as defaultDb, type Db } from '@/db/client'
 import {
+  assets as assetsTable,
   debts as debtsTable,
   events,
   lineItems as lineItemsTable,
@@ -88,6 +89,23 @@ import {
   type CurvePoint,
   type SheetImport,
   type SheetProblem,
+  DEFAULT_HOME_BUYING,
+  DEFAULT_SELLING_COST_BASIS_POINTS,
+  equityPosition,
+  mortgagePaymentsCents,
+  homeCost,
+  mostHouseForPayment,
+  rateInUse,
+  validateAssetInputs,
+  validateHomeBuying,
+  type Asset,
+  type AssetKind,
+  type AssetState,
+  type EquityPosition,
+  type HomeBuyingAssumptions,
+  type HomeCost,
+  type MarketRate,
+  type RateInUse,
 } from '@/domain'
 
 export class EngineError extends Error {}
@@ -1809,6 +1827,243 @@ export class Engine {
       })
   }
 
+  // ---------------------------------------------------------------- equity (PRD §15)
+
+  async listAssets(): Promise<Asset[]> {
+    const rows = await this.db
+      .select()
+      .from(assetsTable)
+      .where(eq(assetsTable.householdId, this.householdId))
+    return rows.map(toAsset)
+  }
+
+  async createAsset(input: {
+    name: string
+    kind: AssetKind
+    valueCents: Cents
+    /** Absent: the usual figure for the kind, which the form shows first. */
+    sellingCostBasisPoints?: number
+    valueAsOf?: CivilDate
+  }): Promise<Asset> {
+    const name = input.name.trim()
+    if (!name) throw new EngineError('A home or vehicle needs a name')
+    const sellingCostBasisPoints =
+      input.sellingCostBasisPoints ?? DEFAULT_SELLING_COST_BASIS_POINTS[input.kind]
+    validateAssetInputs({ valueCents: input.valueCents, sellingCostBasisPoints })
+
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(assetsTable)
+        .values({
+          householdId: this.householdId,
+          name,
+          kind: input.kind,
+          valueCents: input.valueCents,
+          valueAsOf: input.valueAsOf ?? this.today(),
+          sellingCostBasisPoints,
+          state: 'owned',
+        })
+        .returning()
+      if (!row) throw new EngineError('Could not add it')
+      const asset = toAsset(row)
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'asset_added',
+        occurredAt: this.today(),
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { asset_id: asset.id, ...assetEventShape(asset) },
+      })
+      return asset
+    })
+  }
+
+  /**
+   * Correct or revalue a home or vehicle. A new value is a fresh reading, so
+   * it takes today as the date it was checked; a rename does not.
+   */
+  async updateAsset(
+    assetId: Id,
+    patch: Partial<{ name: string; kind: AssetKind; valueCents: Cents; sellingCostBasisPoints: number; state: AssetState }>,
+  ): Promise<void> {
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(assetsTable)
+        .where(and(eq(assetsTable.id, assetId), eq(assetsTable.householdId, this.householdId)))
+      if (!row) throw new EngineError('No such home or vehicle in this household')
+      const before = toAsset(row)
+      const revalued = patch.valueCents !== undefined && patch.valueCents !== before.valueCents
+      const after: Asset = {
+        ...before,
+        ...patch,
+        name: (patch.name ?? before.name).trim(),
+        valueAsOf: revalued ? today : before.valueAsOf,
+      }
+      if (!after.name) throw new EngineError('A home or vehicle needs a name')
+      validateAssetInputs(after)
+
+      await tx
+        .update(assetsTable)
+        .set({
+          name: after.name,
+          kind: after.kind,
+          valueCents: after.valueCents,
+          valueAsOf: after.valueAsOf,
+          sellingCostBasisPoints: after.sellingCostBasisPoints,
+          state: after.state,
+        })
+        .where(eq(assetsTable.id, assetId))
+
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'asset_changed',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { asset_id: assetId, before: assetEventShape(before), after: assetEventShape(after) },
+      })
+    })
+  }
+
+  /** Remove one entered by mistake. Its debts stay, unlinked; the event keeps what it said. */
+  async removeAsset(assetId: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(assetsTable)
+        .where(and(eq(assetsTable.id, assetId), eq(assetsTable.householdId, this.householdId)))
+      if (!row) throw new EngineError('No such home or vehicle in this household')
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'asset_removed',
+        occurredAt: this.today(),
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { asset_id: assetId, ...assetEventShape(toAsset(row)) },
+      })
+      await tx.delete(assetsTable).where(eq(assetsTable.id, assetId))
+    })
+  }
+
+  /**
+   * Say which home or vehicle a debt is secured on, or none. Both must be this
+   * household's: the foreign key alone would accept another household's asset.
+   */
+  async linkDebtToAsset(debtId: Id, assetId: Id | null): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [debt] = await tx
+        .select()
+        .from(debtsTable)
+        .where(and(eq(debtsTable.id, debtId), eq(debtsTable.householdId, this.householdId)))
+      if (!debt) throw new EngineError('No such debt in this household')
+      if (assetId !== null) {
+        const [asset] = await tx
+          .select({ id: assetsTable.id })
+          .from(assetsTable)
+          .where(and(eq(assetsTable.id, assetId), eq(assetsTable.householdId, this.householdId)))
+        if (!asset) throw new EngineError('No such home or vehicle in this household')
+      }
+      if ((debt.assetId ?? null) === assetId) return
+
+      await tx.update(debtsTable).set({ assetId }).where(eq(debtsTable.id, debtId))
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'debt_updated',
+        occurredAt: this.today(),
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { debt_id: debtId, before: { asset_id: debt.assetId ?? null }, after: { asset_id: assetId } },
+      })
+    })
+  }
+
+  /** The weekly average, as the scheduled fetch last stored it. */
+  async marketMortgageRate(): Promise<MarketRate | null> {
+    return this.getSetting<MarketRate | null>('market_mortgage_rate', null)
+  }
+
+  /** Written only by the scheduled fetch (PRD D14). */
+  async recordMarketMortgageRate(rate: MarketRate): Promise<void> {
+    await this.putSetting('market_mortgage_rate', rate)
+  }
+
+  async typedMortgageRate(): Promise<number | null> {
+    const stored = await this.getSetting<{ rateBasisPoints: number | null } | null>('mortgage_rate_override', null)
+    return stored?.rateBasisPoints ?? null
+  }
+
+  /** A lender's quote, say. Null goes back to the weekly average. */
+  async setTypedMortgageRate(rateBasisPoints: number | null): Promise<void> {
+    if (rateBasisPoints !== null && (!Number.isInteger(rateBasisPoints) || rateBasisPoints <= 0 || rateBasisPoints > 2500)) {
+      throw new EngineError('A mortgage rate must be more than 0% and at most 25%.')
+    }
+    // The value column holds a fact, never SQL null: clearing is a row saying "none".
+    await this.putSetting('mortgage_rate_override', { rateBasisPoints })
+  }
+
+  async homeBuyingAssumptions(): Promise<HomeBuyingAssumptions> {
+    const stored = await this.getSetting<Partial<HomeBuyingAssumptions> | null>('home_buying', null)
+    return { ...DEFAULT_HOME_BUYING, ...(stored ?? {}) }
+  }
+
+  async setHomeBuyingAssumptions(assumptions: HomeBuyingAssumptions): Promise<void> {
+    validateHomeBuying(assumptions)
+    await this.putSetting('home_buying', assumptions)
+  }
+
+  /**
+   * Everything the "What could we buy?" screen shows, from the derivation
+   * module. Pass a price to also get what that house would cost a month.
+   */
+  async nextHome(priceCents?: Cents | null): Promise<{
+    today: CivilDate
+    assets: Asset[]
+    debts: Debt[]
+    position: EquityPosition
+    rate: RateInUse | null
+    assumptions: HomeBuyingAssumptions
+    /** What the open mortgages come to, for when no housing payment is stated. */
+    mortgagePaymentsCents: Cents
+    /** The payment being matched: the stated one, else the mortgages'. */
+    targetPaymentCents: Cents
+    mostHouse: HomeCost | null
+    atPrice: HomeCost | null
+  }> {
+    const today = this.today()
+    const [assets, debts, market, typed, assumptions] = await Promise.all([
+      this.listAssets(),
+      this.listDebts(),
+      this.marketMortgageRate(),
+      this.typedMortgageRate(),
+      this.homeBuyingAssumptions(),
+    ])
+    const position = equityPosition(assets, debts)
+    const rate = rateInUse({ typedBasisPoints: typed, market, today })
+    const fromMortgages = mortgagePaymentsCents(debts)
+    const target = assumptions.currentHousingPaymentCents ?? fromMortgages
+    const common = { equityCents: position.countedCents, assumptions }
+    return {
+      today,
+      assets,
+      debts,
+      position,
+      rate,
+      assumptions,
+      mortgagePaymentsCents: fromMortgages,
+      targetPaymentCents: target,
+      mostHouse:
+        rate && target > 0
+          ? mostHouseForPayment({ ...common, targetMonthlyCents: target, rateBasisPoints: rate.rateBasisPoints })
+          : null,
+      atPrice:
+        rate && priceCents != null && priceCents > 0
+          ? homeCost({ ...common, priceCents, rateBasisPoints: rate.rateBasisPoints })
+          : null,
+    }
+  }
+
   /** Settings are versioned by effective_from; a change adds a row, never edits one. */
   async putSetting(key: string, value: unknown): Promise<void> {
     await this.db
@@ -1866,6 +2121,31 @@ function toDebt(r: typeof debtsTable.$inferSelect): Debt {
     plannedPaymentCents: r.plannedPaymentCents,
     fixedPayment: r.fixedPayment,
     state: r.state,
+    assetId: r.assetId,
+  }
+}
+
+function toAsset(r: typeof assetsTable.$inferSelect): Asset {
+  return {
+    id: r.id,
+    householdId: r.householdId,
+    name: r.name,
+    kind: r.kind,
+    valueCents: r.valueCents,
+    valueAsOf: r.valueAsOf as CivilDate,
+    sellingCostBasisPoints: r.sellingCostBasisPoints,
+    state: r.state,
+  }
+}
+
+function assetEventShape(a: Asset) {
+  return {
+    name: a.name,
+    kind: a.kind,
+    value_cents: a.valueCents,
+    value_as_of: a.valueAsOf,
+    selling_cost_basis_points: a.sellingCostBasisPoints,
+    state: a.state,
   }
 }
 

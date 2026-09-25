@@ -57,6 +57,8 @@ export const recurrenceUnitEnum = pgEnum('recurrence_unit', ['day', 'week', 'mon
 
 export const debtCategoryEnum = pgEnum('debt_category', ['consumer', 'auto', 'mortgage'])
 export const debtStateEnum = pgEnum('debt_state', ['open', 'paid_off'])
+export const assetKindEnum = pgEnum('asset_kind', ['home', 'vehicle'])
+export const assetStateEnum = pgEnum('asset_state', ['owned', 'sold'])
 
 /** The closed set of event kinds (PRD §3). Growing it is a deliberate change. */
 export const eventKindEnum = pgEnum('event_kind', [
@@ -84,6 +86,11 @@ export const eventKindEnum = pgEnum('event_kind', [
    * money that went through it.
    */
   'package_deleted',
+  // Equity (migration 0009, PRD §15). A value is a dated fact a person read
+  // off Zillow or KBB, so every change to one is kept.
+  'asset_added',
+  'asset_changed',
+  'asset_removed',
 ])
 
 /**
@@ -225,6 +232,36 @@ export const lineItems = pgTable(
   ],
 )
 
+/**
+ * A home or vehicle the household owns (PRD §15, object #9). Its value is a
+ * stated fact with the date it was checked, never fetched: nothing here
+ * pretends to know what a house is worth.
+ */
+export const assets = pgTable(
+  'assets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    kind: assetKindEnum('kind').notNull(),
+    valueCents: cents('value_cents').notNull(),
+    valueAsOf: date('value_as_of').notNull(),
+    /** What selling takes off the top, basis points: 700 = 7%. */
+    sellingCostBasisPoints: integer('selling_cost_basis_points').notNull(),
+    state: assetStateEnum('state').notNull().default('owned'),
+  },
+  (t) => [
+    index('assets_household_idx').on(t.householdId, t.state),
+    check('assets_value_not_negative', sql`${t.valueCents} >= 0`),
+    check(
+      'assets_selling_cost_in_range',
+      sql`${t.sellingCostBasisPoints} between 0 and 5000`,
+    ),
+  ],
+)
+
 export const debts = pgTable(
   'debts',
   {
@@ -252,6 +289,8 @@ export const debts = pgTable(
     plannedPaymentCents: cents('planned_payment_cents'),
     fixedPayment: boolean('fixed_payment').notNull().default(false),
     state: debtStateEnum('state').notNull().default('open'),
+    /** The home or vehicle this debt is secured on (PRD §15). Removing the asset unlinks it. */
+    assetId: uuid('asset_id').references(() => assets.id, { onDelete: 'set null' }),
   },
   (t) => [index('debts_household_idx').on(t.householdId, t.state)],
 )
@@ -302,6 +341,7 @@ export const householdsRelations = relations(households, ({ many }) => ({
   reserveAccounts: many(reserveAccounts),
   packages: many(packages),
   debts: many(debts),
+  assets: many(assets),
 }))
 
 export const packagesRelations = relations(packages, ({ one, many }) => ({
