@@ -77,13 +77,17 @@ principles, and they are non-negotiable.
   picture. An `individual` account can only be renamed, funded, or
   balance-confirmed by its owner (`canWriteAccount` in `src/domain/types.ts`).
   There is deliberately no `canReadAccount`.
+- **Home and car values are typed, never fetched** (PRD §15, D13). Zillow and
+  KBB do not license their values to an app like this. The mortgage rate is the
+  one outbound data call (`src/server/market-rate.ts`, FRED's public CSV), and
+  what it returns is refused unless it reads as a plausible rate.
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software.
 
 ## Working on it
 
 ```bash
-npm test            # 376 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 448 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

@@ -9,6 +9,7 @@
  * deliberate action -- looking at a what-if should not silently change the rule.
  */
 
+import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import { setPriorityWeightAction } from '@/server/actions'
@@ -94,6 +95,12 @@ export default async function DebtsPage({
         title="Payoff order"
         subtitle="Which debt to clear next, and where a lump sum should go."
       />
+
+      <p className="-mt-3 mb-4 text-sm">
+        <Link href="/debts/equity" className="text-[var(--color-accent)] underline underline-offset-4">
+          What could we buy with our equity?
+        </Link>
+      </p>
 
       {error ? (
         <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
