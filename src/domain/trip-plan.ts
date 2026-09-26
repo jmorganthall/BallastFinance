@@ -17,6 +17,7 @@
 import { addDays, compareDates, minDate, type CivilDate } from './dates'
 import type { Cents } from './money'
 import type { Id } from './types'
+import { busynessFor, type Busyness, type BusynessSources } from './park-data'
 import {
   contingencyBasisPoints,
   defaultLines,
@@ -423,6 +424,11 @@ export function resortLevel(levels: readonly CrowdLevel[], date: CivilDate): num
   return parks.reduce((sum, l) => sum + l.level, 0) / parks.length
 }
 
+/** The sources busynessFor reads: the ones given, with the crowd levels laid under them. */
+export function busynessSources(crowdLevels: readonly CrowdLevel[], given?: BusynessSources): BusynessSources {
+  return { crowdLevels, ...(given ?? {}) }
+}
+
 export interface CrowdPullSummary {
   park: TripPark
   days: number
@@ -513,6 +519,8 @@ export interface WeekComparisonInput {
   days?: readonly TripDay[]
   candidateWeeks?: readonly WeekCandidate[]
   crowdLevels: readonly CrowdLevel[]
+  /** Every source of "how busy" (D28); with none given, the crowd levels alone. */
+  busyness?: BusynessSources
   referencePrices: readonly ReferencePrice[]
   drive?: DriveEstimate | null
   gasPrice?: GasPrice | null
@@ -566,13 +574,14 @@ export function weekComparison(input: WeekComparisonInput): WeekComparisonRow[] 
   const planned = (input.days ?? []).filter((d) => d.park !== 'rest' && d.park !== 'travel')
   const parkOffsets =
     planned.length > 0 ? planned.map((d) => compareDates(d.date, trip.startDate)) : null
+  const sources = busynessSources(input.crowdLevels, input.busyness)
 
   return weeks.map((week) => {
     const shifted: Trip = { ...trip, startDate: week.startDate, endDate: week.endDate }
     const nights = compareDates(week.endDate, week.startDate)
     const offsets = parkOffsets ?? Array.from({ length: nights + 1 }, (_, i) => i)
     const levels = offsets
-      .map((o) => resortLevel(input.crowdLevels, addDays(week.startDate, o)))
+      .map((o) => busynessFor({ ...sources, date: addDays(week.startDate, o), park: 'other' })?.level ?? null)
       .filter((l): l is number => l !== null)
     const average = levels.length > 0 ? Math.round((levels.reduce((s, l) => s + l, 0) / levels.length) * 10) / 10 : null
     const worst = levels.length > 0 ? Math.ceil(Math.max(...levels)) : null
@@ -600,8 +609,8 @@ export interface DayView {
   date: CivilDate
   day: TripDay | null
   park: TripPark
-  /** How busy the day's park is, or the resort as a whole on a day with no park. */
-  level: CrowdLevel | null
+  /** How busy the day's park is, or the resort as a whole on a day with no park, with where the figure came from (D28). */
+  level: Busyness | null
   /** The resort as a whole, to the nearest whole level, for a day whose own park has no figure. */
   resortLevel: number | null
   quietest: { park: TripPark; level: number } | null
@@ -629,7 +638,9 @@ export function dayPlan(
   days: readonly TripDay[],
   reservations: readonly TripReservation[],
   crowdLevels: readonly CrowdLevel[],
+  busyness?: BusynessSources,
 ): DayView[] {
+  const sources = busynessSources(crowdLevels, busyness)
   const byDate = new Map(days.map((d) => [d.date, d]))
   const count = Math.max(0, compareDates(trip.endDate, trip.startDate))
   const out: DayView[] = []
@@ -637,13 +648,13 @@ export function dayPlan(
     const date = addDays(trip.startDate, i)
     const day = byDate.get(date) ?? null
     const park = day?.park ?? defaultPark(trip, date)
-    const own = THEME_PARKS.includes(park) ? pickLevel(crowdLevels, date, park) : pickLevel(crowdLevels, date, 'other')
+    const own = busynessFor({ ...sources, date, park: THEME_PARKS.includes(park) ? park : 'other' })
     let quietest: DayView['quietest'] = null
     for (const p of THEME_PARKS) {
-      const l = pickLevel(crowdLevels, date, p)
+      const l = busynessFor({ ...sources, date, park: p })
       if (l && (!quietest || l.level < quietest.level)) quietest = { park: p, level: l.level }
     }
-    const whole = resortLevel(crowdLevels, date)
+    const whole = busynessFor({ ...sources, date, park: 'other' })?.level ?? null
     out.push({
       date,
       day,
@@ -784,7 +795,7 @@ export function levelFromValue(value: unknown): number | null {
 }
 
 const DATE_KEY = /date|day|^d$|^when$|^x$/i
-const LEVEL_KEY = /crowd|level|index|score|rating|busy|value|^v$|^y$/i
+const LEVEL_KEY = /crowd|level|index|score|rating|busy|wait|predict|value|^v$|^y$/i
 const PARK_KEY = /park|location|venue|place|name|title|label/i
 
 /** Walk a parsed JSON value for objects that read as {date, level[, park]}. A parent key names the park when the row does not. */
@@ -811,6 +822,13 @@ function fromJson(value: unknown, month: string | null, parkHint: TripPark | nul
   for (const [key, v] of Object.entries(record)) {
     if (v && typeof v === 'object') fromJson(v, month, parkFromText(key) ?? park ?? parkHint, out, depth + 1)
   }
+}
+
+/** Every {date, level[, park]} a parsed JSON value carries, for a feed that is JSON already (the outlook, D28). */
+export function crowdLevelsFromJson(json: unknown, month: string | null = null): ParsedCrowdLevel[] {
+  const out: ParsedCrowdLevel[] = []
+  fromJson(json, month, null, out)
+  return out
 }
 
 function jsonCandidates(text: string): unknown[] {

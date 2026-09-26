@@ -1571,6 +1571,28 @@ export async function checkDvcListingsAction(formData: FormData): Promise<void> 
   backToTrip(tripId, null, 'dvc=1')
 }
 
+/**
+ * "Refresh park data" (D29): the weather, the park hours and the crowd
+ * outlook, pulled now and stored as they arrive -- reference data, not a
+ * person's fact, so nothing waits to be kept. What each source said comes
+ * back as a line on the screen.
+ */
+export async function refreshParkDataAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parkDataFetchEnabled } = await import('@/server/park-fetch')
+  const tripId = String(formData.get('trip_id') ?? '')
+  const month = String(formData.get('month') ?? '')
+  const back = (message: string | null, query: string) => (tripId ? backToTrip(tripId, message, query) : backToTrips(message, query, '#calendar'))
+  const query = new URLSearchParams()
+  if (/^\d{4}-\d{2}$/.test(month)) query.set('month', month)
+  if (!parkDataFetchEnabled()) back('Looking up park data is switched off on this machine (PARK_DATA_FETCH=off).', query.toString())
+  const done = await engine.refreshParkData()
+  const stored = `Stored ${done.weather} days of weather, ${done.hours} park-days of hours and ${done.outlook} park-days of crowd outlook.`
+  if (done.weather + done.hours + done.outlook === 0) back(`Nothing could be fetched. ${done.notes.join(' ')}`, query.toString())
+  query.set('refreshed', done.notes.length > 0 ? `${stored} ${done.notes.join(' ')}` : stored)
+  back(null, query.toString())
+}
+
 export async function keepDvcPullAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const tripId = String(formData.get('trip_id'))

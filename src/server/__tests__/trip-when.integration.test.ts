@@ -35,8 +35,9 @@ describeDb('when to go', () => {
   ]
   const readerEnv = { READER_API_KEY: 'k', READER_MODEL: 'test/model' }
 
+  // In the order they were recorded: without it the rows come back in heap order, which other files' writes can change.
   const events = (kind: 'school_calendar_changed' | 'trip_changed') =>
-    db.select().from(schema.events).where(and(eq(schema.events.householdId, householdId), eq(schema.events.kind, kind)))
+    db.select().from(schema.events).where(and(eq(schema.events.householdId, householdId), eq(schema.events.kind, kind))).orderBy(schema.events.recordedAt)
 
   beforeAll(async () => {
     client = postgres(url!, { max: 4, prepare: false })

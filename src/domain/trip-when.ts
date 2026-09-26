@@ -44,7 +44,8 @@ import { addDays, addMonths, compareDates, maxDate, minDate, type CivilDate } fr
 import { formatCents, type Cents } from './money'
 import type { Id } from './types'
 import type { Trip } from './trip'
-import { crowdWord, priceWindowCents, resortLevel, TripPlanError, type BlackoutRange, type CrowdLevel, type TripDay, type WindowPricingInput } from './trip-plan'
+import { busynessSources, crowdWord, priceWindowCents, TripPlanError, type BlackoutRange, type CrowdLevel, type TripDay, type WindowPricingInput } from './trip-plan'
+import { busynessFor, type BusynessSources } from './park-data'
 
 // ---------------------------------------------------------------- facts
 
@@ -373,6 +374,7 @@ export function measureCandidates(input: {
   trip: Pick<Trip, 'startDate' | 'endDate'>
   days?: readonly TripDay[]
   crowdLevels: readonly CrowdLevel[]
+  busyness?: BusynessSources
   priceOf: (window: { startDate: CivilDate; endDate: CivilDate }) => Cents
   daysOff: readonly (DayOffInput & { schoolYear?: string })[]
   holidays: readonly Holiday[]
@@ -381,9 +383,10 @@ export function measureCandidates(input: {
   const tripNights = Math.max(0, compareDates(input.trip.endDate, input.trip.startDate))
   const planned = (input.days ?? []).filter((d) => d.park !== 'rest' && d.park !== 'travel')
   const parkOffsets = planned.length > 0 ? planned.map((d) => compareDates(d.date, input.trip.startDate)) : null
+  const sources = busynessSources(input.crowdLevels, input.busyness)
   return input.candidates.map((c) => {
     const offsets = parkOffsets && c.nights === tripNights ? parkOffsets : Array.from({ length: c.nights + 1 }, (_, i) => i)
-    const levels = offsets.map((o) => resortLevel(input.crowdLevels, addDays(c.startDate, o))).filter((l): l is number => l !== null)
+    const levels = offsets.map((o) => busynessFor({ ...sources, date: addDays(c.startDate, o), park: 'other' })?.level ?? null).filter((l): l is number => l !== null)
     const crowdAverage = levels.length > 0 ? Math.round((levels.reduce((s, l) => s + l, 0) / levels.length) * 10) / 10 : null
     return {
       ...c,
@@ -460,6 +463,8 @@ export function scoreCandidates(input: {
 export interface BestWeeksInput extends WindowPricingInput {
   days?: readonly TripDay[]
   crowdLevels: readonly CrowdLevel[]
+  /** Every source of "how busy" (D28); with none given, the crowd levels alone. */
+  busyness?: BusynessSources
   daysOff: readonly (DayOffInput & { schoolYear?: string })[]
   blackoutDates: readonly BlackoutRange[]
   horizonMonths?: number
@@ -494,6 +499,7 @@ export function bestWeeks(input: BestWeeksInput): BestWeeks {
     trip: input.trip,
     days: input.days,
     crowdLevels: input.crowdLevels,
+    busyness: input.busyness,
     priceOf: (w) => priceWindowCents(input, w),
     daysOff: input.daysOff,
     holidays,

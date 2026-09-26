@@ -55,7 +55,8 @@ repo still has to know them. Everything else: read the document.
 | Trip-C | Favourite dining list (§16) | Not built |
 | Trip-D | Planning the trip: candidate weeks and how busy they are (crowd calendar, D23), the booking timeline and checklist, the days, reservations with confirmations, home as an address found on the map once (D22–D24, PRD rev 37) | Built |
 | Trip-E | When to go: the household school calendar (typed, iCal, or read from the district's PDF), federal holidays, long weekends, the ten best weeks with reasons; DVC broker listings behind a parser; the reader behind an environment key, used only where a parser fails (D25–D27, PRD rev 38) | Built |
+| Trip-F | Ballast's own park data and the calendar: weather by horizon (Open-Meteo), park hours (ThemeParks.wiki), the crowd outlook (RopeDrop Planner), live waits polled into a wait history (Queue-Times) and ranked to 1–10; busyness derived through one function; a month grid on `/trips` and at the top of each trip's When section, with "Refresh park data" (D28–D29, PRD rev 41) | Built |
 
-Phases A–D, F and Trip-A/B/D/E are implemented and tested. What remains before v1 is done is
+Phases A–D, F and Trip-A/B/D/E/F are implemented and tested. What remains before v1 is done is
 verification against reality, not more building — see the PRD's acceptance
 criteria (§12) and the open items (§13).

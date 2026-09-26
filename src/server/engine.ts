@@ -10,7 +10,7 @@
  * this file calls but never duplicates: there is no arithmetic in this layer.
  */
 
-import { and, eq, gte, isNull, lte } from 'drizzle-orm'
+import { and, count, eq, gte, isNotNull, isNull, lte, sql } from 'drizzle-orm'
 import { db as defaultDb, type Db } from '@/db/client'
 import {
   assets as assetsTable,
@@ -22,6 +22,9 @@ import {
   settings as settingsTable,
   crowdLevels as crowdLevelsTable,
   dvcListings as dvcListingsTable,
+  parkHours as parkHoursTable,
+  parkWeather as parkWeatherTable,
+  waitObservations as waitObservationsTable,
   schoolDaysOff as schoolDaysOffTable,
   tripDays as tripDaysTable,
   tripLines as tripLinesTable,
@@ -204,8 +207,49 @@ import {
   type SchoolCalendarSource,
   type SchoolDayOff,
   type WeekWeights,
+  busynessSources,
+  calendarMonth as layOutMonth,
+  DEFAULT_QUEUE_TIMES_GROUP,
+  DEFAULT_QUEUE_TIMES_PARKS,
+  DESTINATIONS,
+  federalHolidaysBetween,
+  indexWaitHistory,
+  monthBounds,
+  normalsForDates,
+  normalsFromArchive,
+  OPEN_METEO_SOURCE,
+  OUTLOOK_SOURCE,
+  PARK_LABELS,
+  THEMEPARKS_SOURCE,
+  validateMonth,
+  validateParkHours,
+  validateParkWeather,
+  validateWaitObservation,
+  type BusynessSources,
+  type CalendarMonth,
+  type ParkHours,
+  type ParkWeather,
+  type ParsedParkHours,
+  type ParsedWeatherDay,
+  type ResolvedPark,
+  type WaitDaySummary,
+  type WaitObservation,
+  type WaitParkNames,
+  type WeatherHorizon,
 } from '@/domain'
 import { fetchSchoolCalendarIcal, pullDvcListings } from '@/server/trip-fetch'
+import {
+  DEFAULT_ROPEDROP_OUTLOOK_URL,
+  fetchArchive,
+  fetchForecast,
+  fetchQueueTimesParks,
+  fetchQueueTimesWaits,
+  fetchRopeDropOutlook,
+  fetchSubseasonal,
+  fetchThemeParksChildren,
+  fetchThemeParksSchedule,
+  HOURS_DAYS_AHEAD,
+} from '@/server/park-fetch'
 import { readerEnabled, readerSourceName, readStructured, type ReaderDeps } from '@/server/reader'
 
 export class EngineError extends Error {}
@@ -262,6 +306,22 @@ export interface DvcPull {
   seenOn: CivilDate
   notes: string[]
 }
+
+/** What "Refresh park data" did (D29): how many rows each pull stored, and what each source said. */
+export interface ParkDataRefresh {
+  weather: number
+  hours: number
+  outlook: number
+  notes: string[]
+}
+
+/** The fetch a job or a test hands the park-data pulls. */
+export interface ParkFetchDeps {
+  fetchImpl?: typeof fetch
+}
+
+/** What is typical for a date is refreshed when what is stored is older than this. */
+export const NORMALS_REFRESH_AFTER_DAYS = 30
 
 /** What "Read it" or "Check what DVC brokers have" came back with: something to look at, or nothing with the reasons. */
 export type ReadOutcome = { ok: true; count: number } | { ok: false; notes: string[] }
@@ -2776,7 +2836,8 @@ export class Engine {
     const from = addDays(trip.startDate, -7 * 3)
     const to = addDays(trip.endDate, 7 * 3)
     const horizonEnd = addDays(addMonths(today, horizonMonths), compareDates(trip.endDate, trip.startDate) + 7)
-    const crowdLevels = await this.crowdLevels(trip.destination, compareDates(today, from) < 0 ? today : from, compareDates(horizonEnd, to) > 0 ? horizonEnd : to)
+    const busyness = await this.busynessSources({ from: compareDates(today, from) < 0 ? today : from, to: compareDates(horizonEnd, to) > 0 ? horizonEnd : to }, trip.destination)
+    const crowdLevels = [...(busyness.crowdLevels ?? [])]
     const listingDates = listingWindow(trip)
     const dvcListings = listingsForTrip(await this.dvcListings(listingDates.from, listingDates.to), trip)
     const pricing = { trip, variant, lines: variant?.lines ?? [], referencePrices, drive, gasPrice: gas, maxDriveMinutes, today }
@@ -2784,16 +2845,16 @@ export class Engine {
       trip,
       variant,
       days,
-      dayViews: dayPlan(trip, days, reservations, crowdLevels),
+      dayViews: dayPlan(trip, days, reservations, crowdLevels, busyness),
       reservations,
       money: reservationMoney(reservations),
       tasks,
-      weeks: weekComparison({ ...pricing, days, crowdLevels, blackoutDates }),
+      weeks: weekComparison({ ...pricing, days, crowdLevels, busyness, blackoutDates }),
       crowdLevels,
       blackoutDates,
       packTemplate,
       pendingPull,
-      bestWeeks: bestWeeks({ ...pricing, days, crowdLevels, daysOff, blackoutDates, horizonMonths, weights: weekWeights }),
+      bestWeeks: bestWeeks({ ...pricing, days, crowdLevels, busyness, daysOff, blackoutDates, horizonMonths, weights: weekWeights }),
       horizonMonths,
       weekWeights,
       dvcListings,
@@ -3397,6 +3458,338 @@ export class Engine {
     return kept
   }
 
+  // -- Ballast's own park data (D28-D29): reference data, household-independent, written only here
+
+  async parkWeather(range: { from: CivilDate; to: CivilDate }, destination: TripDestination = 'wdw'): Promise<ParkWeather[]> {
+    const rows = await this.db
+      .select()
+      .from(parkWeatherTable)
+      .where(and(eq(parkWeatherTable.destination, destination), gte(parkWeatherTable.date, range.from), lte(parkWeatherTable.date, range.to)))
+    return rows.map(toParkWeather)
+  }
+
+  /** Keep a pull's days, one row per date and horizon; the same horizon again for a date replaces its figures. */
+  async recordParkWeather(rows: readonly ParsedWeatherDay[], meta: { destination: TripDestination; horizon: WeatherHorizon; source: string; fetchedOn: CivilDate }): Promise<number> {
+    for (const r of rows) validateParkWeather({ ...r, horizon: meta.horizon, source: meta.source })
+    if (rows.length === 0) return 0
+    await this.db.transaction(async (tx) => {
+      for (const r of rows) {
+        await tx
+          .insert(parkWeatherTable)
+          .values({ destination: meta.destination, date: r.date, highF: r.highF, lowF: r.lowF, precipChance: r.precipChance, horizon: meta.horizon, source: meta.source, fetchedOn: meta.fetchedOn })
+          .onConflictDoUpdate({
+            target: [parkWeatherTable.destination, parkWeatherTable.date, parkWeatherTable.horizon],
+            set: { highF: r.highF, lowF: r.lowF, precipChance: r.precipChance, source: meta.source, fetchedOn: meta.fetchedOn },
+          })
+      }
+    })
+    return rows.length
+  }
+
+  async parkHours(range: { from: CivilDate; to: CivilDate }, destination: TripDestination = 'wdw'): Promise<ParkHours[]> {
+    const rows = await this.db
+      .select()
+      .from(parkHoursTable)
+      .where(and(eq(parkHoursTable.destination, destination), gte(parkHoursTable.date, range.from), lte(parkHoursTable.date, range.to)))
+    return rows.map(toParkHours)
+  }
+
+  /** Keep a park's schedule, one row per park and date; a later pull replaces the day's times. */
+  async recordParkHours(rows: readonly ParsedParkHours[], meta: { destination: TripDestination; park: TripPark; source: string; fetchedOn: CivilDate }): Promise<number> {
+    for (const r of rows) validateParkHours({ ...r, park: meta.park, source: meta.source })
+    if (rows.length === 0) return 0
+    await this.db.transaction(async (tx) => {
+      for (const r of rows) {
+        await tx
+          .insert(parkHoursTable)
+          .values({ destination: meta.destination, park: meta.park, date: r.date, opens: r.opens, closes: r.closes, earlyEntry: r.earlyEntry, extendedEvening: r.extendedEvening, source: meta.source, fetchedOn: meta.fetchedOn })
+          .onConflictDoUpdate({
+            target: [parkHoursTable.destination, parkHoursTable.park, parkHoursTable.date],
+            set: { opens: r.opens, closes: r.closes, earlyEntry: r.earlyEntry, extendedEvening: r.extendedEvening, source: meta.source, fetchedOn: meta.fetchedOn },
+          })
+      }
+    })
+    return rows.length
+  }
+
+  /** Keep what a poll saw. The same posting (source, park, ride, its own timestamp) seen again is nothing; the count is what was new. */
+  async recordWaitObservations(observations: readonly WaitObservation[]): Promise<number> {
+    for (const o of observations) validateWaitObservation(o)
+    if (observations.length === 0) return 0
+    let inserted = 0
+    await this.db.transaction(async (tx) => {
+      for (const o of observations) {
+        const rows = await tx
+          .insert(waitObservationsTable)
+          .values({ source: o.source, parkId: o.parkId, parkName: o.parkName, rideId: o.rideId, rideName: o.rideName, isOpen: o.isOpen, waitMinutes: o.waitMinutes, observedAt: new Date(o.observedAt) })
+          .onConflictDoNothing({ target: [waitObservationsTable.source, waitObservationsTable.parkId, waitObservationsTable.rideId, waitObservationsTable.observedAt] })
+          .returning({ id: waitObservationsTable.id })
+        inserted += rows.length
+      }
+    })
+    return inserted
+  }
+
+  /**
+   * The household's own wait history, a day at a time: for each park and
+   * date (the park's own clock), the mean posted wait across open rides and
+   * how many postings that was. This is the one place a figure is worked
+   * out in SQL: a mean over a table with a row per ride per few minutes is
+   * too big to read into memory, and the shape it returns is the same one
+   * the domain's summariseWaits produces from raw rows. Everything from
+   * here on -- the month-day averaging and the 1-10 ranking -- is the
+   * domain's (indexWaitHistory).
+   */
+  async waitHistory(args: { park?: string; window?: { from: string; to: string } } = {}, destination: TripDestination = 'wdw'): Promise<WaitDaySummary[]> {
+    const t = waitObservationsTable
+    // The park's clock is a constant of the destination, never typed, so it goes in as a literal: as a bind
+    // parameter Postgres would not see the SELECT and GROUP BY expressions as the same one.
+    const tz = sql.raw(`'${DESTINATIONS[destination].timezone.replace(/[^A-Za-z_/]/g, '')}'`)
+    const day = sql<string>`(${t.observedAt} at time zone ${tz})::date`
+    const conditions = [eq(t.isOpen, true), isNotNull(t.waitMinutes)]
+    if (args.park) conditions.push(eq(t.parkName, args.park))
+    if (args.window) {
+      const md = sql`to_char(${t.observedAt} at time zone ${tz}, 'MM-DD')`
+      // A window that wraps the new year ("12-20" to "01-05") is two stretches.
+      conditions.push(args.window.from <= args.window.to ? sql`${md} between ${args.window.from} and ${args.window.to}` : sql`(${md} >= ${args.window.from} or ${md} <= ${args.window.to})`)
+    }
+    const rows = await this.db
+      .select({ parkName: t.parkName, date: day, mean: sql<string>`avg(${t.waitMinutes})`, observations: count() })
+      .from(t)
+      .where(and(...conditions))
+      .groupBy(t.parkName, day)
+      .orderBy(t.parkName, day)
+    return rows.map((r) => ({ parkName: r.parkName, date: String(r.date).slice(0, 10), meanWaitMinutes: Number(r.mean), observations: Number(r.observations) }))
+  }
+
+  /** The names Queue-Times files the four parks under, laid over by a setting (park_wait_names). */
+  async waitParkNames(): Promise<WaitParkNames> {
+    const stored = await this.getSetting<Partial<Record<string, string>>>('park_wait_names', {})
+    return { ...DEFAULT_QUEUE_TIMES_PARKS, ...(stored && typeof stored === 'object' ? stored : {}) } as WaitParkNames
+  }
+
+  async waitParkGroup(): Promise<string> {
+    return this.getSetting<string>('park_wait_group', DEFAULT_QUEUE_TIMES_GROUP)
+  }
+
+  async outlookUrl(): Promise<string> {
+    return this.getSetting<string>('ropedrop_outlook_url', DEFAULT_ROPEDROP_OUTLOOK_URL)
+  }
+
+  /** The park ids the hours feed knows the four parks by, found once and kept (park_hours_ids). */
+  async themeParkIds(destination: TripDestination = 'wdw'): Promise<ResolvedPark[] | null> {
+    const stored = await this.getSetting<Record<string, ResolvedPark[]> | null>('park_hours_ids', null)
+    const list = stored && typeof stored === 'object' ? stored[destination] : null
+    return Array.isArray(list) && list.length > 0 ? list : null
+  }
+
+  private async keepThemeParkIds(destination: TripDestination, parks: ResolvedPark[]): Promise<void> {
+    const stored = await this.getSetting<Record<string, ResolvedPark[]>>('park_hours_ids', {})
+    await this.putSetting('park_hours_ids', { ...(stored && typeof stored === 'object' ? stored : {}), [destination]: parks })
+  }
+
+  /** The newest day something in the wait history was posted, for the age the calendar shows. */
+  private async waitHistoryAsOf(): Promise<CivilDate | null> {
+    const [row] = await this.db.select({ latest: sql<string | null>`max(${waitObservationsTable.observedAt})` }).from(waitObservationsTable)
+    return row?.latest ? (new Date(row.latest).toISOString().slice(0, 10) as CivilDate) : null
+  }
+
+  /**
+   * Everything "how busy" can draw on for a stretch of dates (D28): typed
+   * and fetched crowd levels, the outlook, and the household's own wait
+   * history indexed once. The choosing is busynessFor's.
+   */
+  async busynessSources(range: { from: CivilDate; to: CivilDate }, destination: TripDestination = 'wdw'): Promise<BusynessSources> {
+    const [crowdLevels, summaries, waitParkNames, waitHistoryAsOf] = await Promise.all([
+      this.crowdLevels(destination, range.from, range.to),
+      this.waitHistory({}, destination),
+      this.waitParkNames(),
+      this.waitHistoryAsOf(),
+    ])
+    return busynessSources(crowdLevels, {
+      outlook: crowdLevels.filter((l) => l.source === OUTLOOK_SOURCE),
+      waitHistory: indexWaitHistory(summaries),
+      waitParkNames,
+      waitHistoryAsOf,
+    })
+  }
+
+  /**
+   * "Refresh park data" and the nightly jobs (D28-D29): the forecast, the
+   * 6-week outlook, what is typical (when what is stored is a month old or
+   * missing), the four parks' hours for the months ahead, and the crowd
+   * outlook. Reference data, so it is stored as it arrives and the screen
+   * shows the day it was fetched. Each source's failure is a line, never an
+   * exception; a park the hours feed does not name is said out loud.
+   */
+  async refreshParkData(options: ParkFetchDeps & { destination?: TripDestination; parts?: ('weather' | 'hours' | 'outlook')[] } = {}): Promise<ParkDataRefresh> {
+    const destination = options.destination ?? 'wdw'
+    const fetchImpl = options.fetchImpl ?? fetch
+    const parts = options.parts ?? ['weather', 'hours', 'outlook']
+    const today = this.today()
+    const done: ParkDataRefresh = { weather: 0, hours: 0, outlook: 0, notes: [] }
+    const note = (line: string) => done.notes.push(line)
+
+    if (parts.includes('weather')) {
+      try {
+        const got = await fetchForecast(destination, fetchImpl)
+        if (got.reason) note(`Forecast: ${got.reason}`)
+        else done.weather += await this.recordParkWeather(got.rows, { destination, horizon: 'forecast', source: OPEN_METEO_SOURCE, fetchedOn: today })
+      } catch (error) {
+        note(`Forecast: ${(error as Error).message}`)
+      }
+      try {
+        const got = await fetchSubseasonal(destination, fetchImpl)
+        if (got.reason) note(`6-week outlook: ${got.reason}`)
+        else done.weather += await this.recordParkWeather(got.rows, { destination, horizon: 'subseasonal', source: OPEN_METEO_SOURCE, fetchedOn: today })
+      } catch (error) {
+        note(`6-week outlook: ${(error as Error).message}`)
+      }
+      if (await this.normalsNeedRefresh(destination, today)) {
+        try {
+          const got = await fetchArchive(destination, today, fetchImpl)
+          if (got.reason) note(`Typical for the date: ${got.reason}`)
+          else {
+            const normals = normalsForDates(normalsFromArchive(got.rows), today, addMonths(today, 18))
+            done.weather += await this.recordParkWeather(normals, { destination, horizon: 'normal', source: OPEN_METEO_SOURCE, fetchedOn: today })
+          }
+        } catch (error) {
+          note(`Typical for the date: ${(error as Error).message}`)
+        }
+      }
+    }
+
+    if (parts.includes('hours')) {
+      try {
+        let parks = await this.themeParkIds(destination)
+        if (!parks) {
+          const found = await fetchThemeParksChildren(destination, fetchImpl)
+          if (found.missing.length > 0) {
+            const line = `Park hours: the park service did not list ${found.missing.map((p) => PARK_LABELS[p]).join(', ')} under ${DESTINATIONS[destination].label}.`
+            console.error(`[park-data] ${line}`)
+            note(line)
+          }
+          if (found.rows.length > 0) {
+            parks = found.rows
+            await this.keepThemeParkIds(destination, parks)
+          } else note(`Park hours: ${found.reason ?? 'no parks found'}`)
+        }
+        for (const park of parks ?? []) {
+          try {
+            const got = await fetchThemeParksSchedule(park.id, fetchImpl)
+            if (got.reason) {
+              note(`${PARK_LABELS[park.park]} hours: ${got.reason}`)
+              continue
+            }
+            const horizon = addDays(today, HOURS_DAYS_AHEAD)
+            const rows = got.rows.filter((r) => compareDates(r.date, today) >= 0 && compareDates(r.date, horizon) <= 0)
+            done.hours += await this.recordParkHours(rows, { destination, park: park.park, source: THEMEPARKS_SOURCE, fetchedOn: today })
+          } catch (error) {
+            note(`${PARK_LABELS[park.park]} hours: ${(error as Error).message}`)
+          }
+        }
+      } catch (error) {
+        note(`Park hours: ${(error as Error).message}`)
+      }
+    }
+
+    if (parts.includes('outlook')) {
+      try {
+        const got = await fetchRopeDropOutlook(await this.outlookUrl(), fetchImpl)
+        if (got.reason) note(`Crowd outlook: ${got.reason}`)
+        else done.outlook += await this.recordCrowdLevels(got.rows, { destination, source: OUTLOOK_SOURCE, fetchedOn: today })
+      } catch (error) {
+        note(`Crowd outlook: ${(error as Error).message}`)
+      }
+    }
+    return done
+  }
+
+  private async normalsNeedRefresh(destination: TripDestination, today: CivilDate): Promise<boolean> {
+    const [row] = await this.db
+      .select({ latest: sql<string | null>`max(${parkWeatherTable.fetchedOn})` })
+      .from(parkWeatherTable)
+      .where(and(eq(parkWeatherTable.destination, destination), eq(parkWeatherTable.horizon, 'normal')))
+    if (!row?.latest) return true
+    return compareDates(today, String(row.latest).slice(0, 10)) >= NORMALS_REFRESH_AFTER_DAYS
+  }
+
+  /**
+   * One poll of the live waits (D28): the four parks by the names set,
+   * each ride's posted wait with the feed's own timestamp. A name the
+   * feed does not carry is said out loud in the log. Re-polling the same
+   * postings stores nothing new.
+   */
+  async pollWaits(options: ParkFetchDeps = {}): Promise<{ inserted: number; notes: string[] }> {
+    const fetchImpl = options.fetchImpl ?? fetch
+    const notes: string[] = []
+    const parks = await this.waitParks(fetchImpl, notes)
+    if (parks.length === 0) return { inserted: 0, notes }
+    let inserted = 0
+    for (const park of parks) {
+      try {
+        const got = await fetchQueueTimesWaits(park, fetchImpl)
+        if (got.reason) {
+          notes.push(`${park.name}: ${got.reason}`)
+          continue
+        }
+        inserted += await this.recordWaitObservations(got.rows)
+      } catch (error) {
+        notes.push(`${park.name}: ${(error as Error).message}`)
+      }
+    }
+    return { inserted, notes }
+  }
+
+  /**
+   * The parks the wait feed knows by the names set. A full match is kept in
+   * a setting (park_wait_ids) so a poll every five minutes does not ask for
+   * the list every time; a name the feed did not carry is looked for again
+   * on every poll, and said out loud each time.
+   */
+  private async waitParks(fetchImpl: typeof fetch, notes: string[]): Promise<ResolvedPark[]> {
+    const names = await this.waitParkNames()
+    const group = await this.waitParkGroup()
+    const key = JSON.stringify({ names, group })
+    const cached = await this.getSetting<{ key: string; parks: ResolvedPark[] } | null>('park_wait_ids', null)
+    if (cached && typeof cached === 'object' && cached.key === key && Array.isArray(cached.parks) && cached.parks.length > 0) return cached.parks
+    const found = await fetchQueueTimesParks(names, group, fetchImpl)
+    if (found.missing.length > 0) {
+      const line = `Live waits: the wait service did not list ${found.missing.join(', ')}.`
+      console.error(`[park-data] ${line}`)
+      notes.push(line)
+    }
+    if (found.rows.length === 0) {
+      notes.push(`Live waits: ${found.reason ?? 'no parks found'}`)
+      return []
+    }
+    if (found.missing.length === 0) await this.putSetting('park_wait_ids', { key, parks: found.rows })
+    return found.rows
+  }
+
+  /** A month of the calendar (D29): the facts for it gathered here, laid out by the derivation module. */
+  async calendarMonth(month: string, destination: TripDestination = 'wdw'): Promise<CalendarMonth> {
+    validateMonth(month)
+    const range = monthBounds(month)
+    const [weather, hours, daysOff, blackouts, busyness] = await Promise.all([
+      this.parkWeather(range, destination),
+      this.parkHours(range, destination),
+      this.schoolDaysOff(range),
+      this.blackoutDates(),
+      this.busynessSources(range, destination),
+    ])
+    return layOutMonth({
+      month,
+      weather,
+      hours,
+      busyness,
+      daysOff,
+      holidays: federalHolidaysBetween(range.from, range.to),
+      blackouts,
+      today: this.today(),
+    })
+  }
+
   private async recordSchoolCalendarChange(
     tx: Conn,
     payload: { added: DayOffInput[]; removed: { date: CivilDate; label: string }[]; source: string; source_url: string | null },
@@ -3923,6 +4316,33 @@ function toDvcListing(r: typeof dvcListingsTable.$inferSelect): DvcListing {
     sourceUrl: r.sourceUrl,
     source: r.source,
     seenOn: r.seenOn as CivilDate,
+  }
+}
+
+function toParkWeather(r: typeof parkWeatherTable.$inferSelect): ParkWeather {
+  return {
+    destination: r.destination as TripDestination,
+    date: r.date as CivilDate,
+    highF: r.highF,
+    lowF: r.lowF,
+    precipChance: r.precipChance,
+    horizon: r.horizon,
+    source: r.source,
+    fetchedOn: r.fetchedOn as CivilDate,
+  }
+}
+
+function toParkHours(r: typeof parkHoursTable.$inferSelect): ParkHours {
+  return {
+    destination: r.destination as TripDestination,
+    park: r.park,
+    date: r.date as CivilDate,
+    opens: r.opens,
+    closes: r.closes,
+    earlyEntry: r.earlyEntry,
+    extendedEvening: r.extendedEvening,
+    source: r.source,
+    fetchedOn: r.fetchedOn as CivilDate,
   }
 }
 

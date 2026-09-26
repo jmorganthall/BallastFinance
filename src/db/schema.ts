@@ -154,6 +154,7 @@ export const tripTaskKindEnum = pgEnum('trip_task_kind', ['book', 'pay', 'buy', 
  * without changing how a confirmation is recorded.
  */
 export const confirmationSourceEnum = pgEnum('confirmation_source', ['manual', 'feed'])
+export const weatherHorizonEnum = pgEnum('weather_horizon', ['forecast', 'subseasonal', 'normal'])
 
 export const households = pgTable('households', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -584,6 +585,83 @@ export const dvcListings = pgTable(
     uniqueIndex('dvc_listings_key_idx').on(t.source, t.resort, t.room, t.checkIn, t.nights),
     check('dvc_listings_nights_range', sql`${t.nights} between 1 and 60`),
     check('dvc_listings_price_not_negative', sql`${t.priceCents} is null or ${t.priceCents} >= 0`),
+  ],
+)
+
+/**
+ * A day's weather at a destination (D28): the high and low in whole degrees
+ * Fahrenheit, the chance of rain when the horizon says, and which horizon it
+ * is -- the forecast (to 16 days), the 6-week outlook, or what is typical
+ * for the date (ten years of archive averaged per month-day in the domain).
+ * Reference data shared across households, written only through the engine,
+ * each row with its source and the day it was fetched.
+ */
+export const parkWeather = pgTable(
+  'park_weather',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    destination: text('destination').notNull().default('wdw'),
+    date: date('date').notNull(),
+    highF: integer('high_f').notNull(),
+    lowF: integer('low_f').notNull(),
+    precipChance: integer('precip_chance'),
+    horizon: weatherHorizonEnum('horizon').notNull(),
+    source: text('source').notNull(),
+    fetchedOn: date('fetched_on').notNull(),
+  },
+  (t) => [
+    uniqueIndex('park_weather_key_idx').on(t.destination, t.date, t.horizon),
+    check('park_weather_precip_range', sql`${t.precipChance} is null or ${t.precipChance} between 0 and 100`),
+  ],
+)
+
+/**
+ * A park's hours on a date (D28), on the park's own clock as "HH:MM": when
+ * it opens and closes, when early entry starts and extended evening ends
+ * when the day has them. Reference data like the weather.
+ */
+export const parkHours = pgTable(
+  'park_hours',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    destination: text('destination').notNull().default('wdw'),
+    park: tripParkEnum('park').notNull(),
+    date: date('date').notNull(),
+    opens: text('opens').notNull(),
+    closes: text('closes').notNull(),
+    earlyEntry: text('early_entry'),
+    extendedEvening: text('extended_evening'),
+    source: text('source').notNull(),
+    fetchedOn: date('fetched_on').notNull(),
+  },
+  (t) => [uniqueIndex('park_hours_key_idx').on(t.destination, t.park, t.date)],
+)
+
+/**
+ * A posted wait, as a public wait-times feed had it (D28): which park and
+ * ride, whether it was open, the minutes posted, and the feed's own
+ * timestamp. Polled every few minutes; the same posting seen twice is one
+ * row. The household's own history of these is what the busyness scale
+ * ranks, computed on read and never stored.
+ */
+export const waitObservations = pgTable(
+  'wait_observations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    source: text('source').notNull(),
+    parkId: text('park_id').notNull(),
+    parkName: text('park_name').notNull(),
+    rideId: text('ride_id').notNull(),
+    rideName: text('ride_name').notNull(),
+    isOpen: boolean('is_open').notNull(),
+    waitMinutes: integer('wait_minutes'),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+    ingestedAt: timestamp('ingested_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('wait_observations_key_idx').on(t.source, t.parkId, t.rideId, t.observedAt),
+    index('wait_observations_park_time_idx').on(t.parkName, t.observedAt),
+    check('wait_observations_minutes_range', sql`${t.waitMinutes} is null or ${t.waitMinutes} between 0 and 1440`),
   ],
 )
 

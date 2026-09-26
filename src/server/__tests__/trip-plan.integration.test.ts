@@ -216,8 +216,8 @@ describeDb('planning a trip', () => {
     // The 14th is a rest day until it is planned, so it shows the resort as a whole; then Magic Kingdom's own level.
     let plan = (await engine.tripPlanView(tripId))!
     let monday = plan.dayViews.find((d) => d.date === '2027-06-14')!
-    expect(monday.level).toBeNull()
-    expect(monday.resortLevel).toBe(4) // (6 + 4 + 3) / 3 = 4.33
+    expect(monday.level).toMatchObject({ level: 4.3, source: 'typed', detail: '3 of 4 parks' }) // (6 + 4 + 3) / 3 = 4.33
+    expect(monday.resortLevel).toBe(4)
     await engine.updateTripDay(tripId, monday.day!.id, { park: 'magic_kingdom' })
     plan = (await engine.tripPlanView(tripId))!
     monday = plan.dayViews.find((d) => d.date === '2027-06-14')!
