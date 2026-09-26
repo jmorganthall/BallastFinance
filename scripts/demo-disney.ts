@@ -15,10 +15,10 @@ const annual = { id: 'a1', householdId: 'h', name: 'Annual Expenses', institutio
 const longTerm = { id: 'a2', householdId: 'h', name: 'Long Term Savings', institutionLabel: '', scope: 'household' as const, ownerUserId: null, active: true }
 
 const items: LineItem[] = [
-  { id: 'i1', packageId: 'p1', label: 'Park tickets', unitAmountCents: 60000, quantity: 3, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: null },
-  { id: 'i2', packageId: 'p1', label: 'Airfare',      unitAmountCents: 45000, quantity: 3, dueDate: '2026-11-21', reserveAccountId: 'a1', state: 'accruing', recurrence: null },
-  { id: 'i3', packageId: 'p1', label: 'Lodging',      unitAmountCents: 120000, quantity: 1, dueDate: '2027-01-16', reserveAccountId: 'a2', state: 'accruing', recurrence: null },
-  { id: 'i4', packageId: 'p1', label: 'Park food',    unitAmountCents: 9000,  quantity: 5, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: null },
+  { id: 'i1', packageId: 'p1', label: 'Park tickets', unitAmountCents: 60000, quantity: 3, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: null, timelineStart: 'commit' },
+  { id: 'i2', packageId: 'p1', label: 'Airfare',      unitAmountCents: 45000, quantity: 3, dueDate: '2026-11-21', reserveAccountId: 'a1', state: 'accruing', recurrence: null, timelineStart: 'commit' },
+  { id: 'i3', packageId: 'p1', label: 'Lodging',      unitAmountCents: 120000, quantity: 1, dueDate: '2027-01-16', reserveAccountId: 'a2', state: 'accruing', recurrence: null, timelineStart: 'commit' },
+  { id: 'i4', packageId: 'p1', label: 'Park food',    unitAmountCents: 9000,  quantity: 5, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: null, timelineStart: 'commit' },
 ]
 
 const input: DerivationInput = {
@@ -69,5 +69,26 @@ for (const view of accountViews(edited)) {
   console.log(`\n  ${view.account.name}: ${formatCents(w.totalPerWeekCents)}/week`)
   console.log(`    ${formatCents(w.ongoingPerWeekCents)} ongoing` +
     w.catchUp.map((g) => ` + ${formatCents(g.perWeekCents)} catch-up until ${g.endDate}`).join(''))
+}
+
+// A bill that comes round again (PRD D30): the same part priced both ways.
+// Progressive, $844 every 6 months, next due 9 Jan 2027; the last one was 9 Jul.
+console.log(`\nA repeating part, committed ${TODAY}: Progressive $844 every 6 months, next 2027-01-09\n${'='.repeat(58)}`)
+for (const timelineStart of ['commit', 'last_occurrence'] as const) {
+  const [view] = packageViews({
+    today: TODAY,
+    accounts: [annual],
+    packages: [{ id: 'p2', householdId: 'h', name: 'Car', state: 'active', module: 'manual', detail: null, createdAt: TODAY, committedAt: TODAY }],
+    lineItems: [
+      { id: 'i5', packageId: 'p2', label: 'Progressive', unitAmountCents: 84400, quantity: 1, dueDate: '2027-01-09', reserveAccountId: 'a1', state: 'accruing', recurrence: { every: 6, unit: 'month' }, timelineStart },
+    ],
+  })
+  const item = view!.items[0]!
+  const base = item.components[0]!
+  console.log(
+    `  ${timelineStart === 'commit' ? 'From the commit (before D30)  ' : 'From last time it came round  '}` +
+      `since ${base.startDate}  ${formatCents(item.weekly.totalPerWeekCents).padStart(8)}/wk` +
+      `  should hold ${formatCents(item.shouldHaveSavedCents).padStart(8)}  pace ${formatCents(item.paceCents).padStart(8)}  to go ${formatCents(item.remainingCents).padStart(8)}`,
+  )
 }
 console.log()

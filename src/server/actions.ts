@@ -14,6 +14,7 @@ import {
   describeRecurrence,
   recurrenceOf,
   type Recurrence,
+  type TimelineStart,
 } from '@/domain'
 
 export interface FormState {
@@ -59,19 +60,34 @@ export async function createPackageAction(
   redirect(`/packages/${result.packageId}`)
 }
 
+/**
+ * Where each repeating part's timeline starts, as the commit or edit form
+ * posted it (PRD D30). A checkbox that is off posts nothing, so the form also
+ * names every part it showed the box for; a part it did not show keeps its
+ * setting.
+ */
+function readTimelineStarts(formData: FormData): Record<string, TimelineStart> {
+  const shown = formData.getAll('timeline_part').map(String)
+  const ticked = new Set(formData.getAll('timeline_from_last').map(String))
+  return Object.fromEntries(shown.map((id) => [id, ticked.has(id) ? 'last_occurrence' : 'commit']))
+}
+
 /** Commit, with the one optional number: how much is already set aside (PRD §5). */
 export async function commitPackageAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const { parseAmountOrNull } = await import('@/domain')
   const packageId = String(formData.get('package_id'))
+  const timelineStartByLineItem = readTimelineStarts(formData)
 
   // Taking the offer recomputes it here rather than believing the form: the
   // figure decides a weekly number, so it comes from the same place the screen
-  // got it, not from whatever was posted back.
+  // got it, not from whatever was posted back. Only a part starting today is
+  // offered anything; one starting at its last occurrence already counts it.
   if (formData.get('use_suggested')) {
-    const suggested = await engine.suggestedOpenings(packageId)
+    const suggested = await engine.suggestedOpenings(packageId, { timelineStartByLineItem })
     await engine.commitPackage(packageId, {
       openingByLineItem: Object.fromEntries(suggested.map((s) => [s.lineItemId, s.cents])),
+      timelineStartByLineItem,
     })
     revalidatePath('/')
     revalidatePath('/packages')
@@ -86,7 +102,7 @@ export async function commitPackageAction(formData: FormData): Promise<void> {
       `/packages/${packageId}?error=${encodeURIComponent('Enter what is already set aside as an amount, like 250, or leave it blank.')}`,
     )
   }
-  await engine.commitPackage(packageId, { openingCents: openingCents! })
+  await engine.commitPackage(packageId, { openingCents: openingCents!, timelineStartByLineItem })
   revalidatePath('/')
   revalidatePath('/packages')
   revalidatePath(`/packages/${packageId}`)
@@ -122,6 +138,12 @@ export async function updateLineItemAction(formData: FormData): Promise<void> {
   const reserveAccountId = String(formData.get('reserve_account') ?? '')
   if (!reserveAccountId) fail('Pick the account it is saved in.')
 
+  // The box is only on the form for a part that already repeats; a part
+  // that starts repeating with this save gets the default for one.
+  const timelineStart = formData.get('timeline_shown')
+    ? readTimelineStarts(formData)[lineItemId]
+    : undefined
+
   try {
     await engine.updateLineItem(lineItemId, {
       label,
@@ -130,6 +152,7 @@ export async function updateLineItemAction(formData: FormData): Promise<void> {
       dueDate,
       reserveAccountId,
       recurrence: readRecurrence(formData),
+      ...(timelineStart ? { timelineStart } : {}),
     })
   } catch (error) {
     if (error instanceof EngineError) fail(error.message)

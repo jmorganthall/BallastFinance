@@ -44,6 +44,7 @@ function li(over: Partial<LineItem> & Pick<LineItem, 'id' | 'label' | 'unitAmoun
     reserveAccountId: annual.id,
     state: 'accruing',
     recurrence: null,
+    timelineStart: 'commit',
     ...over,
   }
 }
@@ -151,6 +152,53 @@ describe('reshuffle', () => {
       expect(item.weekly.totalPerWeekCents).toBe(line.perWeekAfterCents)
     }
     // And doing it again finds nothing to change.
+    expect(reshuffleAccount(recorded, annual.id)!.openings).toEqual([])
+  })
+
+  it('finds nothing to move on a part whose timeline starts at its last occurrence, and settles after one pass once it is edited (D30)', () => {
+    // Already on its pace: the D30 part counts exactly what the rule would give it.
+    const onPace = li({ ...progressive, timelineStart: 'last_occurrence' })
+    const untouched = reshuffleAccount(input([], [onPace]), annual.id)!
+    expect(untouched.lines[0]!.holdsNowCents).toBe(PROGRESSIVE_PACE)
+    expect(untouched.openings).toEqual([])
+
+    // Raised today to $1,000, it is below the pace of its new total (the
+    // catch-up has delivered nothing yet). With a one-off in the account
+    // holding $400, a reshuffle counts the part up to that pace first, and
+    // the count is where its timeline now begins: what it holds afterwards
+    // is exactly what was counted, and a second pass has nothing to offer.
+    const raised = li({ ...progressive, unitAmountCents: 100000, timelineStart: 'last_occurrence' })
+    const before: DerivationInput = {
+      ...input([{ lineItemId: 'soon', startDate: TODAY, openingCents: 40000, recordedOrder: 0, origin: 'commit' }], [soon, raised]),
+      changes: [
+        {
+          lineItemId: 'progressive',
+          occurredAt: TODAY,
+          before: { unitAmountCents: 84400, quantity: 1, dueDate: '2027-01-09', reserveAccountId: annual.id },
+          after: { unitAmountCents: 100000, quantity: 1, dueDate: '2027-01-09', reserveAccountId: annual.id },
+        },
+      ],
+    }
+    const result = reshuffleAccount(before, annual.id)!
+    const target = evenPaceCents({ totalCents: 100000, fromDate: '2026-07-09', dueDate: '2027-01-09', today: TODAY })
+    const line = result.lines.find((l) => l.lineItemId === 'progressive')!
+    expect(line.holdsNowCents).toBe(PROGRESSIVE_PACE)
+    expect(line.holdsNowCents).toBeLessThan(target)
+    expect(result.potCents).toBe(40000 + PROGRESSIVE_PACE)
+    expect(result.openings).toEqual([
+      { lineItemId: 'soon', openingCents: 40000 + PROGRESSIVE_PACE - target },
+      { lineItemId: 'progressive', openingCents: target },
+    ])
+    expect(line.holdsAfterCents).toBe(target)
+    const recorded: DerivationInput = {
+      ...before,
+      cycleStarts: [
+        ...(before.cycleStarts ?? []),
+        ...result.openings.map((o, i) => ({ ...o, startDate: TODAY, recordedOrder: 1 + i, origin: 'counted' as const })),
+      ],
+    }
+    const after = accountViews(recorded).find((v) => v.account.id === annual.id)!
+    expect(after.items.find((v) => v.lineItem.id === 'progressive')!.shouldHaveSavedCents).toBe(target)
     expect(reshuffleAccount(recorded, annual.id)!.openings).toEqual([])
   })
 

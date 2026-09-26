@@ -57,6 +57,22 @@ export interface Package {
   committedAt: CivilDate | null
 }
 
+/**
+ * Where a part's money timeline begins (PRD D30). A part that comes round
+ * again did not begin the day it was typed in: by default its base component
+ * runs from the last time it came round, so "should hold today" is already
+ * the elapsed share of the cycle and the weekly figure is the steady rate.
+ * 'commit' is the older reading -- the plan starts the day it is committed
+ * and the elapsed share is offered as an opening instead (D8). A one-off is
+ * always 'commit'; it has no last time.
+ */
+export type TimelineStart = 'last_occurrence' | 'commit'
+
+/** The default for a part: from its last occurrence when it has one. */
+export function defaultTimelineStart(recurrence: Recurrence | null | undefined): TimelineStart {
+  return recurrence ? 'last_occurrence' : 'commit'
+}
+
 export interface LineItem {
   id: Id
   packageId: Id
@@ -68,6 +84,15 @@ export interface LineItem {
   state: LineItemState
   /** null is a one-off. An interval rolls forward when confirmed spent. */
   recurrence: Recurrence | null
+  /**
+   * A fact on the part, like its recurrence, and like the recurrence NOT in
+   * `LineItemSnapshot`: the accrual math reads the part's current setting over
+   * the whole cycle. Toggling it is a statement about where the timeline as a
+   * whole begins, not a dated delta, so it is not replayed as a catch-up; the
+   * engine records the toggle beside the snapshots on the `line_item_changed`
+   * event so the log still explains why the weekly number moved.
+   */
+  timelineStart: TimelineStart
 }
 
 /** Total obligation of a line item. The one place unit x quantity is computed. */

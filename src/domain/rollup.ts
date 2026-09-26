@@ -147,7 +147,8 @@ function effectiveCommitDate(pkg: Package, today: CivilDate): CivilDate {
  * the last time it came round -- the whole point of "should have been saving
  * since" -- or from the day it was actually confirmed spent and started over,
  * when that came later, so a spend confirmed a few days late does not read
- * as a cycle behind. A one-off is measured from the day it existed in a live
+ * as a cycle behind. Under D30 a repeating part's money timeline runs from
+ * the same place by default, so its should-hold and its pace are one line. A one-off is measured from the day it existed in a live
  * plan: the commit, or the day it was added to one. A check-in count only
  * restates what was already there and never moves the clock.
  */
@@ -191,6 +192,7 @@ function viewLineItem(args: {
     commitDate: effectiveCommitDate(pkg, today),
     changes,
     cycleStartDate: cycle?.startDate,
+    cycleOrigin: cycle?.origin,
     openingCents: cycle?.openingCents,
   })
   const totalCents = lineItemTotalCents(lineItem)

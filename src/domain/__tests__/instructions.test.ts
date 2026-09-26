@@ -365,6 +365,7 @@ describe('close-out', () => {
       reserveAccountId: 'acct-annual',
       state: 'accruing',
       recurrence: null,
+      timelineStart: 'commit',
       ...over,
     }
   }

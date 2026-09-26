@@ -131,12 +131,19 @@ describeDb('editing plans and debts', () => {
       let after = (await engine.listLineItems()).find((i) => i.id === tyres.id)!
       expect(after.label).toBe('Winter tyres')
       expect(after.recurrence).toEqual({ every: 1, unit: 'year' })
-      expect((await engine.listLineItemChanges()).filter((c) => c.lineItemId === tyres.id)).toHaveLength(0)
+      // Starting to repeat moved its timeline to its last occurrence (D30):
+      // recorded, with equal money snapshots, so it leaves no component.
+      expect(after.timelineStart).toBe('last_occurrence')
+      const toggled = (await engine.listLineItemChanges()).filter((c) => c.lineItemId === tyres.id)
+      expect(toggled).toHaveLength(1)
+      expect(toggled[0]!.before).toEqual(toggled[0]!.after)
+      const view = (await engine.packageViews()).find((v) => v.package.id === packageId)!
+      expect(view.items.find((i) => i.lineItem.id === tyres.id)!.components.map((c) => c.kind)).toEqual(['base'])
 
       await engine.updateLineItem(tyres.id, { unitAmountCents: 40000 })
       after = (await engine.listLineItems()).find((i) => i.id === tyres.id)!
       expect(after.unitAmountCents).toBe(40000)
-      expect((await engine.listLineItemChanges()).filter((c) => c.lineItemId === tyres.id)).toHaveLength(1)
+      expect((await engine.listLineItemChanges()).filter((c) => c.lineItemId === tyres.id)).toHaveLength(2)
     })
 
     it('takes a part out of a plan without deleting its history', async () => {
@@ -336,7 +343,7 @@ describeDb('editing plans and debts', () => {
         contract_version: INTAKE_CONTRACT_VERSION,
         package: { name: 'Offered opening' },
         line_items: [
-          { label: 'Boat insurance', unit_amount: '530', due_date: '2027-01-16', reserve_account: accountId, recurrence: { every: 1, unit: 'year' } },
+          { label: 'Boat insurance', unit_amount: '530', due_date: '2027-01-16', reserve_account: accountId, recurrence: { every: 1, unit: 'year' }, timeline_start: 'commit' },
           { label: 'Boat one-off', unit_amount: '200', due_date: '2027-01-16', reserve_account: accountId },
         ],
       })
@@ -362,6 +369,139 @@ describeDb('editing plans and debts', () => {
       const commits = await eventsOfKind('package_committed')
       const mine = commits.find((e) => (e.payload as { package_id: string }).package_id === created.packageId)!
       expect((mine.payload as { opening_cents: number }).opening_cents).toBe(36000)
+    })
+  })
+
+  describe('a repeating part starts its timeline at its last occurrence (PRD D30)', () => {
+    let packageId: string
+    let insuranceId: string
+
+    it('defaults a repeating part to its last occurrence and a one-off to the commit, and offers no opening for the former', async () => {
+      pin('2026-09-26')
+      const created = await engine.createPackageFromIntake({
+        contract_version: INTAKE_CONTRACT_VERSION,
+        package: { name: 'Home bills' },
+        line_items: [
+          { label: 'Home insurance', unit_amount: '1200', due_date: '2026-11-15', reserve_account: accountId, recurrence: { every: 1, unit: 'year' } },
+          { label: 'Gutter clean', unit_amount: '300', due_date: '2026-11-15', reserve_account: accountId },
+        ],
+      })
+      if (!created.ok) throw new Error(JSON.stringify(created.problems))
+      packageId = created.packageId
+      const items = (await engine.listLineItems()).filter((i) => i.packageId === packageId)
+      const insurance = items.find((i) => i.label === 'Home insurance')!
+      insuranceId = insurance.id
+      expect(insurance.timelineStart).toBe('last_occurrence')
+      expect(items.find((i) => i.label === 'Gutter clean')!.timelineStart).toBe('commit')
+
+      expect(await engine.suggestedOpenings(packageId)).toEqual([])
+      // Asked as if it started today, the D8 figure is there for the form to show.
+      const asToday = await engine.suggestedOpenings(packageId, {
+        timelineStartByLineItem: { [insuranceId]: 'commit' },
+      })
+      expect(asToday.map((s) => [s.label, s.lastOccurrence, s.cents])).toEqual([['Home insurance', '2025-11-15', 103847]])
+    })
+
+    it('commits with the base running from the last occurrence, on its pace, at the steady rate; the typed opening goes to the one-off', async () => {
+      await engine.commitPackage(packageId, { openingCents: 10000 })
+      const view = (await engine.packageViews()).find((v) => v.package.id === packageId)!
+      const byLabel = Object.fromEntries(view.items.map((i) => [i.lineItem.label, i]))
+      const insurance = byLabel['Home insurance']!
+      expect(insurance.components.map((c) => [c.kind, c.startDate, c.endDate])).toEqual([['base', '2025-11-15', '2026-11-15']])
+      expect(insurance.shouldHaveSavedCents).toBe(103847)
+      expect(insurance.paceCents).toBe(103847)
+      expect(insurance.remainingCents).toBe(16153)
+      expect(insurance.weekly.totalPerWeekCents).toBe(2308)
+      // The $100 typed at commit is the one-off's: the insurance already counts its share.
+      expect(byLabel['Gutter clean']!.shouldHaveSavedCents).toBe(10000)
+      expect(byLabel['Gutter clean']!.components[0]!.kind).toBe('opening')
+    })
+
+    it('can be unticked later, which is recorded, and the part then runs from the commit as before', async () => {
+      const changesBefore = (await engine.listLineItemChanges()).filter((c) => c.lineItemId === insuranceId).length
+      await engine.updateLineItem(insuranceId, { timelineStart: 'commit' })
+      const item = (await engine.packageViews())
+        .find((v) => v.package.id === packageId)!
+        .items.find((i) => i.lineItem.id === insuranceId)!
+      expect(item.lineItem.timelineStart).toBe('commit')
+      expect(item.components.map((c) => [c.kind, c.startDate])).toEqual([['base', '2026-09-26']])
+      expect(item.shouldHaveSavedCents).toBe(0)
+      expect(item.weekly.totalPerWeekCents).toBe(17143) // $1,200 over the 7 Saturdays left
+
+      // The toggle is in the log with equal money snapshots (no catch-up) and the switch beside them.
+      const changes = (await engine.listLineItemChanges()).filter((c) => c.lineItemId === insuranceId)
+      expect(changes).toHaveLength(changesBefore + 1)
+      expect(changes.at(-1)!.before).toEqual(changes.at(-1)!.after)
+      const [event] = (await eventsOfKind('line_item_changed')).filter(
+        (e) => (e.payload as { line_item_id: string }).line_item_id === insuranceId,
+      )
+      expect(event!.payload).toMatchObject({ timeline_start: { before: 'last_occurrence', after: 'commit' } })
+
+      // And back again.
+      await engine.updateLineItem(insuranceId, { timelineStart: 'last_occurrence' })
+      const back = (await engine.packageViews())
+        .find((v) => v.package.id === packageId)!
+        .items.find((i) => i.lineItem.id === insuranceId)!
+      expect(back.components[0]!.startDate).toBe('2025-11-15')
+      expect(back.shouldHaveSavedCents).toBe(103847)
+    })
+
+    it('honours the commit form: a part unticked at commit starts today and takes the offered opening', async () => {
+      const created = await engine.createPackageFromIntake({
+        contract_version: INTAKE_CONTRACT_VERSION,
+        package: { name: 'Unticked at commit' },
+        line_items: [
+          { label: 'Car insurance', unit_amount: '600', due_date: '2026-11-15', reserve_account: accountId, recurrence: { every: 6, unit: 'month' } },
+        ],
+      })
+      if (!created.ok) throw new Error(JSON.stringify(created.problems))
+      const [car] = (await engine.listLineItems()).filter((i) => i.packageId === created.packageId)
+      const starts = { [car!.id]: 'commit' as const }
+      const offered = await engine.suggestedOpenings(created.packageId, { timelineStartByLineItem: starts })
+      expect(offered).toHaveLength(1)
+      await engine.commitPackage(created.packageId, {
+        openingByLineItem: { [car!.id]: offered[0]!.cents },
+        timelineStartByLineItem: starts,
+      })
+      const item = (await engine.packageViews())
+        .find((v) => v.package.id === created.packageId)!
+        .items[0]!
+      expect(item.lineItem.timelineStart).toBe('commit')
+      expect(item.components.map((c) => [c.kind, c.startDate])).toEqual([
+        ['opening', '2026-09-26'],
+        ['base', '2026-09-26'],
+      ])
+      expect(item.shouldHaveSavedCents).toBe(offered[0]!.cents)
+    })
+
+    it('refuses a one-off that starts anywhere but the commit, at the database', async () => {
+      const gutter = (await engine.listLineItems()).find((i) => i.packageId === packageId && i.label === 'Gutter clean')!
+      // The engine coerces; the CHECK is the backstop for anything that bypasses it.
+      await engine.updateLineItem(gutter.id, { timelineStart: 'last_occurrence' })
+      expect((await engine.listLineItems()).find((i) => i.id === gutter.id)!.timelineStart).toBe('commit')
+      const failure = await db
+        .update(schema.lineItems)
+        .set({ timelineStart: 'last_occurrence' })
+        .where(eq(schema.lineItems.id, gutter.id))
+        .then(
+          () => null,
+          (error: unknown) => error as { message: string; cause?: { constraint_name?: string } },
+        )
+      expect(failure).not.toBeNull()
+      expect(failure!.cause?.constraint_name ?? failure!.message).toMatch(/line_items_one_off_starts_at_commit/)
+    })
+
+    it('starts the next cycle at the spend date once confirmed spent, and rolls forward', async () => {
+      pin('2026-11-20')
+      await engine.confirmSpend({ lineItemId: insuranceId, actualAmountCents: 120000 })
+      const item = (await engine.packageViews())
+        .find((v) => v.package.id === packageId)!
+        .items.find((i) => i.lineItem.id === insuranceId)!
+      expect(item.lineItem.dueDate).toBe('2027-11-15')
+      expect(item.components.map((c) => [c.kind, c.startDate, c.endDate])).toEqual([['base', '2026-11-20', '2027-11-15']])
+      expect(item.shouldHaveSavedCents).toBe(0)
+      expect(item.paceCents).toBe(0)
+      pin('2026-09-19')
     })
   })
 

@@ -80,6 +80,8 @@ import {
   type LineItemCycle,
   type LineItemSnapshot,
   type Recurrence,
+  type TimelineStart,
+  defaultTimelineStart,
   type Package,
   type PackageView,
   type AccountScope,
@@ -522,6 +524,7 @@ export class Engine {
             reserveAccountId: item.reserveAccountId,
             recurEvery: item.recurrence?.every ?? null,
             recurUnit: item.recurrence?.unit ?? null,
+            timelineStart: item.timelineStart,
             state: 'planned' as const,
           })),
         )
@@ -542,6 +545,14 @@ export class Engine {
    * event, which is where the accrual math reads it from. It reduces what the
    * base components have to cover, so the weekly figure is right from the
    * first week rather than over-collecting for money the household already has.
+   *
+   * A part whose timeline starts at the last time it came round (D30) already
+   * counts the elapsed share of its cycle, so a single declared opening is
+   * shared only across the parts that start at the commit; the money is real
+   * either way, and what those parts do not count shows as extra at the next
+   * check-in. When every part starts at its last occurrence the opening is
+   * shared across all of them, and each then runs from the commit (see
+   * `componentsForLineItem`): a stated balance is where a timeline begins.
    */
   async commitPackage(
     packageId: Id,
@@ -554,6 +565,11 @@ export class Engine {
        * would put that money in the wrong places.
        */
       openingByLineItem?: Readonly<Record<Id, Cents>>
+      /**
+       * Where each part's timeline starts, as the commit form had it. A part
+       * not named keeps what it has; a one-off is always 'commit'.
+       */
+      timelineStartByLineItem?: Readonly<Record<Id, TimelineStart>>
     } = {},
   ): Promise<void> {
     const today = this.today()
@@ -572,10 +588,26 @@ export class Engine {
       if (pkg.state === 'active') throw new EngineError(`"${pkg.name}" is already committed`)
       if (pkg.state === 'retired') throw new EngineError(`"${pkg.name}" is retired`)
 
-      const items = await tx
+      const planned = await tx
         .select()
         .from(lineItemsTable)
         .where(and(eq(lineItemsTable.packageId, packageId), eq(lineItemsTable.state, 'planned')))
+
+      const starts = options.timelineStartByLineItem ?? {}
+      const items = planned.map((item) => {
+        const wanted = starts[item.id]
+        const timelineStart: TimelineStart =
+          item.recurEvery === null ? 'commit' : (wanted ?? item.timelineStart)
+        return { ...item, timelineStart }
+      })
+      for (const [index, item] of items.entries()) {
+        if (item.timelineStart !== planned[index]!.timelineStart) {
+          await tx
+            .update(lineItemsTable)
+            .set({ timelineStart: item.timelineStart })
+            .where(eq(lineItemsTable.id, item.id))
+        }
+      }
 
       await tx
         .update(packagesTable)
@@ -587,16 +619,25 @@ export class Engine {
         .set({ state: 'accruing' })
         .where(and(eq(lineItemsTable.packageId, packageId), eq(lineItemsTable.state, 'planned')))
 
+      // A single figure is shared across the parts that start at the commit;
+      // across all of them only when there is no such part.
+      const fromCommit = items.filter((i) => i.timelineStart === 'commit')
+      const sharedAmong = fromCommit.length > 0 ? fromCommit : items
+      const shared =
+        !perItem && openingCents > 0 && sharedAmong.length > 0
+          ? apportion(
+              openingCents,
+              sharedAmong.map((i) => i.unitAmountCents * i.quantity),
+            )
+          : null
       const shares = perItem
         ? items.map((item) =>
             Math.max(0, Math.min(perItem[item.id] ?? 0, item.unitAmountCents * item.quantity)),
           )
-        : openingCents > 0 && items.length > 0
-          ? apportion(
-              openingCents,
-              items.map((i) => i.unitAmountCents * i.quantity),
-            )
-          : items.map(() => 0)
+        : items.map((item) => {
+            const at = sharedAmong.indexOf(item)
+            return shared && at >= 0 ? (shared[at] ?? 0) : 0
+          })
 
       await tx.insert(events).values({
         householdId: this.householdId,
@@ -626,6 +667,14 @@ export class Engine {
    */
   async suggestedOpenings(
     packageId: Id,
+    options: {
+      /**
+       * Where each part's timeline would start, as the commit form has it
+       * right now. A part starting at its last occurrence gets no offer
+       * (D30); one starting at the commit gets the D8 figure.
+       */
+      timelineStartByLineItem?: Readonly<Record<Id, TimelineStart>>
+    } = {},
   ): Promise<{ lineItemId: Id; label: string; lastOccurrence: CivilDate; cents: Cents }[]> {
     const today = this.today()
     const rows = await this.db
@@ -642,6 +691,7 @@ export class Engine {
         dueDate: item.dueDate,
         recurrence: item.recurrence,
         today,
+        timelineStart: options.timelineStartByLineItem?.[item.id] ?? item.timelineStart,
       })
       return suggestion
         ? [
@@ -773,7 +823,10 @@ export class Engine {
   async updateLineItem(
     lineItemId: Id,
     patch: Partial<
-      Pick<LineItem, 'label' | 'unitAmountCents' | 'quantity' | 'dueDate' | 'reserveAccountId' | 'recurrence'>
+      Pick<
+        LineItem,
+        'label' | 'unitAmountCents' | 'quantity' | 'dueDate' | 'reserveAccountId' | 'recurrence' | 'timelineStart'
+      >
     >,
   ): Promise<void> {
     const today = this.today()
@@ -806,18 +859,26 @@ export class Engine {
         reserveAccountId: patch.reserveAccountId ?? before.reserveAccountId,
       }
 
-      const { recurrence, ...columns } = patch
+      // Where the timeline starts (D30) follows the recurrence: a one-off is
+      // always 'commit'; a part that starts repeating with nothing said gets
+      // the default for a repeating part; otherwise what was asked, or what
+      // it had.
+      const { recurrence, timelineStart: askedStart, ...columns } = patch
+      const recurrenceAfter =
+        'recurrence' in patch ? (recurrence ?? null) : recurrenceOf(row.recurEvery, row.recurUnit)
+      const timelineStartAfter: TimelineStart = !recurrenceAfter
+        ? 'commit'
+        : (askedStart ??
+          (row.recurEvery === null ? defaultTimelineStart(recurrenceAfter) : row.timelineStart))
       await tx
         .update(lineItemsTable)
-        .set(
-          'recurrence' in patch
-            ? {
-                ...columns,
-                recurEvery: recurrence?.every ?? null,
-                recurUnit: recurrence?.unit ?? null,
-              }
-            : columns,
-        )
+        .set({
+          ...columns,
+          ...('recurrence' in patch
+            ? { recurEvery: recurrence?.every ?? null, recurUnit: recurrence?.unit ?? null }
+            : {}),
+          timelineStart: timelineStartAfter,
+        })
         .where(eq(lineItemsTable.id, lineItemId))
 
       const movesMoney =
@@ -825,15 +886,27 @@ export class Engine {
         before.quantity !== after.quantity ||
         before.dueDate !== after.dueDate ||
         before.reserveAccountId !== after.reserveAccountId
+      const movesTimeline = timelineStartAfter !== row.timelineStart
 
       // A label-only edit is not a plan change and must not create a component.
-      if (movesMoney) {
+      // A timeline toggle moves the weekly number without moving money: the
+      // snapshots stay equal (a zero delta, so no component -- the math reads
+      // the part's current setting over the whole cycle), and the toggle is
+      // written beside them so the log still explains the change.
+      if (movesMoney || movesTimeline) {
         await tx.insert(events).values({
           householdId: this.householdId,
           kind: 'line_item_changed',
           occurredAt: today,
           actorUserId: this.actorUserId,
-          payload: { line_item_id: lineItemId, before, after },
+          payload: {
+            line_item_id: lineItemId,
+            before,
+            after,
+            ...(movesTimeline
+              ? { timeline_start: { before: row.timelineStart, after: timelineStartAfter } }
+              : {}),
+          },
         })
       }
     })
@@ -853,6 +926,8 @@ export class Engine {
       dueDate: CivilDate
       reserveAccountId: Id
       recurrence?: Recurrence | null
+      /** Where its timeline starts (D30). Absent: the default for its recurrence. */
+      timelineStart?: TimelineStart
     },
   ): Promise<Id> {
     const today = this.today()
@@ -888,6 +963,7 @@ export class Engine {
           reserveAccountId: item.reserveAccountId,
           recurEvery: recurrence?.every ?? null,
           recurUnit: recurrence?.unit ?? null,
+          timelineStart: recurrence ? (item.timelineStart ?? defaultTimelineStart(recurrence)) : 'commit',
           state: pkg.state === 'active' ? 'accruing' : 'planned',
         })
         .returning({ id: lineItemsTable.id })
@@ -4489,5 +4565,6 @@ function toLineItem(r: typeof lineItemsTable.$inferSelect): LineItem {
     reserveAccountId: r.reserveAccountId,
     state: r.state,
     recurrence: recurrenceOf(r.recurEvery, r.recurUnit),
+    timelineStart: r.timelineStart,
   }
 }

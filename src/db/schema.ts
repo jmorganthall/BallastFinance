@@ -54,6 +54,8 @@ export const accountScopeEnum = pgEnum('account_scope', ['household', 'individua
  * inspection every 2 years is as ordinary as an annual one.
  */
 export const recurrenceUnitEnum = pgEnum('recurrence_unit', ['day', 'week', 'month', 'year'])
+/** Where a part's money timeline begins (PRD D30). */
+export const timelineStartEnum = pgEnum('timeline_start', ['last_occurrence', 'commit'])
 
 export const debtCategoryEnum = pgEnum('debt_category', ['consumer', 'auto', 'mortgage'])
 export const debtStateEnum = pgEnum('debt_state', ['open', 'paid_off'])
@@ -275,9 +277,20 @@ export const lineItems = pgTable(
     state: lineItemStateEnum('state').notNull().default('planned'),
     recurEvery: integer('recur_every'),
     recurUnit: recurrenceUnitEnum('recur_unit'),
+    /**
+     * 'commit' at the column level so rows from before D30 keep exactly the
+     * behaviour they had; the intake and add paths set 'last_occurrence' for
+     * a part that comes round again unless told otherwise.
+     */
+    timelineStart: timelineStartEnum('timeline_start').notNull().default('commit'),
   },
   (t) => [
     index('line_items_package_idx').on(t.packageId),
+    // A one-off has no last time it came round, so its timeline starts at commit.
+    check(
+      'line_items_one_off_starts_at_commit',
+      sql`${t.recurEvery} is not null or ${t.timelineStart} = 'commit'`,
+    ),
     // An interval is both halves or neither. Half of one -- a number with no
     // unit -- has no meaning, and the roll-forward would silently do nothing.
     check(

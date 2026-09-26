@@ -50,8 +50,37 @@ describe('a valid intake', () => {
         dueDate: '2027-01-16',
         reserveAccountId: 'acct-annual',
         recurrence: null,
+        timelineStart: 'commit',
       },
     ])
+  })
+
+  it('starts a repeating part from its last occurrence unless told otherwise (D30)', () => {
+    const base = intake().line_items[0]
+    const byDefault = validateIntake(
+      intake({ line_items: [{ ...base, recurrence: { every: 1, unit: 'year' } }] }),
+      context,
+    )
+    expect(byDefault.ok && byDefault.value.lineItems[0]!.timelineStart).toBe('last_occurrence')
+
+    const asked = validateIntake(
+      intake({ line_items: [{ ...base, recurrence: 'annual', timeline_start: 'commit' }] }),
+      context,
+    )
+    expect(asked.ok && asked.value.lineItems[0]!.timelineStart).toBe('commit')
+
+    // A one-off has no last time it came round: always the commit, whatever is sent.
+    const oneOff = validateIntake(
+      intake({ line_items: [{ ...base, timeline_start: 'last_occurrence' }] }),
+      context,
+    )
+    expect(oneOff.ok && oneOff.value.lineItems[0]!.timelineStart).toBe('commit')
+
+    const nonsense = validateIntake(
+      intake({ line_items: [{ ...base, timeline_start: 'yesterday' as never }] }),
+      context,
+    )
+    expect(nonsense.ok).toBe(false)
   })
 
   it('carries a recurrence when the producer sends one', () => {
