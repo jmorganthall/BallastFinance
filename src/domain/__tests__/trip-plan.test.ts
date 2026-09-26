@@ -548,7 +548,8 @@ describe('reading a crowd calendar', () => {
   it('the sources, in order, each with its own page', () => {
     expect(CROWD_SOURCES.map((s) => s.key)).toEqual(['thrill_data', 'undercover_tourist'])
     expect(CROWD_SOURCES[0]!.url('wdw', '2027-06')).toBe('https://www.thrill-data.com/trip-planning/crowd-calendar/resort/wdw?month=2027-06&destination=wdw')
-    expect(CROWD_SOURCES[1]!.url('wdw', '2027-06')).toBe('https://www.undercovertourist.com/orlando/crowd-calendar/?month=2027-06')
+    expect(CROWD_SOURCES[1]!.url('wdw', '2027-06')).toBe('https://www.undercovertourist.com/orlando/crowd-calendar/june-2027/')
+    expect(CROWD_SOURCES[1]!.url('wdw', '2026-10')).toBe('https://www.undercovertourist.com/orlando/crowd-calendar/october-2026/')
     expect(monthsOf(trip)).toEqual(['2027-06'])
     expect(monthsOf({ startDate: '2027-11-28', endDate: '2028-01-02' })).toEqual(['2027-11', '2027-12', '2028-01'])
   })

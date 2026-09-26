@@ -938,6 +938,16 @@ export function parseCrowdPage(text: string, month: string | null): ParsedCrowd 
 export const THRILL_DATA_URL = 'https://www.thrill-data.com/trip-planning/crowd-calendar/resort/wdw'
 export const UNDERCOVER_TOURIST_URL = 'https://www.undercovertourist.com/orlando/crowd-calendar/'
 
+const MONTH_PAGE_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'] as const
+
+/** "2026-10" → "october-2026", the way a month is named in a crowd-calendar page address. */
+export function monthPageName(month: string): string {
+  const index = Number(month.slice(5, 7)) - 1
+  const name = MONTH_PAGE_NAMES[index]
+  if (!name) throw new TripPlanError(`Not a month: ${month}`)
+  return `${name}-${month.slice(0, 4)}`
+}
+
 /** Thrill Data's public WDW calendar: the resort page carries every park's levels as data. */
 export function parseThrillDataCrowd(text: string, month: string): ParsedCrowd {
   return parseCrowdPage(text, month)
@@ -959,7 +969,8 @@ export const CROWD_SOURCES: readonly CrowdSource[] = [
   {
     key: 'undercover_tourist',
     label: 'Undercover Tourist',
-    url: (_destination, month) => `${UNDERCOVER_TOURIST_URL}?month=${month}`,
+    // One page per month, named the way the site names it: /orlando/crowd-calendar/october-2026/
+    url: (_destination, month) => `${UNDERCOVER_TOURIST_URL}${monthPageName(month)}/`,
     parse: parseUndercoverTouristCrowd,
   },
 ]

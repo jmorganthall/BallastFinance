@@ -117,7 +117,7 @@ describe('the weather', () => {
     expect(normalsForDates(normals, '2028-02-28', '2028-03-01').map((r) => r.date)).toEqual(['2028-02-29'])
   })
 
-  it('blends by horizon: the forecast first, then the 6-week outlook, then typical, each marked', () => {
+  it('blends by horizon: the forecast first, then the seasonal outlook, then typical, each marked', () => {
     const forecast = [weather('2026-10-01', 'forecast', 90, 74, TODAY, 40)]
     const subseasonal = [weather('2026-10-01', 'subseasonal', 87, 70), weather('2026-10-20', 'subseasonal', 84, 66, '2026-09-20'), weather('2026-10-20', 'subseasonal', 85, 67, '2026-09-25')]
     const normals = [weather('2026-10-01', 'normal', 88, 71), weather('2026-10-20', 'normal', 85, 68), weather('2026-12-01', 'normal', 74, 55)]

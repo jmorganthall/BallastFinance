@@ -1222,6 +1222,17 @@ export async function saveBlackoutDatesAction(formData: FormData): Promise<void>
   redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
 }
 
+/** Where the park data comes from: the crowd outlook's address and the wait feed's park names. */
+export async function saveParkDataSourcesAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const parks = ['magic_kingdom', 'epcot', 'hollywood_studios', 'animal_kingdom'] as const
+  const waitParkNames: Record<string, string> = {}
+  for (const park of parks) waitParkNames[park] = String(formData.get(`wait_name_${park}`) ?? '')
+  const done = await tripRefusalOf(() => engine.setParkDataSources({ outlookUrl: String(formData.get('outlook_url') ?? ''), waitParkNames }))
+  revalidatePath('/trips')
+  redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}#sources` : '/trips?saved=1#sources')
+}
+
 export async function savePackTemplateAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const lines = String(formData.get('pack_template') ?? '')
@@ -1587,7 +1598,9 @@ export async function refreshParkDataAction(formData: FormData): Promise<void> {
   if (/^\d{4}-\d{2}$/.test(month)) query.set('month', month)
   if (!parkDataFetchEnabled()) back('Looking up park data is switched off on this machine (PARK_DATA_FETCH=off).', query.toString())
   const done = await engine.refreshParkData()
-  const stored = `Stored ${done.weather} days of weather, ${done.hours} park-days of hours and ${done.outlook} park-days of crowd outlook.`
+  const w = done.weatherByHorizon
+  const typical = done.typicalKept ? 'typical days kept from this month' : `${w.normal} typical days`
+  const stored = `Stored ${w.forecast} forecast days, ${w.subseasonal} seasonal-outlook days and ${typical}; ${done.hours} park-days of hours; ${done.outlook} park-days of crowd outlook.`
   if (done.weather + done.hours + done.outlook === 0) back(`Nothing could be fetched. ${done.notes.join(' ')}`, query.toString())
   query.set('refreshed', done.notes.length > 0 ? `${stored} ${done.notes.join(' ')}` : stored)
   back(null, query.toString())

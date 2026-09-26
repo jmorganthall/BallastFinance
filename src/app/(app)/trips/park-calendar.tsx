@@ -106,7 +106,7 @@ export function ParkCalendar({
       </table>
 
       <p className="mt-2 text-xs leading-snug text-[var(--color-ink-soft)]">
-        High and low in °F: plain is the forecast, ~ the 6-week outlook, ≈ typical for this date. The bar is how busy, 1
+        High and low in °F: plain is the forecast, ~ the seasonal outlook (about six months, less sure the further out), ≈ typical for this date. The bar is how busy, 1
         (quiet) to 10 (packed). ⤓ is the earliest park close. ● a day off school, ★ a federal holiday; a struck-out day
         is one you cannot go. Tap a day for where each figure came from.
       </p>

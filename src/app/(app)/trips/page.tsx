@@ -18,6 +18,7 @@ import {
   saveBlackoutDatesAction,
   saveHomeAddressAction,
   savePackTemplateAction,
+  saveParkDataSourcesAction,
   saveReferencePricesAction,
   saveSchoolCalendarSourcesAction,
   saveWeekSettingsAction,
@@ -78,19 +79,22 @@ export default async function TripsPage({
 }) {
   const { error, saved, month: monthParam, day: dayParam, refreshed, start: startParam, end: endParam } = await searchParams
   const { engine } = await requireEngine()
-  const [trips, prices, home, blackouts, packTemplate, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights] = await Promise.all([
-    engine.listTrips(),
-    engine.referencePrices(),
-    engine.homeLocation(),
-    engine.blackoutDates(),
-    engine.packTemplate(),
-    Promise.resolve(engine.today()),
-    engine.schoolDaysOff(),
-    engine.schoolCalendarSources(),
-    engine.pendingSchoolCalendar(),
-    engine.horizonMonths(),
-    engine.weekWeights(),
-  ])
+  const [trips, prices, home, blackouts, packTemplate, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames] =
+    await Promise.all([
+      engine.listTrips(),
+      engine.referencePrices(),
+      engine.homeLocation(),
+      engine.blackoutDates(),
+      engine.packTemplate(),
+      Promise.resolve(engine.today()),
+      engine.schoolDaysOff(),
+      engine.schoolCalendarSources(),
+      engine.pendingSchoolCalendar(),
+      engine.horizonMonths(),
+      engine.weekWeights(),
+      engine.outlookUrl(),
+      engine.waitParkNames(),
+    ])
   const readerOn = readerEnabled()
   const open = trips.filter((t) => !t.retiredAt)
   const putAway = trips.filter((t) => t.retiredAt)
@@ -505,6 +509,42 @@ export default async function TripsPage({
           <textarea name="pack_template" rows={Math.max(4, packTemplate.length + 1)} defaultValue={packTemplate.join('\n')} className={input} />
           <button type="submit" className={secondaryButton}>
             Save the packing list
+          </button>
+        </form>
+      </Card>
+
+      <h2 id="sources" className={sectionTitle}>
+        Where the park data comes from
+      </h2>
+      <Card>
+        <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+          Weather comes from Open-Meteo and park hours from ThemeParks.wiki; neither needs setting. The crowd outlook
+          is read from the address below (leave it blank for the usual one), and live waits from Queue-Times, which
+          files each park under the name shown. Change a name only if &ldquo;Refresh park data&rdquo; says a park was
+          not found.
+        </p>
+        <form action={saveParkDataSourcesAction} className="space-y-2">
+          <label className="block text-xs text-[var(--color-ink-soft)]">
+            Crowd outlook address
+            <input name="outlook_url" type="url" defaultValue={outlookUrl} placeholder="https://" className={input} />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            {(
+              [
+                ['magic_kingdom', 'Magic Kingdom'],
+                ['epcot', 'EPCOT'],
+                ['hollywood_studios', 'Hollywood Studios'],
+                ['animal_kingdom', 'Animal Kingdom'],
+              ] as const
+            ).map(([park, label]) => (
+              <label key={park} className="block text-xs text-[var(--color-ink-soft)]">
+                {label}, as the wait feed names it
+                <input name={`wait_name_${park}`} defaultValue={waitParkNames[park] ?? ''} className={input} />
+              </label>
+            ))}
+          </div>
+          <button type="submit" className={secondaryButton}>
+            Save these sources
           </button>
         </form>
       </Card>

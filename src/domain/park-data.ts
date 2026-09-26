@@ -55,7 +55,7 @@ export const WEATHER_HORIZONS: readonly WeatherHorizon[] = ['forecast', 'subseas
 
 export const WEATHER_HORIZON_WORDS: Record<WeatherHorizon, string> = {
   forecast: 'forecast',
-  subseasonal: '6-week outlook',
+  subseasonal: 'seasonal outlook',
   normal: 'typical for this date',
 }
 
@@ -172,7 +172,7 @@ export function validateParkWeather(w: Pick<ParkWeather, 'date' | 'highF' | 'low
   if (!Number.isInteger(w.highF) || !Number.isInteger(w.lowF) || w.highF < -50 || w.highF > 130 || w.lowF < -50 || w.lowF > 130) throw new TripPlanError('Temperatures are whole degrees Fahrenheit that a person could stand in.')
   if (w.lowF > w.highF) throw new TripPlanError('The low cannot be above the high.')
   if (w.precipChance !== null && (!Number.isInteger(w.precipChance) || w.precipChance < 0 || w.precipChance > 100)) throw new TripPlanError('The chance of rain is a whole percent, 0 to 100.')
-  if (!WEATHER_HORIZONS.includes(w.horizon)) throw new TripPlanError('A weather row is a forecast, a 6-week outlook, or typical for the date.')
+  if (!WEATHER_HORIZONS.includes(w.horizon)) throw new TripPlanError('A weather row is a forecast, a seasonal outlook, or typical for the date.')
   if (!w.source.trim()) throw new TripPlanError('A weather row needs to say where it came from.')
 }
 
@@ -226,7 +226,7 @@ export interface BlendedWeather {
 
 /**
  * The weather to show for a date: the forecast when there is one, else the
- * 6-week outlook, else what is typical for the date. Each is looked up by
+ * seasonal outlook, else what is typical for the date. Each is looked up by
  * the date itself; the horizon on the answer says which one it was.
  */
 export function blendWeather(input: {
