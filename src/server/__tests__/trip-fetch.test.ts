@@ -174,7 +174,8 @@ describe('checking how busy', () => {
   it('tries the sources in order: the first that reads every month wins, and each failure is a line for the screen', async () => {
     const fake = (async (url: string) => {
       if (url.startsWith('https://www.thrill-data.com')) return new Response('<html>Access denied</html>', { status: 403 })
-      return new Response(page(url.includes('2027-06') ? '2027-06' : '2027-07'))
+      // Undercover Tourist's pages are named by month: .../june-2027/
+      return new Response(page(url.includes('june-2027') ? '2027-06' : '2027-07'))
     }) as unknown as typeof fetch
     const got = await pullCrowdCalendar('wdw', ['2027-06', '2027-07'], fake)
     expect(got.source?.key).toBe('undercover_tourist')

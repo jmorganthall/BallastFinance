@@ -183,6 +183,7 @@ import {
   type TaskKind,
   type TripDay,
   type TripPark,
+  TripPlanError,
   type TripReservation,
   type TripTask,
   type WeekComparisonRow,
@@ -310,6 +311,10 @@ export interface DvcPull {
 /** What "Refresh park data" did (D29): how many rows each pull stored, and what each source said. */
 export interface ParkDataRefresh {
   weather: number
+  /** The weather count split by horizon, so a missing "typical" is visible, not folded into a total. */
+  weatherByHorizon: Record<WeatherHorizon, number>
+  /** True when what is typical was already stored this month and was not fetched again. */
+  typicalKept: boolean
   hours: number
   outlook: number
   notes: string[]
@@ -3576,6 +3581,36 @@ export class Engine {
     return this.getSetting<string>('ropedrop_outlook_url', DEFAULT_ROPEDROP_OUTLOOK_URL)
   }
 
+  /**
+   * Where the park data comes from, as the household may set it: the crowd
+   * outlook's address and the names the wait feed files the four parks under.
+   * An empty address puts the default back; an empty name puts that park's
+   * default back. Only https addresses are kept, so a typo cannot send the
+   * nightly job somewhere plain.
+   */
+  async setParkDataSources(input: { outlookUrl: string; waitParkNames: WaitParkNames }): Promise<void> {
+    const url = input.outlookUrl.trim()
+    if (url !== '') {
+      let parsed: URL
+      try {
+        parsed = new URL(url)
+      } catch {
+        throw new TripPlanError('The crowd outlook address is not a web address.')
+      }
+      if (parsed.protocol !== 'https:') throw new TripPlanError('The crowd outlook address must start with https://.')
+    }
+    await this.putSetting('ropedrop_outlook_url', url === '' ? DEFAULT_ROPEDROP_OUTLOOK_URL : url)
+
+    const names: WaitParkNames = {}
+    for (const [park, name] of Object.entries(input.waitParkNames)) {
+      const tidy = (name ?? '').trim()
+      if (tidy !== '') names[park as TripPark] = tidy
+    }
+    await this.putSetting('park_wait_names', names)
+    // The park ids the wait feed was matched under belong to the old names.
+    await this.putSetting('park_wait_ids', null)
+  }
+
   /** The park ids the hours feed knows the four parks by, found once and kept (park_hours_ids). */
   async themeParkIds(destination: TripDestination = 'wdw'): Promise<ResolvedPark[] | null> {
     const stored = await this.getSetting<Record<string, ResolvedPark[]> | null>('park_hours_ids', null)
@@ -3616,7 +3651,7 @@ export class Engine {
 
   /**
    * "Refresh park data" and the nightly jobs (D28-D29): the forecast, the
-   * 6-week outlook, what is typical (when what is stored is a month old or
+   * seasonal outlook, what is typical (when what is stored is a month old or
    * missing), the four parks' hours for the months ahead, and the crowd
    * outlook. Reference data, so it is stored as it arrives and the screen
    * shows the day it was fetched. Each source's failure is a line, never an
@@ -3627,23 +3662,34 @@ export class Engine {
     const fetchImpl = options.fetchImpl ?? fetch
     const parts = options.parts ?? ['weather', 'hours', 'outlook']
     const today = this.today()
-    const done: ParkDataRefresh = { weather: 0, hours: 0, outlook: 0, notes: [] }
+    const done: ParkDataRefresh = {
+      weather: 0,
+      weatherByHorizon: { forecast: 0, subseasonal: 0, normal: 0 },
+      typicalKept: false,
+      hours: 0,
+      outlook: 0,
+      notes: [],
+    }
     const note = (line: string) => done.notes.push(line)
+    const keptWeather = (horizon: WeatherHorizon, count: number) => {
+      done.weather += count
+      done.weatherByHorizon[horizon] += count
+    }
 
     if (parts.includes('weather')) {
       try {
         const got = await fetchForecast(destination, fetchImpl)
         if (got.reason) note(`Forecast: ${got.reason}`)
-        else done.weather += await this.recordParkWeather(got.rows, { destination, horizon: 'forecast', source: OPEN_METEO_SOURCE, fetchedOn: today })
+        else keptWeather('forecast', await this.recordParkWeather(got.rows, { destination, horizon: 'forecast', source: OPEN_METEO_SOURCE, fetchedOn: today }))
       } catch (error) {
         note(`Forecast: ${(error as Error).message}`)
       }
       try {
         const got = await fetchSubseasonal(destination, fetchImpl)
-        if (got.reason) note(`6-week outlook: ${got.reason}`)
-        else done.weather += await this.recordParkWeather(got.rows, { destination, horizon: 'subseasonal', source: OPEN_METEO_SOURCE, fetchedOn: today })
+        if (got.reason) note(`Seasonal outlook: ${got.reason}`)
+        else keptWeather('subseasonal', await this.recordParkWeather(got.rows, { destination, horizon: 'subseasonal', source: OPEN_METEO_SOURCE, fetchedOn: today }))
       } catch (error) {
-        note(`6-week outlook: ${(error as Error).message}`)
+        note(`Seasonal outlook: ${(error as Error).message}`)
       }
       if (await this.normalsNeedRefresh(destination, today)) {
         try {
@@ -3651,12 +3697,13 @@ export class Engine {
           if (got.reason) note(`Typical for the date: ${got.reason}`)
           else {
             const normals = normalsForDates(normalsFromArchive(got.rows), today, addMonths(today, 18))
-            done.weather += await this.recordParkWeather(normals, { destination, horizon: 'normal', source: OPEN_METEO_SOURCE, fetchedOn: today })
+            if (normals.length === 0) note('Typical for the date: the archive answered, but no day in it could be averaged.')
+            keptWeather('normal', await this.recordParkWeather(normals, { destination, horizon: 'normal', source: OPEN_METEO_SOURCE, fetchedOn: today }))
           }
         } catch (error) {
           note(`Typical for the date: ${(error as Error).message}`)
         }
-      }
+      } else done.typicalKept = true
     }
 
     if (parts.includes('hours')) {
