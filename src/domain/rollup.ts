@@ -22,7 +22,13 @@ import {
   type WeeklyBreakdown,
 } from './accrual'
 import { previousOccurrence } from './recurrence'
-import { compareDates, type CivilDate } from './dates'
+import {
+  compareDates,
+  DEFAULT_TRANSFER_WEEKDAY,
+  nthTransferDayAfter,
+  type CivilDate,
+  type Weekday,
+} from './dates'
 import type { Cents } from './money'
 import {
   lineItemTotalCents,
@@ -58,6 +64,13 @@ export interface DerivationInput {
    * weekly figure stays exact so the parts still add up.
    */
   transferRoundUpCents?: Cents
+  /**
+   * The day the recurring transfer runs (PRD D31), 0 Sunday to 6 Saturday. A
+   * household setting; every week count below reads it, and nothing here
+   * assumes Saturday. Absent means the default, which is for pure callers
+   * and tests -- the engine always fills it in.
+   */
+  transferWeekday?: Weekday
 }
 
 /**
@@ -182,10 +195,11 @@ function viewLineItem(args: {
   lineItem: LineItem
   pkg: Package
   today: CivilDate
+  transferWeekday: Weekday
   changes: readonly LineItemChange[]
   cycles: readonly LineItemCycle[]
 }): LineItemView {
-  const { lineItem, pkg, today, changes } = args
+  const { lineItem, pkg, today, transferWeekday, changes } = args
   const cycle = currentCycle(lineItem.id, args.cycles, today)
   const components = componentsForLineItem({
     lineItem,
@@ -194,11 +208,18 @@ function viewLineItem(args: {
     cycleStartDate: cycle?.startDate,
     cycleOrigin: cycle?.origin,
     openingCents: cycle?.openingCents,
+    transferWeekday,
   })
   const totalCents = lineItemTotalCents(lineItem)
-  const shouldHaveSavedCents = shouldHaveSavedForItem(components, today, totalCents)
+  const shouldHaveSavedCents = shouldHaveSavedForItem(components, today, totalCents, transferWeekday)
   const paceSince = paceWindowStart({ lineItem, pkg, cycles: args.cycles, today })
-  const paceCents = evenPaceCents({ totalCents, fromDate: paceSince, dueDate: lineItem.dueDate, today })
+  const paceCents = evenPaceCents({
+    totalCents,
+    fromDate: paceSince,
+    dueDate: lineItem.dueDate,
+    today,
+    transferWeekday,
+  })
 
   return {
     lineItem,
@@ -208,7 +229,7 @@ function viewLineItem(args: {
     remainingCents: Math.max(0, totalCents - shouldHaveSavedCents),
     paceCents,
     paceSince,
-    weekly: weeklyBreakdown(components, today),
+    weekly: weeklyBreakdown(components, today, 0, transferWeekday),
     isOverdue: compareDates(today, lineItem.dueDate) > 0 && lineItem.state !== 'retired',
   }
 }
@@ -220,13 +241,14 @@ function isLive(pkg: Package, item: LineItem): boolean {
 
 export function packageViews(input: DerivationInput): PackageView[] {
   const { today, packages, lineItems } = input
+  const transferWeekday = input.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
   const changes = input.changes ?? []
   const cycles = input.cycleStarts ?? []
 
   return packages.map((pkg) => {
     const items = lineItems
       .filter((li) => li.packageId === pkg.id)
-      .map((lineItem) => viewLineItem({ lineItem, pkg, today, changes, cycles }))
+      .map((lineItem) => viewLineItem({ lineItem, pkg, today, transferWeekday, changes, cycles }))
 
     const live = items.filter((v) => v.lineItem.state !== 'retired')
     const components = live.flatMap((v) => v.components)
@@ -237,13 +259,14 @@ export function packageViews(input: DerivationInput): PackageView[] {
       totalCents: live.reduce((s, v) => s + v.totalCents, 0),
       shouldHaveSavedCents: live.reduce((s, v) => s + v.shouldHaveSavedCents, 0),
       paceCents: live.reduce((s, v) => s + v.paceCents, 0),
-      weekly: weeklyBreakdown(components, today),
+      weekly: weeklyBreakdown(components, today, 0, transferWeekday),
     }
   })
 }
 
 export function accountViews(input: DerivationInput): AccountView[] {
   const { today, accounts, packages, lineItems } = input
+  const transferWeekday = input.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
   const changes = input.changes ?? []
   const adjustments = input.driftAdjustments ?? []
   const pendingAdjustments = input.pendingDriftAdjustments ?? []
@@ -258,28 +281,30 @@ export function accountViews(input: DerivationInput): AccountView[] {
       if (lineItem.reserveAccountId !== account.id) continue
       const pkg = packagesById.get(lineItem.packageId)
       if (!pkg || !isLive(pkg, lineItem)) continue
-      items.push(viewLineItem({ lineItem, pkg, today, changes, cycles }))
+      items.push(viewLineItem({ lineItem, pkg, today, transferWeekday, changes, cycles }))
     }
 
     const components = [
       ...items.flatMap((v) => v.components),
       ...adjustments
         .filter((a) => a.reserveAccountId === account.id)
-        .map(driftAdjustmentComponent),
+        .map((a) => driftAdjustmentComponent(a, transferWeekday)),
     ]
 
     // Priced separately and never merged into `components`: an open ask must
     // not move the live number, the should-hold figure, or a check-in's drift.
     const pending = pendingAdjustments
       .filter((a) => a.reserveAccountId === account.id)
-      .map(driftAdjustmentComponent)
-      .filter((c) => isComponentActive(c, today))
+      .map((a) => driftAdjustmentComponent(a, transferWeekday))
+      .filter((c) => isComponentActive(c, today, transferWeekday))
 
     return {
       account,
-      weekly: weeklyBreakdown(components, today, roundUp),
+      weekly: weeklyBreakdown(components, today, roundUp, transferWeekday),
       pendingWeekly:
-        pending.length > 0 ? weeklyBreakdown([...components, ...pending], today, roundUp) : null,
+        pending.length > 0
+          ? weeklyBreakdown([...components, ...pending], today, roundUp, transferWeekday)
+          : null,
       shouldHaveSavedCents: items.reduce((s, v) => s + v.shouldHaveSavedCents, 0),
       outstandingCents: items.reduce((s, v) => s + v.remainingCents, 0),
       items,
@@ -390,6 +415,7 @@ export function catchUpOptions(args: {
   pendingBumpCents?: Cents
   /** A one-time catch-up move still waiting, at its full amount. */
   pendingMoveCents?: Cents
+  transferWeekday?: Weekday
 }): CatchUpOption[] {
   const { shortfallCents, overWeeks } = args
   if (shortfallCents <= 0) return []
@@ -398,7 +424,13 @@ export function catchUpOptions(args: {
   const weeks = Math.max(1, overWeeks)
   const bumpCents = shortfallCents + pendingBumpCents
   const perWeekCents = Math.ceil(bumpCents / weeks)
-  const endDate = addWeeks(args.today, weeks)
+  // The bump runs to its last transfer: (today, endDate] holds exactly `weeks`
+  // transfer days, so the accrual math divides by the same count.
+  const endDate = nthTransferDayAfter(
+    args.today,
+    weeks,
+    args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY,
+  )
   return [
     { kind: 'one_time', amountCents: shortfallCents + pendingMoveCents, replacesCents: pendingMoveCents },
     {
@@ -450,6 +482,7 @@ export function aheadOptions(args: {
   pendingCutCents?: Cents
   /** A move-out still waiting on the to-do list, at its full (positive) amount. */
   pendingMoveOutCents?: Cents
+  transferWeekday?: Weekday
 }): AheadOption[] {
   const { extraCents, weeklyCents } = args
   if (extraCents <= 0) return []
@@ -495,7 +528,7 @@ export function aheadOptions(args: {
     amountCents,
     perWeekCents,
     weeks,
-    endDate: addWeeks(args.today, weeks),
+    endDate: nthTransferDayAfter(args.today, weeks, args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY),
     pauses: perWeekCents === weeklyCents,
     leftoverCents: toCut - amountCents,
     replacesCents: pendingCutCents,
@@ -588,12 +621,6 @@ export function assignExtraToPlans(args: {
   }
 
   return { assignments, leftoverCents: uncountedCents, stillShort, nothingToAddCount }
-}
-
-function addWeeks(d: CivilDate, weeks: number): CivilDate {
-  const base = new Date(`${d}T00:00:00Z`)
-  base.setUTCDate(base.getUTCDate() + weeks * 7)
-  return base.toISOString().slice(0, 10)
 }
 
 export function totalShouldHaveSaved(views: readonly AccountView[]): Cents {

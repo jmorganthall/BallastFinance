@@ -90,6 +90,55 @@ describe('the Disney package rolls up to a Capital One instruction (Phase A acce
     ],
   }
 
+  it('divides by the Friday count on a Friday household (PRD D31), and every figure follows', () => {
+    // The same plan, read on a household whose transfer runs on Fridays.
+    const saturday = accountViews(input)
+    const friday = accountViews({ ...input, transferWeekday: 5 })
+    const fridayAnnual = friday.find((v) => v.account.id === annual.id)!
+    const saturdayAnnual = saturday.find((v) => v.account.id === annual.id)!
+
+    // Sat 19 Sep -> Sat 16 Jan holds 17 Fridays, and -> Sat 21 Nov holds 9:
+    // the same counts as Saturdays here, because both due dates are Saturdays.
+    // The ongoing figure is the sum of the parts, each divided by its own count.
+    expect(fridayAnnual.weekly.ongoingPerWeekCents).toBe(Math.ceil(180000 / 17) + Math.ceil(135000 / 9))
+    expect(fridayAnnual.weekly.ongoingPerWeekCents).toBe(saturdayAnnual.weekly.ongoingPerWeekCents)
+
+    // Move the tickets to Friday 15 Jan and the counts part ways: 17 Fridays, 16 Saturdays.
+    const dueFriday: DerivationInput = {
+      ...input,
+      lineItems: input.lineItems.map((li) =>
+        li.id === 'li-tickets' ? { ...li, dueDate: '2027-01-15' } : li,
+      ),
+    }
+    const onFriday = accountViews({ ...dueFriday, transferWeekday: 5 }).find((v) => v.account.id === annual.id)!
+    const onSaturday = accountViews(dueFriday).find((v) => v.account.id === annual.id)!
+    expect(onFriday.weekly.ongoingPerWeekCents).toBe(Math.ceil(180000 / 17) + Math.ceil(135000 / 9))
+    expect(onSaturday.weekly.ongoingPerWeekCents).toBe(Math.ceil(180000 / 16) + Math.ceil(135000 / 9))
+    expect(onFriday.items.find((i) => i.lineItem.id === 'li-tickets')!.components[0]!.weeks).toBe(17)
+
+    // Should-hold steps on the Friday: by Fri 25 Sep one transfer is in, on either reading of the due date.
+    const firstFriday = accountViews({ ...dueFriday, transferWeekday: 5, today: '2026-09-25' }).find(
+      (v) => v.account.id === annual.id,
+    )!
+    expect(firstFriday.shouldHaveSavedCents).toBe(Math.ceil(180000 / 17) + Math.ceil(135000 / 9))
+    const firstSaturdayRead = accountViews({ ...dueFriday, today: '2026-09-25' }).find(
+      (v) => v.account.id === annual.id,
+    )!
+    expect(firstSaturdayRead.shouldHaveSavedCents).toBe(0)
+  })
+
+  it('ends a catch-up bump or cut on the household transfer day (PRD D31)', () => {
+    // A check-in on Wednesday 23 Sep, eight weeks of catch-up: the bump runs to
+    // the eighth Friday, 13 Nov, and its weekly figure divides by eight Fridays.
+    const [, bump] = catchUpOptions({ shortfallCents: 8000, today: '2026-09-23', overWeeks: 8, transferWeekday: 5 })
+    expect(bump).toMatchObject({ kind: 'rate_bump', weeks: 8, perWeekCents: 1000, endDate: '2026-11-13' })
+    const [, cut] = aheadOptions({ extraCents: 8000, weeklyCents: 5000, today: '2026-09-23', overWeeks: 8, transferWeekday: 5 })
+    expect(cut).toMatchObject({ kind: 'rate_cut', weeks: 8, perWeekCents: 1000, endDate: '2026-11-13' })
+    // On a Saturday household the same check-in ends on Saturday 14 Nov.
+    const [, saturdayBump] = catchUpOptions({ shortfallCents: 8000, today: '2026-09-23', overWeeks: 8 })
+    expect(saturdayBump!.endDate).toBe('2026-11-14')
+  })
+
   it('rounds only the account transfer up to the household step, and says what it really is', () => {
     const exact = accountViews(input)
     const rounded = accountViews({ ...input, transferRoundUpCents: 1000 })

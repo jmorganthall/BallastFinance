@@ -21,15 +21,23 @@
  *
  * Displayed rates then round UP (see money.ts), so an instruction handed to a
  * human is never a cent short of the plan.
+ *
+ * A week is one transfer, and the day the transfer runs is the household's
+ * (PRD D31). Every function here that counts weeks takes it as
+ * `transferWeekday`, beside the date it counts from: a field on an args
+ * object, or the last positional parameter. It defaults to Saturday so the
+ * pure tests can leave it out; the engine always passes the household's.
  */
 
 import {
   accrualWeeksBetween,
   compareDates,
+  DEFAULT_TRANSFER_WEEKDAY,
   maxDate,
   minDate,
   transferWeeksBetween,
   type CivilDate,
+  type Weekday,
 } from './dates'
 import { ceilDiv, proratedCeil, roundUpToStep, type Cents } from './money'
 import { previousOccurrence, type Recurrence } from './recurrence'
@@ -75,14 +83,22 @@ export function componentRatePerWeekCents(c: RateComponent): Cents {
  *
  * On or after the end date a component has delivered everything, by definition:
  * the money is due. That is stated explicitly rather than falling out of the
- * week count, because a window can contain no Saturday at all -- an item due
- * before the next transfer date -- and such a component still has to be fully
+ * week count, because a window can contain no transfer day at all -- an item
+ * due before the next transfer -- and such a component still has to be fully
  * funded by its due date. It reads as a single immediate move, which is what
  * `accrualWeeksBetween`'s one-week floor already prices it as.
  */
-export function componentDeliveredBy(c: RateComponent, asOf: CivilDate): Cents {
+export function componentDeliveredBy(
+  c: RateComponent,
+  asOf: CivilDate,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): Cents {
   if (compareDates(asOf, c.endDate) >= 0) return c.amountCents
-  return proratedCeil(c.amountCents, transferWeeksBetween(c.startDate, asOf), c.weeks)
+  return proratedCeil(
+    c.amountCents,
+    transferWeeksBetween(c.startDate, asOf, transferWeekday),
+    c.weeks,
+  )
 }
 
 /** What a component will still deliver in (from, to]. Used to price an edit's delta. */
@@ -90,16 +106,23 @@ export function componentDeliveredBetween(
   c: RateComponent,
   from: CivilDate,
   to: CivilDate,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
 ): Cents {
   const start = maxDate(from, c.startDate)
   const end = minDate(to, c.endDate)
   if (compareDates(end, start) <= 0) return 0
-  return componentDeliveredBy(c, end) - componentDeliveredBy(c, start)
+  return (
+    componentDeliveredBy(c, end, transferWeekday) - componentDeliveredBy(c, start, transferWeekday)
+  )
 }
 
 /** Is this component still asking for transfers after `asOf`? */
-export function isComponentActive(c: RateComponent, asOf: CivilDate): boolean {
-  return transferWeeksBetween(maxDate(asOf, c.startDate), c.endDate) > 0
+export function isComponentActive(
+  c: RateComponent,
+  asOf: CivilDate,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): boolean {
+  return transferWeeksBetween(maxDate(asOf, c.startDate), c.endDate, transferWeekday) > 0
 }
 
 function buildComponent(args: {
@@ -109,8 +132,13 @@ function buildComponent(args: {
   startDate: CivilDate
   endDate: CivilDate
   amountCents: Cents
+  transferWeekday: Weekday
 }): RateComponent {
-  return { ...args, weeks: accrualWeeksBetween(args.startDate, args.endDate) }
+  const { transferWeekday, ...component } = args
+  return {
+    ...component,
+    weeks: accrualWeeksBetween(args.startDate, args.endDate, transferWeekday),
+  }
 }
 
 function snapshotTotal(s: LineItemSnapshot): Cents {
@@ -172,8 +200,11 @@ export function componentsForLineItem(args: {
   cycleOrigin?: CycleOrigin
   /** Money already set aside for this item when the cycle began. */
   openingCents?: Cents
+  /** The household's transfer day (PRD D31). */
+  transferWeekday?: Weekday
 }): RateComponent[] {
   const { lineItem } = args
+  const transferWeekday = args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
   const commitDate = args.cycleStartDate
     ? maxDate(args.commitDate, args.cycleStartDate)
     : args.commitDate
@@ -228,6 +259,7 @@ export function componentsForLineItem(args: {
       }),
       endDate: maxDate(atCommit.dueDate, commitDate),
       amountCents: snapshotTotal(atCommit) - openingCents,
+      transferWeekday,
     }),
   )
 
@@ -237,9 +269,12 @@ export function componentsForLineItem(args: {
     const newTotal = snapshotTotal(change.after)
     const newDue = maxDate(change.after.dueDate, editDate)
 
-    const delivered = components.reduce((sum, c) => sum + componentDeliveredBy(c, editDate), 0)
+    const delivered = components.reduce(
+      (sum, c) => sum + componentDeliveredBy(c, editDate, transferWeekday),
+      0,
+    )
     const scheduled = components.reduce(
-      (sum, c) => sum + componentDeliveredBetween(c, editDate, newDue),
+      (sum, c) => sum + componentDeliveredBetween(c, editDate, newDue, transferWeekday),
       0,
     )
     const delta = newTotal - delivered - scheduled
@@ -253,6 +288,7 @@ export function componentsForLineItem(args: {
           startDate: editDate,
           endDate: newDue,
           amountCents: delta,
+          transferWeekday,
         }),
       )
     }
@@ -283,7 +319,10 @@ export function baseStartDate(args: {
   return last
 }
 
-export function driftAdjustmentComponent(a: DriftAdjustment): RateComponent {
+export function driftAdjustmentComponent(
+  a: DriftAdjustment,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): RateComponent {
   return buildComponent({
     kind: 'catch_up',
     lineItemId: null,
@@ -291,6 +330,7 @@ export function driftAdjustmentComponent(a: DriftAdjustment): RateComponent {
     startDate: a.startDate,
     endDate: a.endDate,
     amountCents: a.amountCents,
+    transferWeekday,
   })
 }
 
@@ -302,14 +342,22 @@ export function shouldHaveSavedForItem(
   components: readonly RateComponent[],
   asOf: CivilDate,
   capCents: Cents,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
 ): Cents {
-  const raw = components.reduce((sum, c) => sum + componentDeliveredBy(c, asOf), 0)
+  const raw = components.reduce(
+    (sum, c) => sum + componentDeliveredBy(c, asOf, transferWeekday),
+    0,
+  )
   return Math.max(0, Math.min(raw, capCents))
 }
 
 /** Should-have-saved across a set of components with no single cap (account rollup). */
-export function shouldHaveSaved(components: readonly RateComponent[], asOf: CivilDate): Cents {
-  return components.reduce((sum, c) => sum + componentDeliveredBy(c, asOf), 0)
+export function shouldHaveSaved(
+  components: readonly RateComponent[],
+  asOf: CivilDate,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): Cents {
+  return components.reduce((sum, c) => sum + componentDeliveredBy(c, asOf, transferWeekday), 0)
 }
 
 export interface CatchUpGroup {
@@ -348,8 +396,9 @@ export function weeklyBreakdown(
   asOf: CivilDate,
   /** Round the bank figure up to this step; 0 or absent means exact. */
   roundUpToCents: Cents = 0,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
 ): WeeklyBreakdown {
-  const active = components.filter((c) => isComponentActive(c, asOf))
+  const active = components.filter((c) => isComponentActive(c, asOf, transferWeekday))
 
   const ongoingPerWeekCents = active
     .filter((c) => c.kind === 'base')
@@ -383,9 +432,13 @@ export function respreadEquivalentPerWeekCents(args: {
   remainingCents: Cents
   asOf: CivilDate
   dueDate: CivilDate
+  transferWeekday?: Weekday
 }): Cents {
   if (args.remainingCents <= 0) return 0
-  return ceilDiv(args.remainingCents, accrualWeeksBetween(args.asOf, args.dueDate))
+  return ceilDiv(
+    args.remainingCents,
+    accrualWeeksBetween(args.asOf, args.dueDate, args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY),
+  )
 }
 
 export interface CurvePoint {
@@ -397,8 +450,9 @@ export interface CurvePoint {
  * The should-have-saved curve, sampled at the dates money actually moves.
  *
  * Sampled per transfer week rather than per day: the curve is a step function --
- * nothing changes between Saturdays -- so daily sampling would invent smoothness
- * the plan does not have and make the chart lie about when money appears.
+ * nothing changes between transfer days -- so daily sampling would invent
+ * smoothness the plan does not have and make the chart lie about when money
+ * appears.
  */
 export function accrualCurve(args: {
   components: readonly RateComponent[]
@@ -407,9 +461,11 @@ export function accrualCurve(args: {
   capCents?: Cents
   /** Keep the point count sane over long horizons. */
   maxPoints?: number
+  transferWeekday?: Weekday
 }): CurvePoint[] {
   const { components, from, to } = args
-  const totalWeeks = transferWeeksBetween(from, to)
+  const transferWeekday = args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
+  const totalWeeks = transferWeeksBetween(from, to, transferWeekday)
   if (totalWeeks <= 0) {
     return [{ date: from, cents: 0 }]
   }
@@ -420,8 +476,8 @@ export function accrualCurve(args: {
   const points: CurvePoint[] = []
   const value = (at: CivilDate) =>
     args.capCents !== undefined
-      ? shouldHaveSavedForItem(components, at, args.capCents)
-      : shouldHaveSaved(components, at)
+      ? shouldHaveSavedForItem(components, at, args.capCents, transferWeekday)
+      : shouldHaveSaved(components, at, transferWeekday)
 
   points.push({ date: from, cents: value(from) })
 
@@ -460,10 +516,12 @@ export function evenPaceCents(args: {
   fromDate: CivilDate
   dueDate: CivilDate
   today: CivilDate
+  transferWeekday?: Weekday
 }): Cents {
   if (args.totalCents <= 0) return 0
   if (compareDates(args.dueDate, args.today) <= 0) return args.totalCents
   if (compareDates(args.fromDate, args.today) >= 0) return 0
+  const transferWeekday = args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
   const component: RateComponent = {
     kind: 'base',
     lineItemId: null,
@@ -471,9 +529,12 @@ export function evenPaceCents(args: {
     startDate: args.fromDate,
     endDate: args.dueDate,
     amountCents: args.totalCents,
-    weeks: accrualWeeksBetween(args.fromDate, args.dueDate),
+    weeks: accrualWeeksBetween(args.fromDate, args.dueDate, transferWeekday),
   }
-  return Math.max(0, Math.min(componentDeliveredBy(component, args.today), args.totalCents))
+  return Math.max(
+    0,
+    Math.min(componentDeliveredBy(component, args.today, transferWeekday), args.totalCents),
+  )
 }
 
 /**
@@ -500,6 +561,7 @@ export function openingSinceLastOccurrence(args: {
   today: CivilDate
   /** Absent reads as 'commit', the setting under which the offer makes sense. */
   timelineStart?: TimelineStart
+  transferWeekday?: Weekday
 }): { lastOccurrence: CivilDate; cents: Cents } | null {
   if (args.timelineStart === 'last_occurrence') return null
   const last = previousOccurrence(args.dueDate, args.recurrence)
@@ -513,6 +575,7 @@ export function openingSinceLastOccurrence(args: {
     fromDate: last,
     dueDate: args.dueDate,
     today: args.today,
+    transferWeekday: args.transferWeekday,
   })
   return cents > 0 ? { lastOccurrence: last, cents } : null
 }

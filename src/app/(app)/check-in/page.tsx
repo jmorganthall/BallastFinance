@@ -40,10 +40,11 @@ export default async function CheckInPage({
 }) {
   const { done, counted, reshuffled } = await searchParams
   const { engine } = await requireEngine()
-  const [accounts, confirmed, commitments] = await Promise.all([
+  const [accounts, confirmed, commitments, transferWeekday] = await Promise.all([
     engine.accountViews(),
     engine.latestConfirmedBalances(),
     engine.openCommitmentsByAccount(),
+    engine.transferWeekday(),
   ])
   const today = engine.today()
 
@@ -150,15 +151,15 @@ export default async function CheckInPage({
               const drift = computeDrift({
                 account: view,
                 confirmedCents: last.amountCents,
-                committedCents: committedAfter({ commitments: open, from: last.on }),
+                committedCents: committedAfter({ commitments: open, from: last.on, transferWeekday }),
               })
               const behind = drift.driftCents < 0
               const ahead = drift.driftCents > 0
               const shortfall = Math.abs(drift.driftCents)
               const waiting = pendingByKind(open)
               const onTheWay = [
-                ...runningAdjustments({ running: open.running, today }).map((r) => ({ ...r, status: 'running' as const })),
-                ...runningAdjustments({ running: open.pending, today }).map((r) => ({ ...r, status: 'waiting' as const })),
+                ...runningAdjustments({ running: open.running, today, transferWeekday }).map((r) => ({ ...r, status: 'running' as const })),
+                ...runningAdjustments({ running: open.pending, today, transferWeekday }).map((r) => ({ ...r, status: 'waiting' as const })),
               ]
               const options = behind
                 ? catchUpOptions({
@@ -167,11 +168,14 @@ export default async function CheckInPage({
                     overWeeks: CATCH_UP_WEEKS,
                     pendingBumpCents: waiting.bumpCents,
                     pendingMoveCents: waiting.moveCents,
+                    transferWeekday,
                   })
                 : []
               // Ahead with a catch-up bump still running: the first choice is to
               // stop it today, and the rest applies to what is left (D18).
-              const stop = ahead ? stopCatchUpOffer({ running: open.running, today, extraCents: shortfall }) : null
+              const stop = ahead
+                ? stopCatchUpOffer({ running: open.running, today, extraCents: shortfall, transferWeekday })
+                : null
               const extraLeft = stop ? stop.leftCents : shortfall
               // Ahead: first count the extra toward this account's plans by the
               // one rule (every part to its pace, the rest onto the one-offs, never
@@ -190,6 +194,7 @@ export default async function CheckInPage({
                       overWeeks: CATCH_UP_WEEKS,
                       pendingCutCents: waiting.cutCents,
                       pendingMoveOutCents: waiting.moveOutCents,
+                      transferWeekday,
                     }).filter((o) => o.kind === 'rate_cut')
                   : []
 
