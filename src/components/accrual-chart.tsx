@@ -15,7 +15,7 @@
  * so identity never depends on colour alone. Light and dark are separate token
  * values, not an automatic flip.
  *
- * The curve is stepped, not smoothed: money moves on Saturdays, and a smooth
+ * The curve is stepped, not smoothed: money moves on the transfer day, and a smooth
  * curve would claim the balance rises continuously in between.
  */
 

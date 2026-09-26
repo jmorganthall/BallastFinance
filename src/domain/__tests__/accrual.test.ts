@@ -12,7 +12,12 @@ import {
   openingSinceLastOccurrence,
   evenPaceCents,
 } from '../accrual'
-import { transferWeeksBetween, type CivilDate } from '../dates'
+import {
+  DEFAULT_TRANSFER_WEEKDAY,
+  transferWeeksBetween,
+  type CivilDate,
+  type Weekday,
+} from '../dates'
 import type { LineItem, LineItemChange, LineItemSnapshot } from '../types'
 import { lineItemTotalCents } from '../types'
 
@@ -47,8 +52,12 @@ function snap(over: Partial<LineItemSnapshot> = {}): LineItemSnapshot {
 }
 
 /** The invariant everything else rests on. */
-function deliveredByDueDate(components: readonly RateComponent[], dueDate: CivilDate): number {
-  return components.reduce((sum, c) => sum + componentDeliveredBy(c, dueDate), 0)
+function deliveredByDueDate(
+  components: readonly RateComponent[],
+  dueDate: CivilDate,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): number {
+  return components.reduce((sum, c) => sum + componentDeliveredBy(c, dueDate, transferWeekday), 0)
 }
 
 describe('base component at commit', () => {
@@ -446,11 +455,14 @@ describe('invariant: components always deliver exactly the total by the due date
 
   const UNITS = ['day', 'week', 'month', 'year'] as const
 
-  it('holds across randomised edit histories, timeline starts and recurrences', () => {
+  it('holds across randomised edit histories, timeline starts, recurrences and transfer days', () => {
     const random = rng(20260919)
     const trials = Number(process.env.ACCRUAL_INVARIANT_TRIALS ?? 400)
 
     for (let trial = 0; trial < trials; trial += 1) {
+      // The household's transfer day (PRD D31): any of the seven, drawn first
+      // so the rest of the history is the same whichever day it lands on.
+      const transferWeekday = Math.floor(random() * 7) as Weekday
       const startDue = 30 + Math.floor(random() * 400)
       let current: LineItemSnapshot = {
         unitAmountCents: 1 + Math.floor(random() * 500000),
@@ -517,28 +529,112 @@ describe('invariant: components always deliver exactly the total by the due date
         commitDate: COMMIT,
         changes,
         ...cycle,
+        transferWeekday,
       })
 
       expect(
-        deliveredByDueDate(components, current.dueDate),
-        `trial ${trial}: ${JSON.stringify({ changes, final: current, recurrence, timelineStart, cycle })}`,
+        deliveredByDueDate(components, current.dueDate, transferWeekday),
+        `trial ${trial}: ${JSON.stringify({ transferWeekday, changes, final: current, recurrence, timelineStart, cycle })}`,
       ).toBe(lineItemTotalCents(finalItem))
+
+      // Every component's week count is the transfer count of its own window
+      // on this household's day; a Saturday count would read one off at the edges.
+      for (const c of components) {
+        if (c.kind === 'opening') continue
+        expect(c.weeks, `trial ${trial}: weeks of ${JSON.stringify(c)}`).toBe(
+          Math.max(1, transferWeeksBetween(c.startDate, c.endDate, transferWeekday)),
+        )
+      }
     }
   })
 
   it('never under-funds when the rounded-up weekly rates are actually transferred', () => {
     const random = rng(1)
     for (let trial = 0; trial < 200; trial += 1) {
+      const transferWeekday = Math.floor(random() * 7) as Weekday
       const total = 1 + Math.floor(random() * 500000)
       const days = 7 + Math.floor(random() * 500)
       const due = addDaysUTC(COMMIT, days)
       const [base] = componentsForLineItem({
         lineItem: item({ unitAmountCents: total, quantity: 1, dueDate: due }),
         commitDate: COMMIT,
+        transferWeekday,
       })
       const transferred = componentRatePerWeekCents(base!) * base!.weeks
       expect(transferred).toBeGreaterThanOrEqual(total)
     }
+  })
+})
+
+describe('a Friday household (the transfer day is a setting, PRD D31)', () => {
+  const FRIDAY: Weekday = 5
+
+  it('divides by the count of Fridays, and reads one more week than Saturday counting at the edge', () => {
+    // Due Friday 15 Jan 2027, committed Saturday 19 Sep 2026: 17 Fridays land
+    // before the money is needed, where Saturday counting saw 16.
+    const friday = componentsForLineItem({
+      lineItem: item({ dueDate: '2027-01-15' }),
+      commitDate: COMMIT,
+      transferWeekday: FRIDAY,
+    })[0]!
+    const saturday = componentsForLineItem({ lineItem: item({ dueDate: '2027-01-15' }), commitDate: COMMIT })[0]!
+    expect(friday.weeks).toBe(17)
+    expect(saturday.weeks).toBe(16)
+    expect(componentRatePerWeekCents(friday)).toBe(Math.ceil(60000 / 17))
+    expect(weeklyBreakdown([friday], COMMIT, 0, FRIDAY).totalPerWeekCents).toBe(Math.ceil(60000 / 17))
+  })
+
+  it('steps on Fridays: delivered rises the day money moves, not the day after', () => {
+    const [base] = componentsForLineItem({ lineItem: item(), commitDate: COMMIT, transferWeekday: FRIDAY })
+    // Thu 24 Sep: nothing has moved. Fri 25 Sep: one transfer. Sat 26 Sep: still one.
+    expect(componentDeliveredBy(base!, '2026-09-24', FRIDAY)).toBe(0)
+    expect(componentDeliveredBy(base!, '2026-09-25', FRIDAY)).toBe(Math.ceil(60000 / 17))
+    expect(componentDeliveredBy(base!, '2026-09-26', FRIDAY)).toBe(Math.ceil(60000 / 17))
+    // Read with the wrong day, the same component would claim nothing on the Friday.
+    expect(componentDeliveredBy(base!, '2026-09-25')).toBe(0)
+  })
+
+  it('agrees between the pace and the plan on a Friday, as it does on a Saturday', () => {
+    const [base] = componentsForLineItem({
+      lineItem: item({ dueDate: '2027-01-15' }),
+      commitDate: COMMIT,
+      transferWeekday: FRIDAY,
+    })
+    for (const day of ['2026-09-25', '2026-10-30', '2026-12-31', '2027-01-15']) {
+      expect(
+        evenPaceCents({ totalCents: 60000, fromDate: COMMIT, dueDate: '2027-01-15', today: day, transferWeekday: FRIDAY }),
+      ).toBe(componentDeliveredBy(base!, day, FRIDAY))
+    }
+  })
+
+  it('prices an edit on the Friday count, and still lands on the total', () => {
+    const changes: LineItemChange[] = [
+      {
+        lineItemId: 'li-tickets',
+        occurredAt: '2026-11-04', // a Wednesday
+        before: snap({ dueDate: '2027-01-15' }),
+        after: snap({ dueDate: '2027-01-15', quantity: 2 }),
+      },
+    ]
+    const components = componentsForLineItem({
+      lineItem: item({ dueDate: '2027-01-15', quantity: 2 }),
+      commitDate: COMMIT,
+      changes,
+      transferWeekday: FRIDAY,
+    })
+    const catchUp = components.find((c) => c.kind === 'catch_up')!
+    // Wed 4 Nov -> Fri 15 Jan: Fridays Nov 6 .. Jan 15, eleven of them.
+    expect(catchUp.weeks).toBe(11)
+    expect(catchUp.amountCents).toBe(60000)
+    expect(deliveredByDueDate(components, '2027-01-15', FRIDAY)).toBe(120000)
+    expect(respreadEquivalentPerWeekCents({ remainingCents: 1100, asOf: '2026-11-04', dueDate: '2027-01-15', transferWeekday: FRIDAY })).toBe(100)
+  })
+
+  it('samples the curve one point per Friday transfer', () => {
+    const [base] = componentsForLineItem({ lineItem: item(), commitDate: COMMIT, transferWeekday: FRIDAY })
+    const points = accrualCurve({ components: [base!], from: COMMIT, to: DUE, transferWeekday: FRIDAY })
+    expect(points).toHaveLength(transferWeeksBetween(COMMIT, DUE, FRIDAY) + 1)
+    expect(points.at(-1)).toEqual({ date: DUE, cents: 60000 })
   })
 })
 

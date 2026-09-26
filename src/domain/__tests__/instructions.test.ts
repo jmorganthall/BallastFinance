@@ -5,6 +5,7 @@ import {
   instructionSentence,
   openCommitmentsFor,
   outstandingInstructions,
+  perWeekOf,
   runningAdjustments,
   stopCatchUpOffer,
   stopCatchUpSentence,
@@ -289,6 +290,24 @@ describe('outstanding instructions', () => {
     const odd = { issuedOn: '2026-11-21', endsOn: '2026-12-12', amountCents: 100 } // 3 weeks
     expect(instructionSentence(issued({ instructionId: 'b2', type: 'rate_bump', ...odd }))).toContain('$0.34 a week')
     expect(instructionSentence(issued({ instructionId: 'c2', type: 'rate_cut', ...odd }))).toContain('$0.33 a week')
+  })
+
+  it('speaks a bump per week on the household transfer day (PRD D31)', () => {
+    // Issued Wednesday 23 Sep, ending Friday 13 Nov: eight Fridays, but only
+    // seven Saturdays (Sep 26 .. Nov 7). A Friday household divides by eight.
+    const dated = { issuedOn: '2026-09-23', endsOn: '2026-11-13', amountCents: 8000 }
+    const bump = issued({ instructionId: 'b', type: 'rate_bump', ...dated })
+    expect(perWeekOf(bump, 5)).toBe(1000)
+    expect(perWeekOf(bump)).toBe(Math.ceil(8000 / 7))
+    expect(instructionSentence(bump, 5)).toBe(
+      'Add $10.00 a week to the Annual Expenses transfer until 2026-11-13, to catch up.',
+    )
+    // A cut is issued at its positive amount and spoken as a positive figure too.
+    const cut = issued({ instructionId: 'c', type: 'rate_cut', ...dated })
+    expect(perWeekOf(cut, 5)).toBe(1000)
+    expect(instructionSentence(cut, 5)).toContain('$10.00 a week')
+    // The same day, read as a Sunday household: seven Sundays (Sep 27 .. Nov 8).
+    expect(perWeekOf(bump, 0)).toBe(Math.ceil(8000 / 7))
   })
 
   it('splits bumps and cuts into done and still waiting, and flips the sign of a cut', () => {

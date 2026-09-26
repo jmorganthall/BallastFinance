@@ -18,7 +18,14 @@ import {
   driftAdjustmentComponent,
   isComponentActive,
 } from './accrual'
-import { accrualWeeksBetween, compareDates, minDate, type CivilDate } from './dates'
+import {
+  accrualWeeksBetween,
+  compareDates,
+  DEFAULT_TRANSFER_WEEKDAY,
+  minDate,
+  type CivilDate,
+  type Weekday,
+} from './dates'
 import { ceilDiv, formatCents, type Cents } from './money'
 import type { DriftAdjustment, Id } from './types'
 
@@ -296,8 +303,15 @@ export function openCommitmentsFor(args: {
 }
 
 /** What a bump or cut will still put into (positive) or take out of (negative) the account after `from`. */
-export function adjustmentRemainingAfter(a: DriftAdjustment, from: CivilDate): Cents {
-  return a.amountCents - componentDeliveredBy(driftAdjustmentComponent(a), from)
+export function adjustmentRemainingAfter(
+  a: DriftAdjustment,
+  from: CivilDate,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): Cents {
+  return (
+    a.amountCents -
+    componentDeliveredBy(driftAdjustmentComponent(a, transferWeekday), from, transferWeekday)
+  )
 }
 
 /**
@@ -307,10 +321,15 @@ export function adjustmentRemainingAfter(a: DriftAdjustment, from: CivilDate): C
  * the raw gap, so a catch-up already running or already offered is never
  * offered a second time.
  */
-export function committedAfter(args: { commitments: OpenCommitments; from: CivilDate }): Cents {
+export function committedAfter(args: {
+  commitments: OpenCommitments
+  from: CivilDate
+  transferWeekday?: Weekday
+}): Cents {
   const { commitments, from } = args
+  const transferWeekday = args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
   const dated = [...commitments.running, ...commitments.pending].reduce(
-    (sum, a) => sum + adjustmentRemainingAfter(a, from),
+    (sum, a) => sum + adjustmentRemainingAfter(a, from, transferWeekday),
     0,
   )
   const moves = commitments.pendingMoves.reduce((sum, m) => sum + m.amountCents, 0)
@@ -343,8 +362,11 @@ export function pendingByKind(commitments: OpenCommitments): PendingByKind {
 }
 
 /** The weekly figure a bump or cut reads at: the same rounding the transfer instruction uses. */
-export function adjustmentPerWeekCents(a: DriftAdjustment): Cents {
-  return componentRatePerWeekCents(driftAdjustmentComponent(a))
+export function adjustmentPerWeekCents(
+  a: DriftAdjustment,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): Cents {
+  return componentRatePerWeekCents(driftAdjustmentComponent(a, transferWeekday))
 }
 
 /**
@@ -364,14 +386,18 @@ export interface RunningAdjustment {
 export function runningAdjustments(args: {
   running: readonly DriftAdjustment[]
   today: CivilDate
+  transferWeekday?: Weekday
 }): RunningAdjustment[] {
+  const transferWeekday = args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
   return args.running
-    .filter((a) => isComponentActive(driftAdjustmentComponent(a), args.today))
+    .filter((a) =>
+      isComponentActive(driftAdjustmentComponent(a, transferWeekday), args.today, transferWeekday),
+    )
     .map((a) => ({
       instructionId: a.id,
-      perWeekCents: adjustmentPerWeekCents(a),
+      perWeekCents: adjustmentPerWeekCents(a, transferWeekday),
       endDate: a.endDate,
-      remainingCents: adjustmentRemainingAfter(a, args.today),
+      remainingCents: adjustmentRemainingAfter(a, args.today, transferWeekday),
     }))
     .sort((a, b) => compareDates(a.endDate, b.endDate))
 }
@@ -398,6 +424,7 @@ export function stopCatchUpOffer(args: {
   running: readonly DriftAdjustment[]
   today: CivilDate
   extraCents: Cents
+  transferWeekday?: Weekday
 }): StopCatchUpOffer | null {
   if (args.extraCents <= 0) return null
   const bump = runningAdjustments(args)
@@ -422,15 +449,28 @@ export function stopCatchUpSentence(offer: StopCatchUpOffer): string {
  * as the weekly breakdown: a bump rounds up so it never under-funds, a cut
  * rounds down so it never over-cuts.
  */
-export function perWeekOf(instruction: IssuedInstruction): Cents {
-  const weeks = accrualWeeksBetween(instruction.issuedOn, instruction.endsOn ?? instruction.issuedOn)
+export function perWeekOf(
+  instruction: IssuedInstruction,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): Cents {
+  const weeks = accrualWeeksBetween(
+    instruction.issuedOn,
+    instruction.endsOn ?? instruction.issuedOn,
+    transferWeekday,
+  )
   return instruction.type === 'rate_cut'
     ? -ceilDiv(-instruction.amountCents, weeks)
     : ceilDiv(instruction.amountCents, weeks)
 }
 
-/** The sentence a human reads and acts on. Plain language (PRD §9). */
-export function instructionSentence(instruction: IssuedInstruction): string {
+/**
+ * The sentence a human reads and acts on. Plain language (PRD §9). A bump or
+ * cut is spoken per week, so the household's transfer day decides its figure.
+ */
+export function instructionSentence(
+  instruction: IssuedInstruction,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): string {
   switch (instruction.type) {
     case 'set_weekly_transfer':
       return `In Capital One 360, set the recurring transfer into ${instruction.targetLabel} to ${formatCents(instruction.amountCents)} per week.`
@@ -455,9 +495,9 @@ export function instructionSentence(instruction: IssuedInstruction): string {
     case 'one_time_move_out':
       return `Move ${formatCents(instruction.amountCents)} out of ${instruction.targetLabel} once; it holds more than the plan needs.`
     case 'rate_bump':
-      return `Add ${formatCents(perWeekOf(instruction))} a week to the ${instruction.targetLabel} transfer until ${instruction.endsOn}, to catch up.`
+      return `Add ${formatCents(perWeekOf(instruction, transferWeekday))} a week to the ${instruction.targetLabel} transfer until ${instruction.endsOn}, to catch up.`
     case 'rate_cut':
-      return `Take ${formatCents(perWeekOf(instruction))} a week off the ${instruction.targetLabel} transfer until ${instruction.endsOn}; the extra you already hold covers it.`
+      return `Take ${formatCents(perWeekOf(instruction, transferWeekday))} a week off the ${instruction.targetLabel} transfer until ${instruction.endsOn}; the extra you already hold covers it.`
     case 'debt_payment':
       return `Pay ${formatCents(instruction.amountCents)} toward ${instruction.targetLabel}.`
     case 'spend_confirmation':

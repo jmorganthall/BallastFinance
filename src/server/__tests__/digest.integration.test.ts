@@ -10,7 +10,13 @@ import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
 import { Engine } from '@/server/engine'
-import { buildCheckInNudge, buildDueDatePrompts, buildWeeklyDigest } from '@/server/digest'
+import {
+  buildCheckInNudge,
+  buildDueDatePrompts,
+  buildWeeklyDigest,
+  buildWeeklyDigestIfDue,
+  weeklyDigestDueToday,
+} from '@/server/digest'
 import { INTAKE_CONTRACT_VERSION } from '@/domain'
 
 const url = process.env.DATABASE_URL
@@ -118,6 +124,31 @@ describeDb('weekly digest', () => {
     const detail = digest.detail as { total_per_week_cents: number; accounts: unknown[] }
     expect(detail.total_per_week_cents).toBeGreaterThan(0)
     expect(detail.accounts).toHaveLength(1)
+  })
+
+  it('goes out on the household transfer day and on no other (PRD D31)', async () => {
+    const base = { householdId, baseUrl: 'https://ballast.example', db }
+
+    // Saturday until the household says otherwise: 19 Sep 2026 is one.
+    expect(await weeklyDigestDueToday({ ...base, today: '2026-09-19' })).toBe(true)
+    expect(await weeklyDigestDueToday({ ...base, today: '2026-09-18' })).toBe(false)
+    expect(await buildWeeklyDigestIfDue({ ...base, today: '2026-09-18' })).toBeNull()
+    expect((await buildWeeklyDigestIfDue({ ...base, today: '2026-09-19' }))?.kind).toBe('weekly_digest')
+
+    // A Friday household gets it on Friday, and nothing on Saturday.
+    await engine.setTransferWeekday(5)
+    expect(await weeklyDigestDueToday({ ...base, today: '2026-09-18' })).toBe(true)
+    expect(await weeklyDigestDueToday({ ...base, today: '2026-09-19' })).toBe(false)
+    expect(await buildWeeklyDigestIfDue({ ...base, today: '2026-09-19' })).toBeNull()
+    const friday = await buildWeeklyDigestIfDue({ ...base, today: '2026-09-18' })
+    expect(friday?.kind).toBe('weekly_digest')
+    // And the numbers in it count Fridays. From Fri 18 Sep: the airfare due
+    // Sat 26 Sep has one Friday left (the 25th), so all $1,350 moves this
+    // week; the tickets due Sat 16 Jan 2027 have 17 Fridays, ceil(180000 / 17).
+    // The account figure is rounded up to the household's $10 step.
+    const detail = friday!.detail as { accounts: { per_week_cents: number }[] }
+    expect(detail.accounts[0]!.per_week_cents).toBe(Math.ceil((135000 + Math.ceil(180000 / 17)) / 1000) * 1000)
+    expect(friday!.body).toContain('This week — 2026-09-18')
   })
 
   it('nudges only when a balance is actually stale', async () => {

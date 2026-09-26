@@ -763,6 +763,23 @@ export async function saveTransferRoundingAction(formData: FormData): Promise<vo
   redirect('/settings?saved=1')
 }
 
+/**
+ * The day the transfer runs (PRD D31). Nothing is stored but the day: every
+ * weekly figure counts transfers afresh from it, so saving re-renders the
+ * numbers and the steady-transfer to-dos re-issue wherever a figure moved.
+ */
+export async function saveTransferWeekdayAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const day = Number(formData.get('transfer_weekday'))
+  try {
+    await engine.setTransferWeekday(day)
+  } catch {
+    redirect(`/settings?error=${encodeURIComponent('Pick the day of the week the transfer runs.')}`)
+  }
+  revalidatePath('/', 'layout')
+  redirect('/settings?saved=1')
+}
+
 export async function saveNudgeSettingsAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const weeks = Number(formData.get('check_in_nudge_weeks'))

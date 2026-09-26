@@ -41,6 +41,9 @@ import {
   canWriteAccount,
   closeOutPrompts,
   DEFAULT_TRANSFER_ROUND_UP_CENTS,
+  DEFAULT_TRANSFER_WEEKDAY,
+  isWeekday,
+  type Weekday,
   findShortfalls,
   formatCents,
   lineItemTotalCents,
@@ -677,12 +680,18 @@ export class Engine {
     } = {},
   ): Promise<{ lineItemId: Id; label: string; lastOccurrence: CivilDate; cents: Cents }[]> {
     const today = this.today()
-    const rows = await this.db
-      .select()
-      .from(lineItemsTable)
-      .where(
-        and(eq(lineItemsTable.packageId, packageId), eq(lineItemsTable.householdId, this.householdId)),
-      )
+    const [rows, transferWeekday] = await Promise.all([
+      this.db
+        .select()
+        .from(lineItemsTable)
+        .where(
+          and(
+            eq(lineItemsTable.packageId, packageId),
+            eq(lineItemsTable.householdId, this.householdId),
+          ),
+        ),
+      this.transferWeekday(),
+    ])
 
     return rows.flatMap((row) => {
       const item = toLineItem(row)
@@ -692,6 +701,7 @@ export class Engine {
         recurrence: item.recurrence,
         today,
         timelineStart: options.timelineStartByLineItem?.[item.id] ?? item.timelineStart,
+        transferWeekday,
       })
       return suggestion
         ? [
@@ -1166,16 +1176,25 @@ export class Engine {
 
   /** Load every fact the derivation module needs, in one place. */
   async derivationInput(): Promise<DerivationInput> {
-    const [accounts, packages, lineItems, changes, adjustments, cycleStarts, transferRoundUpCents] =
-      await Promise.all([
-        this.listReserveAccounts(),
-        this.listPackages(),
-        this.listLineItems(),
-        this.listLineItemChanges(),
-        this.driftAdjustments(),
-        this.listCycleStarts(),
-        this.transferRoundUpCents(),
-      ])
+    const [
+      accounts,
+      packages,
+      lineItems,
+      changes,
+      adjustments,
+      cycleStarts,
+      transferRoundUpCents,
+      transferWeekday,
+    ] = await Promise.all([
+      this.listReserveAccounts(),
+      this.listPackages(),
+      this.listLineItems(),
+      this.listLineItemChanges(),
+      this.driftAdjustments(),
+      this.listCycleStarts(),
+      this.transferRoundUpCents(),
+      this.transferWeekday(),
+    ])
     return {
       today: this.today(),
       accounts,
@@ -1186,6 +1205,7 @@ export class Engine {
       pendingDriftAdjustments: adjustments.pending,
       cycleStarts,
       transferRoundUpCents,
+      transferWeekday,
     }
   }
 
@@ -1196,6 +1216,25 @@ export class Engine {
    */
   async transferRoundUpCents(): Promise<Cents> {
     return this.getSetting<number>('transfer_round_up_cents', DEFAULT_TRANSFER_ROUND_UP_CENTS)
+  }
+
+  /**
+   * The day the recurring transfer runs (PRD D31), 0 Sunday to 6 Saturday. A
+   * household fact, not the software's: every count of weeks reads it, so
+   * changing it re-derives every weekly figure (nothing derived is stored,
+   * D9). Saturday until a person picks a day. A value that is not a weekday
+   * -- a hand-edited row, say -- reads as the default rather than breaking
+   * every screen.
+   */
+  async transferWeekday(): Promise<Weekday> {
+    const stored = await this.getSetting<unknown>('transfer_weekday', DEFAULT_TRANSFER_WEEKDAY)
+    return isWeekday(stored) ? stored : DEFAULT_TRANSFER_WEEKDAY
+  }
+
+  /** Recorded like every other setting: a dated row, never an edit. */
+  async setTransferWeekday(day: number): Promise<void> {
+    if (!isWeekday(day)) throw new EngineError('The transfer day has to be a day of the week')
+    await this.putSetting('transfer_weekday', day)
   }
 
   /** Home / This Week: the per-account numbers to move (PRD §9). */
@@ -1237,6 +1276,7 @@ export class Engine {
       from,
       to,
       capCents: targetCents,
+      transferWeekday: await this.transferWeekday(),
     })
 
     // Confirmed balances are per account, so a package-level comparison only

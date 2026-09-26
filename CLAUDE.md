@@ -52,8 +52,23 @@ principles, and they are non-negotiable.
 - **Dates are calendar dates, not instants.** `CivilDate` strings, `date`
   columns, and no timezone in the arithmetic. The only timezone-aware function
   is `todayIn()`.
-- **The week boundary is Saturday**, matching the Capital One transfer and the
-  digest. A "week" in the accrual math is one Saturday transfer.
+- **The week boundary is the household's transfer day** (PRD D31, rev 44),
+  the weekday the Capital One recurring transfer runs: setting
+  `transfer_weekday` (0 Sunday – 6 Saturday), default Saturday until a person
+  picks a day under Settings ("Our transfer runs on"). A "week" in the accrual
+  math is one such transfer. The one definition of the count is
+  `transferWeeksBetween` in `src/domain/dates.ts`; every function that counts
+  weeks takes the day as `transferWeekday` beside `today` (a field on an args
+  object, or the last positional parameter), defaulting to Saturday only so
+  pure tests can leave it out. The engine always passes the household's:
+  `DerivationInput.transferWeekday` from `derivationInput()`, and
+  `engine.transferWeekday()` wherever a screen or the digest calls a domain
+  function directly. Nothing derived is stored, so changing the day
+  re-derives every figure. The digest is sent on the transfer day:
+  `DIGEST_CRON` names a time of day and `buildWeeklyDigestIfDue` skips a
+  household whose day it is not. A catch-up bump or cut ends on the n-th
+  transfer day (`nthTransferDayAfter`). Any place that still assumes Saturday
+  is a bug.
 - **Events are append-only**, enforced by a revoked privilege *and* a trigger
   that fires regardless of role. Never add an UPDATE or DELETE against `events`;
   record a correcting event instead.
@@ -201,7 +216,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 686 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 710 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

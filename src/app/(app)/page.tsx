@@ -24,13 +24,15 @@ export const dynamic = 'force-dynamic'
 
 export default async function ThisWeekPage() {
   const { engine, viewer } = await requireEngine()
-  const [accounts, outstanding, closeOuts, commitments, tripToDos] = await Promise.all([
-    engine.accountViews(),
-    engine.outstandingInstructions(),
-    engine.closeOutPrompts(),
-    engine.openCommitmentsByAccount(),
-    engine.comingUpTripTasks(3),
-  ])
+  const [accounts, outstanding, closeOuts, commitments, tripToDos, transferWeekday] =
+    await Promise.all([
+      engine.accountViews(),
+      engine.outstandingInstructions(),
+      engine.closeOutPrompts(),
+      engine.openCommitmentsByAccount(),
+      engine.comingUpTripTasks(3),
+      engine.transferWeekday(),
+    ])
   const today = engine.today()
 
   // What can be done today, and what is held back until a later day (the
@@ -43,7 +45,11 @@ export default async function ThisWeekPage() {
   const withWork = accounts.filter(
     (a) =>
       a.weekly.transferPerWeekCents !== 0 ||
-      runningAdjustments({ running: commitments.get(a.account.id)?.running ?? [], today }).length > 0,
+      runningAdjustments({
+        running: commitments.get(a.account.id)?.running ?? [],
+        today,
+        transferWeekday,
+      }).length > 0,
   )
   const grandTotal = withWork.reduce((s, a) => s + a.weekly.transferPerWeekCents, 0)
   const shouldHold = accounts.reduce((s, a) => s + a.shouldHaveSavedCents, 0)
@@ -135,7 +141,7 @@ export default async function ThisWeekPage() {
               return (
               <li key={instruction.instructionId}>
                 <Card>
-                  <p className="text-sm">{instructionSentence(instruction)}</p>
+                  <p className="text-sm">{instructionSentence(instruction, transferWeekday)}</p>
                   {target && onceDone ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
                       That makes the {target.account.name} transfer{' '}
@@ -200,7 +206,7 @@ export default async function ThisWeekPage() {
               <li key={instruction.instructionId}>
                 <Card className="border-dashed">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm">{instructionSentence(instruction)}</p>
+                    <p className="text-sm">{instructionSentence(instruction, transferWeekday)}</p>
                     <Pill tone="neutral">From {humanDate(instruction.availableOn!)}</Pill>
                   </div>
                   {instruction.note ? (
@@ -319,6 +325,7 @@ export default async function ThisWeekPage() {
                 remainingCents: outstanding,
                 asOf: today,
                 dueDate: soonest ?? today,
+                transferWeekday,
               })
               // Every bump or cut the person has confirmed and that is still
               // changing this transfer, with the day it was going to run to,
@@ -326,6 +333,7 @@ export default async function ThisWeekPage() {
               const running = runningAdjustments({
                 running: commitments.get(view.account.id)?.running ?? [],
                 today,
+                transferWeekday,
               })
 
               return (

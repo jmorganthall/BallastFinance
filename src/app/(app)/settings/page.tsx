@@ -14,9 +14,10 @@ import {
   saveNotificationPrefsAction,
   saveNudgeSettingsAction,
   saveTransferRoundingAction,
+  saveTransferWeekdayAction,
   signOutAction,
 } from '@/server/actions'
-import { formatCents } from '@/domain'
+import { formatCents, WEEKDAY_NAMES } from '@/domain'
 import { SheetImport } from './sheet-import'
 
 export const dynamic = 'force-dynamic'
@@ -32,16 +33,18 @@ export default async function SettingsPage({
   const { saved, error } = await searchParams
   const { engine, viewer } = await requireEngine()
 
-  const [rules, buffer, weight, accounts, nudgeWeeks, promoLead, prefs, roundUp] = await Promise.all([
-    engine.allocationRules(),
-    engine.bufferCents(),
-    engine.priorityWeight(),
-    engine.reserveAccountsForViewer(),
-    engine.getSetting<number>('check_in_nudge_weeks', 2),
-    engine.promoLeadWeeks(),
-    engine.getSetting<Record<string, boolean>>('notification_prefs', {}),
-    engine.transferRoundUpCents(),
-  ])
+  const [rules, buffer, weight, accounts, nudgeWeeks, promoLead, prefs, roundUp, transferWeekday] =
+    await Promise.all([
+      engine.allocationRules(),
+      engine.bufferCents(),
+      engine.priorityWeight(),
+      engine.reserveAccountsForViewer(),
+      engine.getSetting<number>('check_in_nudge_weeks', 2),
+      engine.promoLeadWeeks(),
+      engine.getSetting<Record<string, boolean>>('notification_prefs', {}),
+      engine.transferRoundUpCents(),
+      engine.transferWeekday(),
+    ])
   // Absent means subscribed: both spouses receive everything by default (PRD §8).
   const receives = prefs[viewer.userId] !== false
 
@@ -108,6 +111,30 @@ export default async function SettingsPage({
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
         The weekly transfer
       </h2>
+      <Card className="mb-4">
+        <form action={saveTransferWeekdayAction} className="space-y-3">
+          <label className="block text-sm font-medium">
+            Our transfer runs on
+            <select name="transfer_weekday" defaultValue={String(transferWeekday)} className={field}>
+              {WEEKDAY_NAMES.map((name, day) => (
+                <option key={name} value={day}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+              The weekly figures count how many transfers land before each due date, so this is
+              the day Capital One moves the money.
+            </span>
+          </label>
+          <button
+            type="submit"
+            className="w-full rounded-xl border border-[var(--color-line)] px-4 py-3 font-medium"
+          >
+            Save
+          </button>
+        </form>
+      </Card>
       <Card className="mb-6">
         <form action={saveTransferRoundingAction} className="space-y-3">
           <label className="block text-sm font-medium">

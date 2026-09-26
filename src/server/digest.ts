@@ -9,7 +9,7 @@
 import { Engine } from '@/server/engine'
 import type { Db } from '@/db/client'
 import type { NotificationPayload } from '@/server/notifications'
-import { formatCents, instructionSentence, transferWeeksBetween } from '@/domain'
+import { formatCents, instructionSentence, isTransferDay, transferWeeksBetween } from '@/domain'
 
 export interface DigestInput {
   householdId: string
@@ -39,14 +39,32 @@ function engineFor(input: DigestInput): Engine {
   })
 }
 
+/**
+ * The digest goes out on the household's transfer day (PRD D31), so the
+ * numbers in it describe the week the reader is in: the scheduler runs this
+ * every morning and it says whether today is that day for this household.
+ */
+export async function weeklyDigestDueToday(input: DigestInput): Promise<boolean> {
+  const engine = engineFor(input)
+  return isTransferDay(engine.today(), await engine.transferWeekday())
+}
+
+/** The digest, or null when today is not this household's transfer day. */
+export async function buildWeeklyDigestIfDue(
+  input: DigestInput,
+): Promise<NotificationPayload | null> {
+  return (await weeklyDigestDueToday(input)) ? buildWeeklyDigest(input) : null
+}
+
 export async function buildWeeklyDigest(input: DigestInput): Promise<NotificationPayload> {
   const engine = engineFor(input)
   const today = engine.today()
 
-  const [accounts, outstanding, closeOuts] = await Promise.all([
+  const [accounts, outstanding, closeOuts, transferWeekday] = await Promise.all([
     engine.accountViews(),
     engine.outstandingInstructions(),
     engine.closeOutPrompts(),
+    engine.transferWeekday(),
   ])
 
   const active = accounts.filter((a) => a.weekly.transferPerWeekCents !== 0)
@@ -89,13 +107,17 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   if (dueNow.length > 0) {
     lines.push('', '## Still to do', '')
     for (const instruction of dueNow) {
-      lines.push(`- ${instructionSentence(instruction)}${instruction.note ? ` (${instruction.note})` : ''}`)
+      lines.push(
+        `- ${instructionSentence(instruction, transferWeekday)}${instruction.note ? ` (${instruction.note})` : ''}`,
+      )
     }
   }
   if (comingUp.length > 0) {
     lines.push('', '## Coming up', '')
     for (const instruction of comingUp) {
-      lines.push(`- ${instructionSentence(instruction)}${instruction.note ? ` (${instruction.note})` : ''}`)
+      lines.push(
+        `- ${instructionSentence(instruction, transferWeekday)}${instruction.note ? ` (${instruction.note})` : ''}`,
+      )
     }
   }
 
@@ -103,7 +125,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   const upcoming = accounts
     .flatMap((a) => a.items)
     .filter((item) => {
-      const weeks = transferWeeksBetween(today, item.lineItem.dueDate)
+      const weeks = transferWeeksBetween(today, item.lineItem.dueDate, transferWeekday)
       return weeks > 0 && weeks <= 2
     })
   if (upcoming.length > 0) {
@@ -173,14 +195,17 @@ export async function buildCheckInNudge(
   const afterWeeks = input.afterWeeks ?? (await engine.getSetting('check_in_nudge_weeks', 2))
   const today = engine.today()
 
-  const confirmed = await engine.latestConfirmedBalances()
+  const [confirmed, transferWeekday] = await Promise.all([
+    engine.latestConfirmedBalances(),
+    engine.transferWeekday(),
+  ])
   const accounts = (await engine.accountViews()).filter((a) => a.items.length > 0)
   if (accounts.length === 0) return null
 
   const stale = accounts.filter((view) => {
     const last = confirmed.get(view.account.id)
     if (!last) return true
-    return transferWeeksBetween(last.on, today) >= afterWeeks
+    return transferWeeksBetween(last.on, today, transferWeekday) >= afterWeeks
   })
   if (stale.length === 0) return null
 

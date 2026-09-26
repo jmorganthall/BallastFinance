@@ -16,7 +16,7 @@ import {
   buildCheckInNudge,
   buildDueDatePrompts,
   buildPromoWarnings,
-  buildWeeklyDigest,
+  buildWeeklyDigestIfDue,
 } from '@/server/digest'
 import { sendNotification } from '@/server/notifications'
 import { Engine } from '@/server/engine'
@@ -26,11 +26,12 @@ import { parkDataFetchEnabled } from '@/server/park-fetch'
 const TIMEZONE = process.env.HOUSEHOLD_TIMEZONE ?? 'America/Chicago'
 
 /**
- * Saturday morning, matching the household week boundary. If the digest arrived
- * on a different day than the transfer runs, the numbers in it would describe a
- * week the reader is not in.
+ * The time of day the digest goes out (PRD D31). It is checked every morning
+ * and sent to a household only on its own transfer day, so the numbers in it
+ * describe the week the reader is in. An older value naming a weekday, like
+ * "0 8 * * 6", still works: it just never checks on the other days.
  */
-const WEEKLY_DIGEST_CRON = process.env.DIGEST_CRON ?? '0 8 * * 6'
+const WEEKLY_DIGEST_CRON = process.env.DIGEST_CRON ?? '0 8 * * *'
 const DUE_PROMPT_CRON = process.env.DUE_PROMPT_CRON ?? '0 9 * * 6'
 const CHECK_IN_NUDGE_CRON = process.env.CHECK_IN_NUDGE_CRON ?? '0 17 * * 0'
 const PROMO_WARNING_CRON = process.env.PROMO_WARNING_CRON ?? '0 10 * * 1'
@@ -160,8 +161,8 @@ export function startScheduler(): void {
 
   schedule(WEEKLY_DIGEST_CRON, 'weekly-digest', async () => {
     await forEachHousehold('weekly-digest', async (householdId, timezone) => {
-      const payload = await buildWeeklyDigest({ householdId, baseUrl: baseUrl(), timezone })
-      await sendNotification(payload)
+      const payload = await buildWeeklyDigestIfDue({ householdId, baseUrl: baseUrl(), timezone })
+      if (payload) await sendNotification(payload)
     })
   })
 
