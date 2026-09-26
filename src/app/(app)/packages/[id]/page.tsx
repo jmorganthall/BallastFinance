@@ -25,7 +25,7 @@ import {
   retirePackageAction,
   updateLineItemAction,
 } from '@/server/actions'
-import { describeRecurrence, formatCents } from '@/domain'
+import { describeRecurrence, formatCents, previousOccurrence } from '@/domain'
 import { RecurrenceFields } from '@/components/recurrence-fields'
 import { DeletePlan } from './delete-plan'
 
@@ -52,10 +52,18 @@ export default async function PackageDetailPage({
   if (!view) notFound()
 
   const isDraft = view.package.state === 'simulated'
-  // What a recurring part would already hold, had saving started last time
-  // round. Offered, never assumed: the person picks it or types their own.
-  const suggested = isDraft ? await engine.suggestedOpenings(view.package.id) : []
-  const suggestedTotal = suggested.reduce((sum, s) => sum + s.cents, 0)
+  // What a repeating part would already hold, had saving started the last
+  // time it came round. With the timeline starting there (D30, the default)
+  // that is what the part should hold today; with it starting at the commit
+  // it is offered as an opening instead, never assumed (D8). One figure, one
+  // arithmetic, read here as if every part started at the commit so the
+  // screen can show it either way.
+  const repeating = view.items.filter((i) => i.lineItem.state !== 'retired' && i.lineItem.recurrence !== null)
+  const elapsed = isDraft
+    ? await engine.suggestedOpenings(view.package.id, {
+        timelineStartByLineItem: Object.fromEntries(repeating.map((i) => [i.lineItem.id, 'commit'])),
+      })
+    : []
   const isDone = view.package.state === 'retired'
   const whatIf = isDraft ? await engine.whatIf(id) : []
   const curve = isDraft || isDone ? null : await engine.packageCurve(id)
@@ -145,66 +153,79 @@ export default async function PackageDetailPage({
               )}
             </div>
 
-            {suggested.length > 0 ? (
-              <form
-                action={commitPackageAction}
-                className="mt-4 rounded-xl border-2 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3"
-              >
-                <input type="hidden" name="package_id" value={view.package.id} />
-                <p className="text-sm font-medium">
-                  You would have <Money cents={suggestedTotal} /> set aside by now
-                </p>
-                <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-                  If you had been saving since the last time this came round. Is that about what
-                  you have?
-                </p>
-                <ul className="mt-2 space-y-1 text-sm">
-                  {suggested.map((s) => (
-                    <li key={s.lineItemId} className="flex justify-between gap-3">
-                      <span>
-                        {s.label}
-                        <span className="block text-xs text-[var(--color-ink-soft)]">
-                          last due {humanDate(s.lastOccurrence)}
-                        </span>
-                      </span>
-                      <span className="shrink-0 tabular">
-                        <Money cents={s.cents} />
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  type="submit"
-                  name="use_suggested"
-                  value="1"
-                  className="mt-3 w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"
-                >
-                  Yes, start with <Money cents={suggestedTotal} /> set aside
-                </button>
-              </form>
-            ) : null}
-
-            <form action={commitPackageAction} className="mt-4 space-y-3">
+            {/*
+              One form. A repeating part starts its timeline from the last
+              time it came round unless its box is unticked; an unticked part
+              starts today and is offered what it would have set aside by
+              now. The reveals are CSS on the checkbox state, so the page
+              stays server-rendered: nothing here is worked out in the browser.
+            */}
+            <form action={commitPackageAction} className="group mt-4 space-y-3">
               <input type="hidden" name="package_id" value={view.package.id} />
-              <label className="block text-sm font-medium">
-                {suggested.length > 0
-                  ? 'Or tell us what is actually set aside'
-                  : 'Already set aside for this (optional)'}
+
+              {elapsed.length > 0 ? (
+                <div className="space-y-2 rounded-xl border-2 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3">
+                  <p className="text-sm font-medium">Parts that come round again</p>
+                  {elapsed.map((s) => (
+                    <div key={s.lineItemId} className="rounded-lg bg-[var(--color-card)] p-2">
+                      <input type="hidden" name="timeline_part" value={s.lineItemId} />
+                      <input
+                        type="checkbox"
+                        id={`timeline-${s.lineItemId}`}
+                        name="timeline_from_last"
+                        value={s.lineItemId}
+                        defaultChecked
+                        className="tl peer mr-2 align-middle"
+                      />
+                      <label htmlFor={`timeline-${s.lineItemId}`} className="text-sm">
+                        <strong>{s.label}:</strong> start the timeline from the last time this came
+                        round ({humanDate(s.lastOccurrence)})
+                      </label>
+                      <p className="mt-1 hidden text-xs text-[var(--color-ink-soft)] peer-checked:block">
+                        Should hold <Money cents={s.cents} /> today; the check-in will say if it is
+                        not there.
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--color-ink-soft)] peer-checked:hidden">
+                        Starts today instead. You would have <Money cents={s.cents} /> set aside by
+                        now if you had been saving since {humanDate(s.lastOccurrence)} — is that
+                        about what you have?
+                      </p>
+                    </div>
+                  ))}
+                  <button
+                    type="submit"
+                    name="use_suggested"
+                    value="1"
+                    className="hidden w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white group-has-[.tl:not(:checked)]:block"
+                  >
+                    Yes, start with what I would have set aside by now
+                  </button>
+                </div>
+              ) : null}
+
+              <label
+                className={`block text-sm font-medium ${
+                  live.some((i) => i.lineItem.recurrence === null) || elapsed.length === 0
+                    ? ''
+                    : 'hidden group-has-[.tl:not(:checked)]:block'
+                }`}
+              >
+                Already set aside for this (optional)
                 <input name="opening" inputMode="decimal" placeholder="0" className={field} />
                 <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
-                  Money you already have toward it. Shared across the parts by cost, so the
-                  weekly amount is right from the first week.
+                  Money you already have toward it. Shared by cost across the parts that start
+                  today, so the weekly amount is right from the first week.
                 </span>
               </label>
               <button
                 type="submit"
                 className={`w-full rounded-xl px-4 py-3 font-medium ${
-                  suggested.length > 0
-                    ? 'border border-[var(--color-line)]'
+                  elapsed.length > 0
+                    ? 'border border-[var(--color-line)] group-has-[.tl:not(:checked)]:bg-transparent group-has-[.tl:not(:checked)]:text-[var(--color-ink)] bg-[var(--color-accent)] text-white'
                     : 'bg-[var(--color-accent)] text-white'
                 }`}
               >
-                {suggested.length > 0 ? 'Start with this amount instead' : 'Start saving for this'}
+                Start saving for this
               </button>
             </form>
           </>
@@ -344,6 +365,28 @@ export default async function PackageDetailPage({
                       </label>
                       <RecurrenceFields defaultValue={item.lineItem.recurrence} />
                     </div>
+                    {item.lineItem.recurrence !== null ? (
+                      <div className="text-sm">
+                        <input type="hidden" name="timeline_shown" value="1" />
+                        <input type="hidden" name="timeline_part" value={item.lineItem.id} />
+                        <input
+                          type="checkbox"
+                          id={`edit-timeline-${item.lineItem.id}`}
+                          name="timeline_from_last"
+                          value={item.lineItem.id}
+                          defaultChecked={item.lineItem.timelineStart === 'last_occurrence'}
+                          className="mr-2 align-middle"
+                        />
+                        <label htmlFor={`edit-timeline-${item.lineItem.id}`}>
+                          Start the timeline from the last time this came round (
+                          {humanDate(previousOccurrence(item.lineItem.dueDate, item.lineItem.recurrence)!)})
+                        </label>
+                        <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                          Ticked, it should already hold its share of the cycle and the weekly
+                          amount is the steady one. Unticked, it starts from the day the plan did.
+                        </p>
+                      </div>
+                    ) : null}
                     <label className="block text-sm font-medium">
                       Save it in
                       <select
@@ -374,17 +417,31 @@ export default async function PackageDetailPage({
                 </details>
               ) : null}
 
-              {!isDraft && item.components.length > 1 ? (
+              {!isDraft &&
+              (item.components.length > 1 ||
+                item.components.some(
+                  (c) => c.kind === 'base' && c.startDate < (view.package.committedAt ?? c.startDate),
+                )) ? (
                 <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
                   <Hint
                     detail={item.components
                       .map(
                         (c) =>
-                          `${c.kind === 'base' ? 'Original plan' : c.kind === 'opening' ? 'Already set aside' : 'Added when the plan changed'}: ${formatCents(c.amountCents)} over ${c.weeks} week${c.weeks === 1 ? '' : 's'}, ${c.startDate} to ${c.endDate}`,
+                          `${
+                            c.kind === 'base'
+                              ? c.startDate < (view.package.committedAt ?? c.startDate)
+                                ? 'Since last time it came round'
+                                : 'Original plan'
+                              : c.kind === 'opening'
+                                ? 'Already set aside'
+                                : 'Added when the plan changed'
+                          }: ${formatCents(c.amountCents)} over ${c.weeks} week${c.weeks === 1 ? '' : 's'}, ${c.startDate} to ${c.endDate}`,
                       )
                       .join(' · ')}
                   >
-                    Made of {item.components.length} pieces
+                    {item.components.length > 1
+                      ? `Made of ${item.components.length} pieces`
+                      : 'Counted since last time it came round'}
                   </Hint>
                 </p>
               ) : null}
@@ -431,7 +488,8 @@ export default async function PackageDetailPage({
               </label>
               {!isDraft ? (
                 <p className="text-xs text-[var(--color-ink-soft)]">
-                  It starts being set aside from today.
+                  A one-off starts being set aside from today. A part that comes round again
+                  counts from the last time it did, and should already hold its share.
                 </p>
               ) : null}
               <button

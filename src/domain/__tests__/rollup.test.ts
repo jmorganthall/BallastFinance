@@ -60,6 +60,7 @@ function li(over: Partial<LineItem> & Pick<LineItem, 'id'>): LineItem {
     reserveAccountId: annual.id,
     state: 'accruing',
     recurrence: null,
+    timelineStart: 'commit',
     ...over,
   }
 }
@@ -740,6 +741,58 @@ describe('progress against the pace', () => {
     expect(item.paceCents).toBe(34386)
     expect(item.shouldHaveSavedCents).toBe(0)
     expect(progressOf(item).status).toBe('behind')
+  })
+
+  it('puts a repeating part on its pace from the day it is committed, when its timeline starts at its last occurrence (D30)', () => {
+    const views = accountViews({
+      today: TODAY,
+      accounts: [annual],
+      packages: [pkg()],
+      lineItems: [
+        li({
+          id: 'li-progressive',
+          label: 'Progressive',
+          unitAmountCents: 84400,
+          dueDate: '2027-01-09',
+          recurrence: { every: 6, unit: 'month' },
+          timelineStart: 'last_occurrence',
+        }),
+      ],
+    })
+    const item = views[0]!.items[0]!
+    expect(item.components[0]!.startDate).toBe('2026-07-09')
+    expect(item.paceSince).toBe('2026-07-09')
+    // The money timeline and the pace are one line.
+    expect(item.shouldHaveSavedCents).toBe(item.paceCents)
+    expect(item.shouldHaveSavedCents).toBe(34386)
+    expect(item.remainingCents).toBe(84400 - 34386)
+    // The steady rate over the 27-Saturday cycle, not $844 squeezed into 16 weeks.
+    expect(item.weekly.totalPerWeekCents).toBe(3126)
+    expect(progressOf(item).status).toBe('on_track')
+  })
+
+  it('keeps a repeating part on the cycle a spend began, under either timeline start', () => {
+    for (const timelineStart of ['last_occurrence', 'commit'] as const) {
+      const views = accountViews({
+        today: TODAY,
+        accounts: [annual],
+        packages: [pkg({ committedAt: '2026-01-10' })],
+        lineItems: [
+          li({
+            id: 'li-p',
+            label: 'Progressive',
+            unitAmountCents: 84400,
+            dueDate: '2027-01-09',
+            recurrence: { every: 6, unit: 'month' },
+            timelineStart,
+          }),
+        ],
+        cycleStarts: [{ lineItemId: 'li-p', startDate: '2026-07-15', openingCents: 0, recordedOrder: 0, origin: 'rolled' }],
+      })
+      const item = views[0]!.items[0]!
+      expect(item.components[0]!.startDate).toBe('2026-07-15')
+      expect(item.paceCents).toBe(item.shouldHaveSavedCents)
+    }
   })
 
   it('measures a one-off from the day it existed in a live plan, and a count never moves that', () => {

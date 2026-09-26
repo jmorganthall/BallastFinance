@@ -173,6 +173,26 @@ principles, and they are non-negotiable.
   and the date. It never touches money math and never runs on a schedule.
   Do not import it anywhere but the engine, and do not add a second caller.
   Unreachable from the sandbox: tested with a fake fetch only.
+- **A repeating part's timeline starts at its last occurrence** (PRD D30,
+  rev 42). `line_items.timeline_start` (migration 0015) is
+  `'last_occurrence'` for a new part that comes round again and `'commit'`
+  for a one-off (a CHECK enforces the latter); the column default is
+  `'commit'` so rows from before D30 behave exactly as they did. Under
+  `last_occurrence` the base component runs from `previousOccurrence(due)`
+  at total ÷ cycle weeks, so on the commit day should-hold is already the
+  elapsed share -- the same number as `evenPaceCents` for the same window --
+  and the pace and the money timeline agree; whether the money is there is
+  the check-in's job, and no opening is suggested. The rules for where a
+  base starts live in one place, `baseStartDate` in `src/domain/accrual.ts`:
+  a cycle a spend began, a cycle a check-in count or a reshuffle began, and
+  a cycle that opens with money (an opening typed at commit, a sheet's
+  "reserved now") run from the cycle date under either setting -- a stated balance is where
+  a timeline begins, and that is what keeps "should hold rises to match
+  what is there" true. Like the recurrence, the setting is a fact on the
+  part and not part of `LineItemSnapshot`: the math reads the current
+  setting over the whole cycle, and `updateLineItem` records a toggle on a
+  `line_item_changed` event with equal money snapshots (a zero delta, no
+  component) and `timeline_start: { before, after }` beside them.
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software. The trip planner's
   usual figures are a constant in `src/domain/trip.ts`, laid over by a
@@ -181,7 +201,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 668 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 686 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

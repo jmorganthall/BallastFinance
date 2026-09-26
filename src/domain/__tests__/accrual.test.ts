@@ -31,6 +31,7 @@ function item(over: Partial<LineItem> = {}): LineItem {
     reserveAccountId: ACCOUNT,
     state: 'accruing',
     recurrence: null,
+    timelineStart: 'commit',
     ...over,
   }
 }
@@ -309,6 +310,130 @@ describe('component activity', () => {
   })
 })
 
+describe('a repeating part starts its timeline at its last occurrence (PRD D30)', () => {
+  // $1,200 every year, next due 15 Nov 2026, committed 26 Sep 2026 (a Saturday).
+  // The last one was 15 Nov 2025: 52 Saturday transfers in the cycle, 45 of
+  // them already gone by the commit.
+  const TODAY: CivilDate = '2026-09-26'
+  const NOV: CivilDate = '2026-11-15'
+  const yearly = (timelineStart: LineItem['timelineStart']) =>
+    item({
+      unitAmountCents: 120000,
+      dueDate: NOV,
+      recurrence: { every: 1, unit: 'year' },
+      timelineStart,
+    })
+
+  it('runs the base component from the last occurrence at the steady rate', () => {
+    const [base, ...rest] = componentsForLineItem({ lineItem: yearly('last_occurrence'), commitDate: TODAY })
+    expect(rest).toHaveLength(0)
+    expect(base!.startDate).toBe('2025-11-15')
+    expect(base!.endDate).toBe(NOV)
+    expect(base!.weeks).toBe(52)
+    expect(componentRatePerWeekCents(base!)).toBe(2308) // $1,200 ÷ 52, rounded up
+    expect(weeklyBreakdown([base!], TODAY).totalPerWeekCents).toBe(2308)
+  })
+
+  it('should-hold on the commit day is the elapsed share -- the pace itself -- and the rest is still to set aside', () => {
+    const components = componentsForLineItem({ lineItem: yearly('last_occurrence'), commitDate: TODAY })
+    const shouldHold = shouldHaveSavedForItem(components, TODAY, 120000)
+    expect(shouldHold).toBe(
+      evenPaceCents({ totalCents: 120000, fromDate: '2025-11-15', dueDate: NOV, today: TODAY }),
+    )
+    expect(shouldHold).toBe(103847) // ceil(120000 × 45 / 52)
+    expect(120000 - shouldHold).toBe(16153)
+    expect(deliveredByDueDate(components, NOV)).toBe(120000)
+  })
+
+  it('behaves exactly as before when set to start at the commit', () => {
+    const [base] = componentsForLineItem({ lineItem: yearly('commit'), commitDate: TODAY })
+    expect(base!.startDate).toBe(TODAY)
+    expect(base!.weeks).toBe(7)
+    expect(componentRatePerWeekCents(base!)).toBe(17143)
+    expect(shouldHaveSavedForItem([base!], TODAY, 120000)).toBe(0)
+  })
+
+  it('leaves a one-off unchanged: it has no last time', () => {
+    const [base] = componentsForLineItem({
+      lineItem: item({ unitAmountCents: 120000, dueDate: NOV, timelineStart: 'commit' }),
+      commitDate: TODAY,
+    })
+    expect(base!.startDate).toBe(TODAY)
+  })
+
+  it('starts the next cycle at the spend date under both settings, once confirmed spent and rolled', () => {
+    // Confirmed on 20 Nov 2026, rolled to 15 Nov 2027; the last occurrence
+    // of the new due date (15 Nov 2026) is before the spend, and the spend wins.
+    for (const timelineStart of ['last_occurrence', 'commit'] as const) {
+      const [base, ...rest] = componentsForLineItem({
+        lineItem: yearly(timelineStart) && item({ ...yearly(timelineStart), dueDate: '2027-11-15' }),
+        commitDate: TODAY,
+        cycleStartDate: '2026-11-20',
+        cycleOrigin: 'rolled',
+      })
+      expect(rest).toHaveLength(0)
+      expect(base!.startDate).toBe('2026-11-20')
+      expect(base!.endDate).toBe('2027-11-15')
+      expect(shouldHaveSavedForItem([base!], '2026-11-20', 120000)).toBe(0)
+    }
+  })
+
+  it('runs from the cycle start, not the last occurrence, once the cycle opens with money', () => {
+    // Money a person said is there is where the timeline begins: should-hold
+    // is exactly that money, never that money plus an elapsed share on top.
+    const components = componentsForLineItem({
+      lineItem: yearly('last_occurrence'),
+      commitDate: TODAY,
+      cycleStartDate: TODAY,
+      cycleOrigin: 'counted',
+      openingCents: 103847,
+    })
+    expect(components.map((c) => c.kind)).toEqual(['opening', 'base'])
+    expect(components[1]!.startDate).toBe(TODAY)
+    expect(shouldHaveSavedForItem(components, TODAY, 120000)).toBe(103847)
+    // Counted to the pace, the weekly figure is the steady one.
+    expect(weeklyBreakdown(components, TODAY).totalPerWeekCents).toBe(2308)
+    expect(deliveredByDueDate(components, NOV)).toBe(120000)
+  })
+
+  it('keeps an edit working from the edit date on top of the longer base', () => {
+    const EDIT: CivilDate = '2026-10-17'
+    const components = componentsForLineItem({
+      lineItem: item({ ...yearly('last_occurrence'), unitAmountCents: 150000 }),
+      commitDate: TODAY,
+      changes: [
+        {
+          lineItemId: 'li-tickets',
+          occurredAt: EDIT,
+          before: snap({ unitAmountCents: 120000, dueDate: NOV }),
+          after: snap({ unitAmountCents: 150000, dueDate: NOV }),
+        },
+      ],
+    })
+    expect(components.map((c) => [c.kind, c.startDate])).toEqual([
+      ['base', '2025-11-15'],
+      ['catch_up', EDIT],
+    ])
+    expect(components[1]!.amountCents).toBe(30000)
+    expect(deliveredByDueDate(components, NOV)).toBe(150000)
+  })
+
+  it('offers no opening for a part that already starts at its last occurrence', () => {
+    const args = {
+      totalCents: 120000,
+      dueDate: NOV,
+      recurrence: { every: 1, unit: 'year' } as const,
+      today: TODAY,
+    }
+    expect(openingSinceLastOccurrence({ ...args, timelineStart: 'last_occurrence' })).toBeNull()
+    expect(openingSinceLastOccurrence({ ...args, timelineStart: 'commit' })).toEqual({
+      lastOccurrence: '2025-11-15',
+      cents: 103847,
+    })
+    expect(openingSinceLastOccurrence(args)).toEqual({ lastOccurrence: '2025-11-15', cents: 103847 })
+  })
+})
+
 describe('invariant: components always deliver exactly the total by the due date', () => {
   // A small deterministic PRNG so a failure is reproducible.
   function rng(seed: number) {
@@ -319,10 +444,13 @@ describe('invariant: components always deliver exactly the total by the due date
     }
   }
 
-  it('holds across randomised edit histories', () => {
-    const random = rng(20260919)
+  const UNITS = ['day', 'week', 'month', 'year'] as const
 
-    for (let trial = 0; trial < 400; trial += 1) {
+  it('holds across randomised edit histories, timeline starts and recurrences', () => {
+    const random = rng(20260919)
+    const trials = Number(process.env.ACCRUAL_INVARIANT_TRIALS ?? 400)
+
+    for (let trial = 0; trial < trials; trial += 1) {
       const startDue = 30 + Math.floor(random() * 400)
       let current: LineItemSnapshot = {
         unitAmountCents: 1 + Math.floor(random() * 500000),
@@ -330,6 +458,15 @@ describe('invariant: components always deliver exactly the total by the due date
         dueDate: addDaysUTC(COMMIT, startDue),
         reserveAccountId: ACCOUNT,
       }
+      // Half the trials repeat, on any interval; those start at the last
+      // occurrence or the commit at random, and half of them sit in a cycle
+      // that a spend, an add or a count began, with or without money.
+      const recurrence =
+        random() < 0.5
+          ? null
+          : { every: 1 + Math.floor(random() * 12), unit: UNITS[Math.floor(random() * UNITS.length)]! }
+      const timelineStart = !recurrence ? 'commit' : random() < 0.5 ? 'last_occurrence' : 'commit'
+      const cycleDraw = [random(), random(), random(), random()] as const
 
       const changes: LineItemChange[] = []
       let editOffset = 0
@@ -354,20 +491,37 @@ describe('invariant: components always deliver exactly the total by the due date
         current = after
       }
 
+      // A cycle can only begin before the part is due: a roll moves the due
+      // date with it, and nothing else starts a cycle on a part that is over.
+      const daysToFinalDue = Math.round(
+        (Date.parse(`${current.dueDate}T00:00:00Z`) - Date.parse(`${COMMIT}T00:00:00Z`)) / 86_400_000,
+      )
+      const cycle =
+        cycleDraw[0] < 0.5
+          ? undefined
+          : {
+              cycleStartDate: addDaysUTC(COMMIT, Math.floor(cycleDraw[1] * Math.min(20, daysToFinalDue))),
+              cycleOrigin: (['added', 'rolled', 'counted', 'commit'] as const)[Math.floor(cycleDraw[2] * 4)],
+              openingCents: cycleDraw[3] < 0.5 ? 0 : Math.floor(cycleDraw[3] * 300000),
+            }
+
       const finalItem = item({
         unitAmountCents: current.unitAmountCents,
         quantity: current.quantity,
         dueDate: current.dueDate,
+        recurrence,
+        timelineStart,
       })
       const components = componentsForLineItem({
         lineItem: finalItem,
         commitDate: COMMIT,
         changes,
+        ...cycle,
       })
 
       expect(
         deliveredByDueDate(components, current.dueDate),
-        `trial ${trial}: ${JSON.stringify({ changes, final: current })}`,
+        `trial ${trial}: ${JSON.stringify({ changes, final: current, recurrence, timelineStart, cycle })}`,
       ).toBe(lineItemTotalCents(finalItem))
     }
   })

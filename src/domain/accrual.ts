@@ -3,7 +3,9 @@
  *
  * Model (D2): a line item's savings plan is a set of rate COMPONENTS, each
  * running over its own window. At commit one `base` component spreads the whole
- * amount from the commit date to the due date. Every later edit leaves existing
+ * amount to the due date -- from the commit date for a one-off, and by default
+ * from the last time it came round for a part that repeats (D30), so the
+ * money timeline and the pace are one line. Every later edit leaves existing
  * components untouched and adds one `catch_up` component covering only the delta,
  * spread from the edit date to the due date. That is what keeps the ongoing
  * transfer stable and makes every adjustment visible and dated, rather than
@@ -33,11 +35,13 @@ import { ceilDiv, proratedCeil, roundUpToStep, type Cents } from './money'
 import { previousOccurrence, type Recurrence } from './recurrence'
 import {
   lineItemTotalCents,
+  type CycleOrigin,
   type DriftAdjustment,
   type Id,
   type LineItem,
   type LineItemChange,
   type LineItemSnapshot,
+  type TimelineStart,
 } from './types'
 
 /**
@@ -129,6 +133,29 @@ function snapshotTotal(s: LineItemSnapshot): Cents {
  *                                  can no longer deliver its full amount in time
  *   - due date pushed LATER     -> zero delta; the existing plan still funds it,
  *                                  and it simply finishes early
+ *
+ * Where the base component STARTS (PRD D30):
+ *
+ *   - a one-off, or a part set to 'commit': the cycle start -- the commit,
+ *     the day it was added, or the day it was confirmed spent and rolled.
+ *   - a part set to 'last_occurrence' whose cycle opens at $0: the last time
+ *     it came round, when that is before the cycle start. Should-have-saved
+ *     on the commit day is then the elapsed share of the cycle, exactly what
+ *     `evenPaceCents` says for the same window, and the weekly figure is
+ *     total ÷ cycle weeks. Whether the money is actually there is the
+ *     check-in's job. A cycle a spend confirmation started is bounded by the
+ *     spend date, because that spend IS the last occurrence.
+ *   - a cycle that opens WITH money -- an opening typed at commit, a sheet's
+ *     "reserved now" -- or that a check-in count or a reshuffle began, even
+ *     at $0, starts at the cycle date under either setting. An opening is a
+ *     person's statement of what the part holds today, and the plan runs
+ *     from that statement: were the base still to run from the last
+ *     occurrence, its elapsed share would be added ON TOP of the opening and
+ *     a part counted up to its pace would read above it, so "should hold
+ *     rises to match what is actually there" (the reshuffle's promise) would
+ *     be false and every reshuffle would offer itself again. A count to the
+ *     pace under this rule lands exactly on the D30 line: should-hold is the
+ *     pace and the rate is the steady one.
  */
 export function componentsForLineItem(args: {
   lineItem: LineItem
@@ -141,6 +168,8 @@ export function componentsForLineItem(args: {
    * one's math.
    */
   cycleStartDate?: CivilDate
+  /** What began that cycle. A roll or a count starts the base there (see above). */
+  cycleOrigin?: CycleOrigin
   /** Money already set aside for this item when the cycle began. */
   openingCents?: Cents
 }): RateComponent[] {
@@ -189,7 +218,14 @@ export function componentsForLineItem(args: {
       kind: 'base',
       lineItemId: lineItem.id,
       reserveAccountId: atCommit.reserveAccountId,
-      startDate: commitDate,
+      startDate: baseStartDate({
+        timelineStart: lineItem.timelineStart,
+        recurrence: lineItem.recurrence,
+        dueDate: atCommit.dueDate,
+        cycleStartDate: commitDate,
+        cycleOrigin: args.cycleOrigin,
+        openingCents,
+      }),
       endDate: maxDate(atCommit.dueDate, commitDate),
       amountCents: snapshotTotal(atCommit) - openingCents,
     }),
@@ -223,6 +259,28 @@ export function componentsForLineItem(args: {
   }
 
   return components
+}
+
+/**
+ * Where a part's base component starts (PRD D30; the rules are spelled out on
+ * `componentsForLineItem`). One definition, so the label a screen puts on the
+ * component and the arithmetic behind it can never disagree.
+ */
+export function baseStartDate(args: {
+  timelineStart: TimelineStart
+  recurrence: Recurrence | null
+  dueDate: CivilDate
+  /** The cycle's own start: the commit, an add, a roll or a count. */
+  cycleStartDate: CivilDate
+  cycleOrigin?: CycleOrigin
+  openingCents?: Cents
+}): CivilDate {
+  if (args.timelineStart !== 'last_occurrence') return args.cycleStartDate
+  if ((args.openingCents ?? 0) > 0) return args.cycleStartDate
+  if (args.cycleOrigin === 'rolled' || args.cycleOrigin === 'counted') return args.cycleStartDate
+  const last = previousOccurrence(args.dueDate, args.recurrence)
+  if (!last || compareDates(last, args.cycleStartDate) >= 0) return args.cycleStartDate
+  return last
 }
 
 export function driftAdjustmentComponent(a: DriftAdjustment): RateComponent {
@@ -430,14 +488,20 @@ export function evenPaceCents(args: {
  *
  * It is a suggestion, never an assertion: the money is only there if the
  * household says it is, so nothing here writes anything. Returns null when
- * there is nothing to suggest -- a one-off, or a cycle that has not started.
+ * there is nothing to suggest -- a one-off, a cycle that has not started, or
+ * a part whose timeline already starts at its last occurrence (D30): its
+ * should-hold carries the elapsed share by itself, and an opening on such a
+ * part is only money genuinely set aside, which nobody should be told.
  */
 export function openingSinceLastOccurrence(args: {
   totalCents: Cents
   dueDate: CivilDate
   recurrence: Recurrence | null
   today: CivilDate
+  /** Absent reads as 'commit', the setting under which the offer makes sense. */
+  timelineStart?: TimelineStart
 }): { lastOccurrence: CivilDate; cents: Cents } | null {
+  if (args.timelineStart === 'last_occurrence') return null
   const last = previousOccurrence(args.dueDate, args.recurrence)
   if (!last) return null
   // The cycle has not begun: there is no elapsed time to have saved over.

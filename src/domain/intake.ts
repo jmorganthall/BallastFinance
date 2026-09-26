@@ -16,7 +16,15 @@ import { z } from 'zod'
 import { assertCivilDate, compareDates, type CivilDate } from './dates'
 import { parseAmountToCents, type Cents } from './money'
 import { recurrenceOf, rollToFuture, RECURRENCE_UNITS, type Recurrence } from './recurrence'
-import { canWriteAccount, type Id, type Package, type PackageState, type ReserveAccount } from './types'
+import {
+  canWriteAccount,
+  defaultTimelineStart,
+  type Id,
+  type Package,
+  type PackageState,
+  type ReserveAccount,
+  type TimelineStart,
+} from './types'
 
 /** Bump only for a breaking change. Unknown versions are rejected loudly (PRD §4). */
 export const INTAKE_CONTRACT_VERSION = '1'
@@ -67,6 +75,14 @@ const intakeLineItemSchema = z.object({
       }
       return parsed
     }),
+  /**
+   * Where the part's money timeline begins (PRD D30). Additive: a producer
+   * that does not send it gets the default -- from the last time it came
+   * round for a part that repeats, from the commit for a one-off. A one-off
+   * is always 'commit' whatever is sent, because it has no last time; that
+   * is a definition, not a guess, so it is not refused.
+   */
+  timeline_start: z.enum(['last_occurrence', 'commit']).optional(),
 })
 
 const intakePackageSchema = z.object({
@@ -96,6 +112,7 @@ export interface NormalisedLineItem {
   dueDate: CivilDate
   reserveAccountId: Id
   recurrence: Recurrence | null
+  timelineStart: TimelineStart
 }
 
 export interface NormalisedIntake {
@@ -237,6 +254,9 @@ export function validateIntake(raw: unknown, context: IntakeContext): IntakeResu
         dueDate,
         reserveAccountId: account.id,
         recurrence: item.recurrence,
+        timelineStart: item.recurrence
+          ? (item.timeline_start ?? defaultTimelineStart(item.recurrence))
+          : 'commit',
       })
     }
   })
