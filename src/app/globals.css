@@ -19,6 +19,17 @@
   --color-ahead-soft: oklch(0.95 0.04 155);
   --color-caution: oklch(0.58 0.13 80);
   --color-caution-soft: oklch(0.96 0.04 85);
+  /*
+   * How busy, 1 quiet to 10 packed, two levels a step: one hue (the accent's),
+   * light to dark. A sequential scale, validated as an ordinal ramp in both
+   * themes (dataviz: monotone lightness, a visible gap between steps, the
+   * light end still readable on the card).
+   */
+  --color-busy-1: oklch(0.75 0.13 235);
+  --color-busy-2: oklch(0.66 0.13 235);
+  --color-busy-3: oklch(0.57 0.13 235);
+  --color-busy-4: oklch(0.48 0.13 235);
+  --color-busy-5: oklch(0.39 0.13 235);
 }
 
 /*
@@ -43,6 +54,12 @@
     --color-ahead-soft: oklch(0.29 0.06 155);
     --color-caution: oklch(0.82 0.14 88);
     --color-caution-soft: oklch(0.32 0.06 85);
+    /* The same ramp flipped for a dark card: quiet sits near the surface, packed stands out. */
+    --color-busy-1: oklch(0.46 0.13 235);
+    --color-busy-2: oklch(0.55 0.13 235);
+    --color-busy-3: oklch(0.64 0.13 235);
+    --color-busy-4: oklch(0.73 0.13 235);
+    --color-busy-5: oklch(0.82 0.13 235);
   }
 }
 

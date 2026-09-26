@@ -11,6 +11,7 @@ import {
   addSchoolDayOffAction,
   createTripAction,
   discardSchoolCalendarAction,
+  refreshParkDataAction,
   keepSchoolCalendarAction,
   readSchoolCalendarSourceAction,
   removeSchoolDayOffAction,
@@ -23,6 +24,7 @@ import {
 } from '@/server/actions'
 import { readerEnabled } from '@/server/reader'
 import {
+  addDays,
   dollarsForInput,
   headCount,
   homeIsLocated,
@@ -36,6 +38,7 @@ import {
   type Trip,
 } from '@/domain'
 import { TravelerFields } from './traveler-fields'
+import { ParkCalendar } from './park-calendar'
 
 export const dynamic = 'force-dynamic'
 
@@ -71,9 +74,9 @@ function tripStatus(trip: Trip): { tone: 'neutral' | 'accent' | 'ahead'; label: 
 export default async function TripsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; saved?: string }>
+  searchParams: Promise<{ error?: string; saved?: string; month?: string; day?: string; refreshed?: string; start?: string; end?: string }>
 }) {
-  const { error, saved } = await searchParams
+  const { error, saved, month: monthParam, day: dayParam, refreshed, start: startParam, end: endParam } = await searchParams
   const { engine } = await requireEngine()
   const [trips, prices, home, blackouts, packTemplate, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights] = await Promise.all([
     engine.listTrips(),
@@ -92,6 +95,15 @@ export default async function TripsPage({
   const open = trips.filter((t) => !t.retiredAt)
   const putAway = trips.filter((t) => t.retiredAt)
   const stale = prices.filter((p) => referenceFreshness(p, today).stale)
+
+  // The calendar (D29): this month unless the URL says another; a tapped day offers to start a trip there.
+  const month = monthParam && /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : today.slice(0, 7)
+  const calendar = await engine.calendarMonth(month)
+  const isDate = (d: string | undefined): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d)
+  const tappedDay = isDate(dayParam) ? dayParam : null
+  const calendarHref = (m: string, d?: string) => `/trips?month=${m}${d ? `&day=${d}` : ''}#calendar`
+  const newTripStart = isDate(startParam) ? startParam : ''
+  const newTripEnd = isDate(endParam) ? endParam : ''
 
   return (
     <>
@@ -136,7 +148,41 @@ export default async function TripsPage({
         </ul>
       )}
 
-      <h2 className={sectionTitle}>New trip</h2>
+      <h2 id="calendar" className={sectionTitle}>
+        Look at the year
+      </h2>
+      <Card>
+        {refreshed ? <p className="mb-3 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
+        <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+          How hot, how busy, how late the parks stay open, when school is out and which days are federal holidays. Tap a
+          day to start a trip there.
+        </p>
+        <ParkCalendar
+          calendar={calendar}
+          today={today}
+          selected={tappedDay}
+          monthHref={(m) => calendarHref(m)}
+          dayHref={(d) => calendarHref(month, d)}
+          refresh={
+            <form action={refreshParkDataAction}>
+              <input type="hidden" name="month" value={month} />
+              <button type="submit" className={smallButton}>
+                Refresh park data
+              </button>
+            </form>
+          }
+        >
+          {tappedDay ? (
+            <Link href={`/trips?start=${tappedDay}&end=${addDays(tappedDay, 6)}#new-trip`} className={smallButton + ' inline-block'}>
+              Start a trip on {shortDate(tappedDay)}
+            </Link>
+          ) : null}
+        </ParkCalendar>
+      </Card>
+
+      <h2 id="new-trip" className={sectionTitle}>
+        New trip
+      </h2>
       <Card>
         <form action={createTripAction} className="space-y-3">
           <label className="block text-sm font-medium">
@@ -146,11 +192,11 @@ export default async function TripsPage({
           <div className="grid grid-cols-2 gap-3">
             <label className="block text-sm font-medium">
               First day
-              <input name="start_date" type="date" required className={input} />
+              <input name="start_date" type="date" required defaultValue={newTripStart} className={input} />
             </label>
             <label className="block text-sm font-medium">
               Last day
-              <input name="end_date" type="date" required className={input} />
+              <input name="end_date" type="date" required defaultValue={newTripEnd} className={input} />
             </label>
           </div>
           <TravelerFields />

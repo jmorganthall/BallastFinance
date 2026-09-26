@@ -31,6 +31,7 @@ import {
   keepCrowdPullAction,
   keepDvcPullAction,
   rebuildTimelineAction,
+  refreshParkDataAction,
   removeReservationAction,
   removeTaskAction,
   removeTripLineAction,
@@ -51,6 +52,7 @@ import {
   useWeekAction,
 } from '@/server/actions'
 import {
+  BUSYNESS_SOURCE_WORDS,
   CATEGORY_LABELS,
   CROWD_SOURCES,
   CROWD_STALE_AFTER_DAYS,
@@ -79,7 +81,8 @@ import {
   TRIP_PARKS,
   tripNights,
   weekdayName,
-  type CrowdLevel,
+  addDays,
+  type Busyness,
   type DayView,
   type ReserveAccount,
   type TripLine,
@@ -89,6 +92,7 @@ import {
   type VariantChoices,
 } from '@/domain'
 import { TravelerFields } from '../traveler-fields'
+import { ParkCalendar } from '../park-calendar'
 
 export const dynamic = 'force-dynamic'
 
@@ -145,10 +149,10 @@ export default async function TripPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string; saved?: string; drive?: string; gas?: string; crowds?: string; dvc?: string }>
+  searchParams: Promise<{ error?: string; saved?: string; drive?: string; gas?: string; crowds?: string; dvc?: string; month?: string; day?: string; refreshed?: string }>
 }) {
   const { id } = await params
-  const { error, saved, drive: pendingDrive, gas: pendingGas } = await searchParams
+  const { error, saved, drive: pendingDrive, gas: pendingGas, month: monthParam, day: dayParam, refreshed } = await searchParams
   const { engine } = await requireEngine()
   const view = await engine.tripView(id)
   if (!view) notFound()
@@ -186,6 +190,12 @@ export default async function TripPage({
   const parkDays = plan.dayViews.filter((d) => THEME_PARKS.includes(d.park)).length
   const withConfirmation = plan.reservations.filter((r) => r.confirmation).length
   const followedPrice = followed ? (view.variants.find((v) => v.id === followed.id)?.price.totalCents ?? null) : null
+
+  // The calendar (D29): the month in the URL, else the trip's own; the tapped day in the URL too.
+  const month = monthParam && /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : trip.startDate.slice(0, 7)
+  const calendar = await engine.calendarMonth(month, trip.destination)
+  const tappedDay = dayParam && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : null
+  const calendarHref = (m: string, d?: string) => `/trips/${trip.id}?month=${m}${d ? `&day=${d}` : ''}#when`
 
   return (
     <>
@@ -417,7 +427,42 @@ export default async function TripPage({
             : 'No crowd calendar yet for these dates'
         }
       >
-        <h3 className="font-semibold">Best weeks</h3>
+        {refreshed ? <p className="mb-3 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
+        <h3 className="font-semibold">Look at the year</h3>
+        <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+          How hot, how busy, how late the parks stay open, when school is out. Tap a day to start the trip there.
+        </p>
+        <ParkCalendar
+          calendar={calendar}
+          today={today}
+          selected={tappedDay}
+          monthHref={(m) => calendarHref(m)}
+          dayHref={(d) => calendarHref(month, d)}
+          refresh={
+            <form action={refreshParkDataAction}>
+              <input type="hidden" name="trip_id" value={trip.id} />
+              <input type="hidden" name="month" value={month} />
+              <button type="submit" className={smallButton}>
+                Refresh park data
+              </button>
+            </form>
+          }
+        >
+          {tappedDay && editable ? (
+            <form action={useDatesAction} className="flex items-center gap-2">
+              <input type="hidden" name="trip_id" value={trip.id} />
+              <input type="hidden" name="start_date" value={tappedDay} />
+              <input type="hidden" name="end_date" value={addDays(tappedDay, nights)} />
+              <button type="submit" className={smallButton}>
+                Use these dates
+              </button>
+              <span className="text-xs text-[var(--color-ink-soft)]">
+                {shortDate(tappedDay)} – {shortDate(addDays(tappedDay, nights))}, {nights} {nights === 1 ? 'night' : 'nights'}
+              </span>
+            </form>
+          ) : null}
+        </ParkCalendar>
+        <h3 className="mt-4 font-semibold">Best weeks</h3>
         <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
           The ten best dates from {shortDate(plan.bestWeeks.horizonFrom)} to {shortDate(plan.bestWeeks.horizonTo)},{' '}
           {plan.bestWeeks.horizonTo.slice(0, 4)}: every {nights}-night window, and every long weekend a holiday or a day
@@ -1133,12 +1178,12 @@ function TaskRow({
   )
 }
 
-function CrowdMark({ level, today }: { level: CrowdLevel; today: string }) {
-  const fresh = crowdFreshness(level, today)
+function CrowdMark({ level, today }: { level: Busyness; today: string }) {
+  const fresh = level.fetchedOn ? crowdFreshness({ fetchedOn: level.fetchedOn }, today) : { stale: false }
   return (
     <span className="text-xs text-[var(--color-ink-soft)]">
-      {crowdSourceName(level.source)}
-      {level.source === 'typed' ? '' : `, ${humanDate(level.fetchedOn)}`}
+      {level.source === 'crowd_level' ? crowdSourceName(level.detail) : BUSYNESS_SOURCE_WORDS[level.source]}
+      {level.fetchedOn && level.source !== 'typed' ? `, ${humanDate(level.fetchedOn)}` : ''}
       {fresh.stale ? (
         <>
           {' '}

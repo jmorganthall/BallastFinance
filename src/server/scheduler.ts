@@ -21,6 +21,7 @@ import {
 import { sendNotification } from '@/server/notifications'
 import { Engine } from '@/server/engine'
 import { fetchMarketMortgageRate, marketRateFetchEnabled } from '@/server/market-rate'
+import { parkDataFetchEnabled } from '@/server/park-fetch'
 
 const TIMEZONE = process.env.HOUSEHOLD_TIMEZONE ?? 'America/Chicago'
 
@@ -38,6 +39,16 @@ const PROMO_WARNING_CRON = process.env.PROMO_WARNING_CRON ?? '0 10 * * 1'
  * means a missed week heals itself the next morning, not the next Thursday.
  */
 const MARKET_RATE_CRON = process.env.MARKET_RATE_CRON ?? '0 9 * * *'
+/**
+ * Ballast's own park data (PRD §16, D28). Weather and park hours overnight,
+ * when the sources have posted the day ahead; the live waits every five
+ * minutes, which is how often the feed itself changes. Each is switched off
+ * on its own by setting its cron to "off", and all three by PARK_DATA_FETCH=off.
+ * They are reference data shared by every household, so each runs once.
+ */
+const PARK_WEATHER_CRON = process.env.PARK_WEATHER_CRON ?? '15 3 * * *'
+const PARK_HOURS_CRON = process.env.PARK_HOURS_CRON ?? '45 3 * * *'
+const WAIT_POLL_CRON = process.env.WAIT_POLL_CRON ?? '*/5 * * * *'
 
 const tasks: ScheduledTask[] = []
 
@@ -63,7 +74,23 @@ async function forEachHousehold(
   }
 }
 
+/**
+ * Reference data belongs to no household, but every write goes through an
+ * engine bound to one (PRD §10). The first household stands in: the rows it
+ * writes carry no household, and the settings it reads (park ids, the
+ * outlook link) are the ones the screen's button would read too.
+ */
+async function referenceEngine(): Promise<Engine | null> {
+  const [household] = await db.select().from(households).limit(1)
+  if (!household) return null
+  return new Engine({ householdId: household.id, actorUserId: null, timezone: household.timezone })
+}
+
 function schedule(expression: string, label: string, job: () => Promise<void>): void {
+  if (expression.trim().toLowerCase() === 'off') {
+    console.log(`[cron] ${label} is off`)
+    return
+  }
   if (!cron.validate(expression)) {
     console.error(`[cron:${label}] invalid expression "${expression}"; job not scheduled`)
     return
@@ -92,8 +119,38 @@ async function refreshMarketRate(): Promise<void> {
   })
 }
 
+async function refreshParkWeather(): Promise<void> {
+  const engine = await referenceEngine()
+  if (!engine) return
+  const done = await engine.refreshParkData({ parts: ['weather', 'outlook'] })
+  for (const line of done.notes) console.error(`[cron:park-weather] ${line}`)
+  console.log(`[cron:park-weather] stored ${done.weather} weather days and ${done.outlook} outlook park-days`)
+}
+
+async function refreshParkHours(): Promise<void> {
+  const engine = await referenceEngine()
+  if (!engine) return
+  const done = await engine.refreshParkData({ parts: ['hours'] })
+  for (const line of done.notes) console.error(`[cron:park-hours] ${line}`)
+  console.log(`[cron:park-hours] stored ${done.hours} park-days of hours`)
+}
+
+async function pollWaits(): Promise<void> {
+  const engine = await referenceEngine()
+  if (!engine) return
+  const done = await engine.pollWaits()
+  for (const line of done.notes) console.error(`[cron:wait-poll] ${line}`)
+  if (done.inserted > 0) console.log(`[cron:wait-poll] ${done.inserted} new postings`)
+}
+
 export function startScheduler(): void {
   if (tasks.length > 0) return // already started
+
+  if (parkDataFetchEnabled()) {
+    schedule(PARK_WEATHER_CRON, 'park-weather', refreshParkWeather)
+    schedule(PARK_HOURS_CRON, 'park-hours', refreshParkHours)
+    schedule(WAIT_POLL_CRON, 'wait-poll', pollWaits)
+  }
 
   if (marketRateFetchEnabled()) {
     schedule(MARKET_RATE_CRON, 'market-rate', refreshMarketRate)

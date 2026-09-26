@@ -32,9 +32,9 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `reader-shapes.ts` holds the zod shapes the reader may answer with |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `reader-shapes.ts` holds the zod shapes the reader may answer with |
 | `src/db/` | Drizzle schema and the connection. Facts only |
-| `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts` and `trip-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page; public, key-free, each switchable off by env, every request with the app's own User-Agent). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
+| `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
 | `drizzle/` | Migrations. `0001` is the append-only enforcement — read it before touching events |
 | `scripts/` | Bootstrap, seed, backup, quickstart, and the Disney demo for checking against the spreadsheet |
@@ -125,6 +125,40 @@ principles, and they are non-negotiable.
   reference data like `crowd_levels`: what a broker had on a date, shown
   beside the lodging line and never the line itself, never in money math.
   Both pulls are held in a setting and shown before they are kept.
+- **Ballast collects its own park data, and the calendar comes first**
+  (PRD §16, D28–D29, rev 41). `park_weather` (per date and horizon:
+  forecast / subseasonal / normal), `park_hours` (per park and date, "HH:MM"
+  on the park's own clock, never converted) and `wait_observations` (one
+  row per posting, unique on source + park + ride + the feed's own
+  timestamp, so a re-poll is a no-op) are household-independent reference
+  data like `crowd_levels` (migration 0014), written only through the
+  engine, each row with a source and fetched-on; the crowd outlook is
+  stored in `crowd_levels` under source `ropedrop`. Adapters in
+  `src/server/park-fetch.ts`: Open-Meteo (forecast, seasonal, archive),
+  ThemeParks.wiki (park ids resolved once from the destination's children
+  by name and kept in setting `park_hours_ids`; a name not found is an
+  error in the log), RopeDrop Planner's public JSON (URL in setting
+  `ropedrop_outlook_url`, parsed defensively), Queue-Times (park names in
+  setting `park_wait_names`). None is reachable from the sandbox; every
+  adapter is tested on fixtures from the documented shapes and a fake
+  fetch. **Queue-Times' data must appear with "Powered by Queue-Times.com"
+  linking to https://queue-times.com/en-US** wherever it is shown. **No
+  request sets `origin` or `referer`.** Busyness is derived, never stored:
+  `busynessFor` (typed → outlook → the household's own wait history ranked
+  1–10 across the year, documented at the top of `park-data.ts` → a
+  crowd-calendar level → nothing), and `pickLevel`/`weekComparison`/
+  `dayPlan`/`bestWeeks`/the calendar all read through it. One exception to
+  "no arithmetic in SQL", stated in `Engine.waitHistory`: the per-park,
+  per-day mean wait is summed in SQL because a row per ride per five
+  minutes is too big to read; its shape matches the domain's
+  `summariseWaits`, and the ranking stays in the domain. Jobs
+  (`PARK_WEATHER_CRON`, `PARK_HOURS_CRON`, `WAIT_POLL_CRON`, all off with
+  `PARK_DATA_FETCH=off`, each off with its cron set to `off`) run once
+  through the first household's engine, not per household. The calendar
+  (`ParkCalendar`, on `/trips` and at the top of a trip's When section) is
+  server-rendered with `?month=` and `?day=` links and colours busyness
+  with the one-hue ramp `--color-busy-1..5` in `globals.css`, validated
+  as an ordinal ramp in both themes; the number is printed too.
 - **The reader is the only model call, and the last resort** (PRD §16, D27).
   `src/server/reader.ts` is the one module that knows a language model
   exists. It is off unless `READER_API_KEY`, `READER_BASE_URL` and
@@ -147,7 +181,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 635 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 668 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

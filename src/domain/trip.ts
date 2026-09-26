@@ -73,8 +73,9 @@ export interface TripCar {
 
 export type TripDestination = 'wdw'
 
-export const DESTINATIONS: Record<TripDestination, LocatedHome> = {
-  wdw: { label: 'Walt Disney World', latitude: 28.3852, longitude: -81.5639 },
+/** Where each destination is, and the clock its parks keep (D28: park hours are that clock's, never converted). */
+export const DESTINATIONS: Record<TripDestination, LocatedHome & { timezone: string }> = {
+  wdw: { label: 'Walt Disney World', latitude: 28.3852, longitude: -81.5639, timezone: 'America/New_York' },
 }
 
 export interface Trip {
