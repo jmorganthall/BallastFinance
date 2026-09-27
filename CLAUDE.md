@@ -32,7 +32,7 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `reader-shapes.ts` holds the zod shapes the reader may answer with |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -172,8 +172,43 @@ principles, and they are non-negotiable.
   through the first household's engine, not per household. The calendar
   (`ParkCalendar`, on `/trips` and at the top of a trip's When section) is
   server-rendered with `?month=` and `?day=` links and colours busyness
-  with the one-hue ramp `--color-busy-1..5` in `globals.css`, validated
-  as an ordinal ramp in both themes; the number is printed too.
+  with the green-to-red scale `--color-busy-1..5` in `globals.css` (below);
+  the number is printed too.
+- **Which park, which day is a derivation, and "Use this plan" is the only
+  write** (PRD D32, rev 45). `src/domain/park-day-plan.ts` documents the fit
+  at its top: the busyness level (`MISSING_BUSYNESS` 5.5 when nothing is
+  known, said in the reasons), plus `(1 − PARK_COVER[park]) × RAIN_WEIGHT`
+  on a day at or above `RAIN_THRESHOLD_PERCENT` (50), minus
+  `HEAT_EARLY_BONUS` (1) for the park that opens earliest on a day at or
+  above `HEAT_THRESHOLD_F` (92), minus `LATE_CLOSE_BONUS` (0.5) for a close
+  at or after `LATE_CLOSE_HOUR` (21); a park whose hours say it is closed is
+  unavailable, and no hours row means unknown, not closed. `planParkDays`
+  takes the lowest total fit over the days open to it, day by day never
+  taking a park while another has been used less (the days a person chose
+  count), ties to the earlier day's quieter park; a greedy pass was tried
+  and rejected because it leaves a wet day whatever park is left. Which
+  days are open to the plan: a theme-park day or a rest day nobody chose
+  and that is not yet gone; never a travel day, a water-park day or
+  "somewhere else". "Set by hand" is `trip_days.plan.parkChosen` (in the
+  plan JSON, no migration; absent on older rows and read as false): the
+  form sets it when the park a person picks differs from what the day was
+  (`park_was`), and "Let the plan choose" clears it. `Engine.parkDayPlan`
+  gathers the facts and `applyParkDayPlan` derives the proposal again,
+  refuses when it differs from what the page showed, and writes each
+  changed day through `updateTripDay` (one `trip_changed` event per day,
+  `parkChosen` false so a later plan may move it). Nothing about the
+  proposal is stored. On screen the number is "fit", never "score", and a
+  hand-set day is "your pick". The busyness colours are the green-to-red
+  scale `--color-busy-1..5` in `globals.css`: two levels a step
+  (`busynessStep`), light green for quiet down to deep red for packed in
+  the light theme and, with the lightness anchor flipped, deep green up to
+  bright red on a dark card. The order is carried by lightness so it holds
+  for colour-blind readers, and the number is always printed beside the
+  colour. Before touching it, run the dataviz skill's validator in
+  `--ordinal` mode against both card surfaces (`#ffffff`, `#192028`):
+  monotone lightness, gaps of at least 0.06, the end nearest the card at
+  2:1 or better must all pass; its "single hue" check fails by design,
+  because the PRD asks for green to red.
 - **The reader is the only model call, and the last resort** (PRD §16, D27).
   `src/server/reader.ts` is the one module that knows a language model
   exists. It is off unless `READER_API_KEY`, `READER_BASE_URL` and
@@ -216,7 +251,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 710 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 736 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

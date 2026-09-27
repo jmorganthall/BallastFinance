@@ -4,9 +4,9 @@
  * the URL, so it works with no client JavaScript. Every figure on it is the
  * derivation module's (calendarMonth); this file lays out cells.
  *
- * Busyness is a colour from the app's one-hue ramp (--color-busy-1..5), two
- * levels a step, and the number is printed too, so colour is never the only
- * carrier. Tapping a day shows where each figure came from and offers to
+ * Busyness is a colour from the app's green-to-red scale (--color-busy-1..5,
+ * green quiet, deep red packed, D32), two levels a step, and the number is
+ * printed too, so colour is never the only carrier. Tapping a day shows where each figure came from and offers to
  * start a window there.
  */
 
@@ -107,7 +107,7 @@ export function ParkCalendar({
 
       <p className="mt-2 text-xs leading-snug text-[var(--color-ink-soft)]">
         High and low in °F: plain is the forecast, ~ the seasonal outlook (about six months, less sure the further out), ≈ typical for this date. The bar is how busy, 1
-        (quiet) to 10 (packed). ⤓ is the earliest park close. ● a day off school, ★ a federal holiday; a struck-out day
+        (quiet) to 10 (packed): green is quiet, red is packed, and the number is beside it. ⤓ is the earliest park close. ● a day off school, ★ a federal holiday; a struck-out day
         is one you cannot go. Tap a day for where each figure came from.
       </p>
       <p className="mt-1 text-xs text-[var(--color-ink-soft)]">

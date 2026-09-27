@@ -193,8 +193,8 @@ describe('scoring', () => {
   it('measures how busy on the park days shifted with the window, the price, school missed and blackouts', () => {
     const trip = { startDate: '2027-03-06', endDate: '2027-03-13' }
     const days = [
-      { id: 'd', tripId: 't', date: '2027-03-08', park: 'magic_kingdom' as const, plan: { notes: '', ropeDrop: false }, sort: 2 },
-      { id: 'e', tripId: 't', date: '2027-03-09', park: 'epcot' as const, plan: { notes: '', ropeDrop: false }, sort: 3 },
+      { id: 'd', tripId: 't', date: '2027-03-08', park: 'magic_kingdom' as const, plan: { notes: '', ropeDrop: false, parkChosen: false }, sort: 2 },
+      { id: 'e', tripId: 't', date: '2027-03-09', park: 'epcot' as const, plan: { notes: '', ropeDrop: false, parkChosen: false }, sort: 3 },
     ]
     const candidates = [window('2027-03-06', 7, { current: true }), window('2027-03-13', 7), window('2027-03-12', 3, { kind: 'long_weekend', anchor: 'Teacher day' })]
     const measured = measureCandidates({

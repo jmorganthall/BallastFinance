@@ -463,7 +463,7 @@ export const tripDays = pgTable(
       .references(() => trips.id, { onDelete: 'cascade' }),
     date: date('date').notNull(),
     park: tripParkEnum('park').notNull().default('rest'),
-    /** {notes, ropeDrop} */
+    /** {notes, ropeDrop, parkChosen} -- parkChosen (D32) is absent on rows from before it and reads as false. */
     plan: jsonb('plan').notNull().default(sql`'{"notes":"","ropeDrop":false}'::jsonb`),
     sort: integer('sort').notNull().default(0),
   },

@@ -235,6 +235,11 @@ import {
   type CalendarMonth,
   type ParkHours,
   type ParkWeather,
+  parkDayPlanDiff,
+  planParkDays,
+  sameParkDayPlan,
+  type ParkDayAssignment,
+  type ParkDayPlan,
   type ParsedParkHours,
   type ParsedWeatherDay,
   type ResolvedPark,
@@ -363,6 +368,8 @@ export interface TripPlanView {
   /** What a broker had for the trip's dates, two days either side (D26). */
   dvcListings: DvcListing[]
   pendingDvcPull: DvcPull | null
+  /** Which park, which day: the proposal beside the current choice (D32). */
+  parkDayPlan: ParkDayPlan
 }
 
 /** Everything the trip screen shows: facts, plus each way's price tag from the derivation module. */
@@ -2962,6 +2969,7 @@ export class Engine {
     const listingDates = listingWindow(trip)
     const dvcListings = listingsForTrip(await this.dvcListings(listingDates.from, listingDates.to), trip)
     const pricing = { trip, variant, lines: variant?.lines ?? [], referencePrices, drive, gasPrice: gas, maxDriveMinutes, today }
+    const parkDayPlan = await this.parkDayPlanFor(trip, days, busyness)
     return {
       trip,
       variant,
@@ -2980,6 +2988,7 @@ export class Engine {
       weekWeights,
       dvcListings,
       pendingDvcPull,
+      parkDayPlan,
     }
   }
 
@@ -3024,12 +3033,52 @@ export class Engine {
       const after: TripDay = {
         ...before,
         park: patch.park ?? before.park,
-        plan: { notes: (patch.plan?.notes ?? before.plan.notes).trim(), ropeDrop: patch.plan?.ropeDrop ?? before.plan.ropeDrop },
+        plan: {
+          notes: (patch.plan?.notes ?? before.plan.notes).trim(),
+          ropeDrop: patch.plan?.ropeDrop ?? before.plan.ropeDrop,
+          parkChosen: patch.plan?.parkChosen ?? before.plan.parkChosen,
+        },
       }
       validateDayInputs(after)
       await tx.update(tripDaysTable).set({ park: after.park, plan: after.plan }).where(eq(tripDaysTable.id, dayId))
       await this.recordTripChange(tx, { trip_id: tripId, day_id: dayId, before: dayEventShape(before), after: dayEventShape(after) })
     })
+  }
+
+  /**
+   * Which park, which day (D32): the facts for the trip's dates gathered
+   * here -- how busy per park, the weather, the park hours -- and the
+   * choosing in the derivation module. Nothing is stored.
+   */
+  async parkDayPlan(tripId: Id): Promise<ParkDayPlan> {
+    const trip = await this.tripInHousehold(this.db, tripId)
+    const days = await this.listTripDays(tripId)
+    const busyness = await this.busynessSources({ from: trip.startDate, to: trip.endDate }, trip.destination)
+    return this.parkDayPlanFor(trip, days, busyness)
+  }
+
+  private async parkDayPlanFor(trip: Trip, days: readonly TripDay[], busyness: BusynessSources): Promise<ParkDayPlan> {
+    const range = { from: trip.startDate, to: trip.endDate }
+    const [weather, hours] = await Promise.all([this.parkWeather(range, trip.destination), this.parkHours(range, trip.destination)])
+    return planParkDays({ days, busyness, weather, hours, today: this.today() })
+  }
+
+  /**
+   * "Use this plan": the proposal is derived again here and each day it
+   * changes is written through updateTripDay, one trip_changed event per
+   * day, with parkChosen left false so a later plan may move it. When the
+   * caller says what it showed and the fresh proposal differs, nothing is
+   * written: the person looks again. Returns the days changed.
+   */
+  async applyParkDayPlan(tripId: Id, shown?: readonly Pick<ParkDayAssignment, 'dayId' | 'park'>[]): Promise<number> {
+    await this.tripForPlanning(this.db, tripId)
+    const plan = await this.parkDayPlan(tripId)
+    if (shown && !sameParkDayPlan(shown, plan.assignments)) {
+      throw new EngineError('The plan changed since this page was drawn. Have another look before using it.')
+    }
+    const changes = parkDayPlanDiff(await this.listTripDays(tripId), plan.assignments)
+    for (const c of changes) await this.updateTripDay(tripId, c.dayId, { park: c.to, plan: { parkChosen: false } })
+    return changes.length
   }
 
   async listReservations(tripId: Id): Promise<TripReservation[]> {
@@ -4417,7 +4466,7 @@ function toTripDay(r: typeof tripDaysTable.$inferSelect): TripDay {
     tripId: r.tripId,
     date: r.date as CivilDate,
     park: r.park,
-    plan: { notes: typeof plan.notes === 'string' ? plan.notes : '', ropeDrop: plan.ropeDrop === true },
+    plan: { notes: typeof plan.notes === 'string' ? plan.notes : '', ropeDrop: plan.ropeDrop === true, parkChosen: plan.parkChosen === true },
     sort: r.sort,
   }
 }

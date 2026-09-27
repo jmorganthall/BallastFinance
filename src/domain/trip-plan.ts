@@ -60,6 +60,8 @@ export const PARK_LABELS: Record<TripPark, string> = {
 export interface DayPlanNotes {
   notes: string
   ropeDrop: boolean
+  /** A person picked this day's park (or rest, or travel) by hand: the park plan keeps it and plans around it (D32). */
+  parkChosen: boolean
 }
 
 export interface TripDay {
@@ -169,7 +171,9 @@ export function validateCrowdLevel(level: Pick<CrowdLevel, 'level' | 'park' | 'd
 
 export function validateDayInputs(day: Pick<TripDay, 'park' | 'plan'>): void {
   if (!TRIP_PARKS.includes(day.park)) throw new TripPlanError('Pick a park, a rest day or a travel day.')
-  if (typeof day.plan.notes !== 'string' || typeof day.plan.ropeDrop !== 'boolean') throw new TripPlanError('The day plan is notes and a rope-drop choice.')
+  if (typeof day.plan.notes !== 'string' || typeof day.plan.ropeDrop !== 'boolean' || typeof day.plan.parkChosen !== 'boolean') {
+    throw new TripPlanError('The day plan is notes, a rope-drop choice and whether you picked the park yourself.')
+  }
 }
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
