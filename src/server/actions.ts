@@ -14,7 +14,9 @@ import {
   describeRecurrence,
   recurrenceOf,
   type Recurrence,
+  type ThemePark,
   type TimelineStart,
+  type TripPark,
 } from '@/domain'
 
 export interface FormState {
@@ -1297,18 +1299,54 @@ export async function useWeekAction(formData: FormData): Promise<void> {
   backToTrip(tripId, done.message)
 }
 
+/**
+ * Save a day. A park picked by hand that differs from what the day was
+ * marks the day as the person's pick (D32), so the park plan keeps it;
+ * "Let the plan choose" (park "plan") clears that mark and leaves the park
+ * as it is until the plan is used.
+ */
 export async function updateTripDayAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const { TRIP_PARKS } = await import('@/domain')
   const tripId = String(formData.get('trip_id'))
-  const park = String(formData.get('park') ?? '') as (typeof TRIP_PARKS)[number]
+  const picked = String(formData.get('park') ?? '')
+  const was = String(formData.get('park_was') ?? '')
+  const park = picked as (typeof TRIP_PARKS)[number]
+  const chosen = picked === 'plan' ? false : TRIP_PARKS.includes(park) && picked !== was ? true : undefined
   const done = await tripRefusalOf(() =>
     engine.updateTripDay(tripId, String(formData.get('day_id')), {
       park: TRIP_PARKS.includes(park) ? park : undefined,
-      plan: { notes: String(formData.get('notes') ?? ''), ropeDrop: formData.get('rope_drop') === 'on' },
+      plan: { notes: String(formData.get('notes') ?? ''), ropeDrop: formData.get('rope_drop') === 'on', ...(chosen === undefined ? {} : { parkChosen: chosen }) },
     }),
   )
   backToTrip(tripId, done.message, `saved=1#day-${String(formData.get('day_id'))}`)
+}
+
+/** "Let the plan choose" on a day that was the person's pick: the park stays until the plan is used. */
+export async function letPlanChooseDayAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const tripId = String(formData.get('trip_id'))
+  const dayId = String(formData.get('day_id'))
+  const done = await tripRefusalOf(() => engine.updateTripDay(tripId, dayId, { plan: { parkChosen: false } }))
+  backToTrip(tripId, done.message, `saved=1#day-${dayId}`)
+}
+
+/**
+ * "Use this plan" (D32): the proposal the page showed travels as
+ * "dayId:park" fields, the engine derives it afresh and writes only when
+ * the two agree, so nothing stale lands.
+ */
+export async function applyParkDayPlanAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { isThemePark } = await import('@/domain')
+  const tripId = String(formData.get('trip_id'))
+  const shown: { dayId: string; park: ThemePark }[] = []
+  for (const v of formData.getAll('assignment')) {
+    const [dayId, park] = String(v).split(':')
+    if (dayId && park && isThemePark(park as TripPark)) shown.push({ dayId, park: park as ThemePark })
+  }
+  const done = await tripRefusalOf(() => engine.applyParkDayPlan(tripId, shown))
+  backToTrip(tripId, done.message, 'saved=1#days')
 }
 
 export async function typeCrowdLevelAction(formData: FormData): Promise<void> {

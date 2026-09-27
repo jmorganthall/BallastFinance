@@ -20,16 +20,21 @@
   --color-caution: oklch(0.58 0.13 80);
   --color-caution-soft: oklch(0.96 0.04 85);
   /*
-   * How busy, 1 quiet to 10 packed, two levels a step: one hue (the accent's),
-   * light to dark. A sequential scale, validated as an ordinal ramp in both
-   * themes (dataviz: monotone lightness, a visible gap between steps, the
-   * light end still readable on the card).
+   * How busy, 1 quiet to 10 packed, two levels a step: green for quiet
+   * through amber to deep red for packed (PRD D32). The order is carried by
+   * lightness, not only by hue -- light green down to deep red -- so the
+   * ramp still reads in order for a colour-blind reader, and the number is
+   * always printed beside the colour. Validated with the dataviz ramp
+   * checks in both themes (monotone lightness, a gap of at least 0.06
+   * between steps, the end nearest the card at 2:1 or better) and for
+   * ordering under simulated protan and deutan vision; the "one hue" check
+   * is failed on purpose, because the PRD asks for green to red.
    */
-  --color-busy-1: oklch(0.75 0.13 235);
-  --color-busy-2: oklch(0.66 0.13 235);
-  --color-busy-3: oklch(0.57 0.13 235);
-  --color-busy-4: oklch(0.48 0.13 235);
-  --color-busy-5: oklch(0.39 0.13 235);
+  --color-busy-1: oklch(0.74 0.14 150); /* #62c37a */
+  --color-busy-2: oklch(0.67 0.14 115); /* #939f24 */
+  --color-busy-3: oklch(0.605 0.124 80); /* #a87805 */
+  --color-busy-4: oklch(0.54 0.142 50); /* #ad5002 */
+  --color-busy-5: oklch(0.475 0.19 27); /* #ae0813 */
 }
 
 /*
@@ -54,12 +59,18 @@
     --color-ahead-soft: oklch(0.29 0.06 155);
     --color-caution: oklch(0.82 0.14 88);
     --color-caution-soft: oklch(0.32 0.06 85);
-    /* The same ramp flipped for a dark card: quiet sits near the surface, packed stands out. */
-    --color-busy-1: oklch(0.46 0.13 235);
-    --color-busy-2: oklch(0.55 0.13 235);
-    --color-busy-3: oklch(0.64 0.13 235);
-    --color-busy-4: oklch(0.73 0.13 235);
-    --color-busy-5: oklch(0.82 0.13 235);
+    /*
+     * The same green-to-red scale with its lightness anchor flipped for a
+     * dark card: quiet sits near the surface as a deep green, packed stands
+     * out as a bright red. Steps are wider toward the red end because a
+     * protan eye sees red darker; every step stays in order under the
+     * simulation. Validated on the dark card (#192028).
+     */
+    --color-busy-1: oklch(0.44 0.12 150); /* #03642b */
+    --color-busy-2: oklch(0.515 0.116 115); /* #666f02 */
+    --color-busy-3: oklch(0.6 0.124 80); /* #a77601 */
+    --color-busy-4: oklch(0.685 0.15 50); /* #e17a39 */
+    --color-busy-5: oklch(0.745 0.154 27); /* #ff8276 */
   }
 }
 

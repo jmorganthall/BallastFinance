@@ -59,7 +59,8 @@ repo still has to know them. Everything else: read the document.
 | D30 | A repeating part's timeline starts at its last occurrence: `timeline_start` on the part, the base component from the last occurrence at the steady rate, no opening offered for such a part, a checkbox at commit and on the part's edit form (PRD D30, rev 42) | Built |
 | D31 | The transfer day is a household setting: `transfer_weekday` (default Saturday) under Settings as "Our transfer runs on"; one definition of the week count in `src/domain/dates.ts`, the day threaded as `transferWeekday` beside `today` through every count; the digest sent on that day, `DIGEST_CRON` naming only the time (PRD D31, rev 44) | Built |
 | Trip-F | Ballast's own park data and the calendar: weather by horizon (Open-Meteo), park hours (ThemeParks.wiki), the crowd outlook (RopeDrop Planner), live waits polled into a wait history (Queue-Times) and ranked to 1–10; busyness derived through one function; a month grid on `/trips` and at the top of each trip's When section, with "Refresh park data" (D28–D29, PRD rev 41) | Built |
+| Trip-G | Which park, which day: a proposed park for each open day from how busy, the weather and the park hours, with the reasons in words, applied only by "Use this plan"; a day set by hand is "your pick" and planned around; each park once before any repeats; busyness coloured green (quiet) to deep red (packed) with the number beside it, validated in both themes (D32, PRD rev 45) | Built |
 
-Phases A–D, F and Trip-A/B/D/E/F are implemented and tested. What remains before v1 is done is
+Phases A–D, F and Trip-A/B/D/E/F/G are implemented and tested. What remains before v1 is done is
 verification against reality, not more building — see the PRD's acceptance
 criteria (§12) and the open items (§13).

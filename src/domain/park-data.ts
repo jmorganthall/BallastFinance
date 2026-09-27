@@ -562,7 +562,7 @@ export function calendarMonth(input: {
   }
 }
 
-/** The colour step for a level, 1 to 5: two levels a step, so the scale reads at a glance. */
+/** The colour step for a level, 1 to 5: two levels a step on the green-to-red scale (--color-busy-1..5, D32), so it reads at a glance. */
 export function busynessStep(level: number): 1 | 2 | 3 | 4 | 5 {
   return Math.max(1, Math.min(5, Math.ceil(Math.round(level) / 2))) as 1 | 2 | 3 | 4 | 5
 }

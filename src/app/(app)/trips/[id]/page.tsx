@@ -22,6 +22,7 @@ import {
   addTaskAction,
   addTripLineAction,
   addVariantAction,
+  applyParkDayPlanAction,
   checkCrowdsAction,
   checkDriveAction,
   checkDvcListingsAction,
@@ -30,6 +31,7 @@ import {
   discardDvcPullAction,
   keepCrowdPullAction,
   keepDvcPullAction,
+  letPlanChooseDayAction,
   rebuildTimelineAction,
   refreshParkDataAction,
   removeReservationAction,
@@ -53,6 +55,7 @@ import {
 } from '@/server/actions'
 import {
   BUSYNESS_SOURCE_WORDS,
+  busynessStep,
   CATEGORY_LABELS,
   CROWD_SOURCES,
   CROWD_STALE_AFTER_DAYS,
@@ -84,6 +87,8 @@ import {
   addDays,
   type Busyness,
   type DayView,
+  type ParkDayAssignment,
+  type ParkDayPlan,
   type ReserveAccount,
   type TripLine,
   type TripLineCategory,
@@ -778,9 +783,17 @@ export default async function TripPage({
             </form>
           ) : null}
         </div>
+        <ParkDayPlanCard plan={plan.parkDayPlan} tripId={trip.id} editable={planning} />
         <div className="grid gap-3 md:grid-cols-2">
           {plan.dayViews.map((d) => (
-            <DayCard key={d.date} day={d} tripId={trip.id} today={today} editable={planning} />
+            <DayCard
+              key={d.date}
+              day={d}
+              tripId={trip.id}
+              today={today}
+              editable={planning}
+              proposal={plan.parkDayPlan.assignments.find((a) => a.date === d.date) ?? null}
+            />
           ))}
         </div>
       </Section>
@@ -1194,17 +1207,121 @@ function CrowdMark({ level, today }: { level: Busyness; today: string }) {
   )
 }
 
-function DayCard({ day, tripId, today, editable }: { day: DayView; tripId: string; today: string; editable: boolean }) {
+/** A small square in the day's busyness colour; the number is always printed beside it wherever it appears. */
+function BusyChip({ level }: { level: number | null }) {
+  if (level === null) return null
+  return <span className="inline-block h-3 w-3 shrink-0 rounded-sm align-middle" style={{ background: `var(--color-busy-${busynessStep(level)})` }} aria-hidden />
+}
+
+/**
+ * Which park, which day (D32): the proposal beside what each day is now.
+ * Every figure is the derivation module's; "Use this plan" sends back what
+ * was shown so the engine can refuse anything stale.
+ */
+function ParkDayPlanCard({ plan, tripId, editable }: { plan: ParkDayPlan; tripId: string; editable: boolean }) {
+  const changes = plan.assignments.filter((a) => a.current !== a.park)
+  const missing = [
+    plan.missing.busyness.length > 0
+      ? `How busy is unknown for ${plan.missing.busyness.length === plan.assignments.length ? 'these days' : `${plan.missing.busyness.length} of these days`}; the plan uses the middle of the scale there.`
+      : null,
+    plan.missing.weather.length > 0 ? 'No weather yet for some days, so rain and heat did not count there.' : null,
+    plan.missing.hours.length > 0 ? 'No park hours yet for some days, so opening and closing times did not count there.' : null,
+  ].filter((m): m is string => m !== null)
+  return (
+    <Card className="mb-3 bg-[var(--color-surface)]">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="font-semibold">Which park, which day</h3>
+        <span className="text-xs text-[var(--color-ink-soft)]">{plan.summary}</span>
+      </div>
+      <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
+        From how busy each park is, the weather and the park hours: the quietest park first, a wet day to the parks with the most under cover, a hot
+        day to the one that opens earliest, a late close for the evening, and each of the four parks once before any repeats. A day you set yourself is
+        kept and planned around. Nothing changes until you press &ldquo;Use this plan&rdquo;.
+      </p>
+      {plan.assignments.length > 0 ? (
+        <ul className="mt-2 divide-y divide-[var(--color-line)] text-sm">
+          {plan.assignments.map((a) => (
+            <li key={a.dayId} className="flex items-baseline gap-2 py-1.5">
+              <span className="w-20 shrink-0 text-[var(--color-ink-soft)]">
+                {weekdayName(a.date).slice(0, 3)} {shortDate(a.date)}
+              </span>
+              <span className="min-w-0 flex-1">
+                <BusyChip level={a.busyness} /> <Hint detail={`Fit ${a.score}: lower is a better fit`}>{PARK_LABELS[a.park]}</Hint>
+                {a.current !== a.park ? <span className="text-xs text-[var(--color-ink-soft)]"> (now {PARK_LABELS[a.current].toLowerCase()})</span> : null}
+                <span className="block text-xs text-[var(--color-ink-soft)]">{a.reasons.join(', ')}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">Every day is your pick, a travel day, or already gone, so there is nothing for the plan to choose.</p>
+      )}
+      {plan.unchanged.length > 0 ? (
+        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+          Your pick: {plan.unchanged.map((u) => `${weekdayName(u.date).slice(0, 3)} ${shortDate(u.date)} ${PARK_LABELS[u.park].toLowerCase()}`).join(', ')}.
+        </p>
+      ) : null}
+      {plan.unplanned.length > 0 ? (
+        <p className="mt-2 text-xs text-[var(--color-behind)]">{plan.unplanned.map((u) => `${weekdayName(u.date).slice(0, 3)} ${shortDate(u.date)}: ${u.reason}`).join('; ')}.</p>
+      ) : null}
+      {missing.map((m) => (
+        <p key={m} className="mt-2 text-xs text-[var(--color-ink-soft)]">
+          {m}
+        </p>
+      ))}
+      {editable && changes.length > 0 ? (
+        <form action={applyParkDayPlanAction} className="mt-3 flex flex-wrap items-center gap-2">
+          <input type="hidden" name="trip_id" value={tripId} />
+          {plan.assignments.map((a) => (
+            <input key={a.dayId} type="hidden" name="assignment" value={`${a.dayId}:${a.park}`} />
+          ))}
+          <button type="submit" className={smallButton}>
+            Use this plan
+          </button>
+          <span className="text-xs text-[var(--color-ink-soft)]">
+            Sets {changes.length} {changes.length === 1 ? 'day' : 'days'}; the rest already match.
+          </span>
+        </form>
+      ) : editable && plan.assignments.length > 0 ? (
+        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">The days already match this plan.</p>
+      ) : null}
+    </Card>
+  )
+}
+
+function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tripId: string; today: string; editable: boolean; proposal: ParkDayAssignment | null }) {
   const inPark = THEME_PARKS.includes(day.park)
   const levelPark = inPark ? day.park : 'other'
+  const yourPick = day.day?.plan.parkChosen === true
   return (
     <Card>
       <div id={`day-${day.day?.id ?? day.date}`} className="flex items-baseline justify-between gap-3">
         <h3 className="font-semibold">
           {weekdayName(day.date)} <span className="font-normal text-[var(--color-ink-soft)]">{shortDate(day.date)}</span>
         </h3>
-        <span className="text-sm">{PARK_LABELS[day.park]}</span>
+        <span className="text-sm">
+          {PARK_LABELS[day.park]}
+          {yourPick ? <span className="ml-1 text-xs text-[var(--color-ink-soft)]">(your pick)</span> : null}
+        </span>
       </div>
+      {proposal ? (
+        <details className="mt-1 text-xs text-[var(--color-ink-soft)]">
+          <summary className="cursor-pointer">
+            {proposal.park === day.park ? 'The plan agrees: ' : 'The plan would make this '}
+            <BusyChip level={proposal.busyness} /> {PARK_LABELS[proposal.park]}
+          </summary>
+          <span className="block">{proposal.reasons.join(', ')}.</span>
+        </details>
+      ) : null}
+      {editable && yourPick && day.day ? (
+        <form action={letPlanChooseDayAction} className="mt-1">
+          <input type="hidden" name="trip_id" value={tripId} />
+          <input type="hidden" name="day_id" value={day.day.id} />
+          <button type="submit" className="text-xs text-[var(--color-accent)] underline underline-offset-4">
+            Let the plan choose this day
+          </button>
+        </form>
+      ) : null}
 
       <p className="mt-2 text-sm">
         {day.level ? (
@@ -1244,14 +1361,16 @@ function DayCard({ day, tripId, today, editable }: { day: DayView; tripId: strin
           <form action={updateTripDayAction} className="mt-2 space-y-2">
             <input type="hidden" name="trip_id" value={tripId} />
             <input type="hidden" name="day_id" value={day.day.id} />
+            <input type="hidden" name="park_was" value={day.day.park} />
             <label className="block text-xs text-[var(--color-ink-soft)]">
-              Where
+              Where (a change here is your pick, and the plan keeps it)
               <select name="park" defaultValue={day.day.park} className={input}>
                 {TRIP_PARKS.map((p) => (
                   <option key={p} value={p}>
                     {PARK_LABELS[p]}
                   </option>
                 ))}
+                {yourPick ? <option value="plan">Let the plan choose</option> : null}
               </select>
             </label>
             <label className="flex items-center gap-2 text-sm">

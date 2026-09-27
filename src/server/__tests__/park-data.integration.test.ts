@@ -12,8 +12,8 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import { and, eq, gte, lte, or } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
-import { Engine } from '@/server/engine'
-import { summariseWaits, type WaitObservation } from '@/domain'
+import { Engine, EngineError } from '@/server/engine'
+import { summariseWaits, type ThemePark, type WaitObservation } from '@/domain'
 
 const url = process.env.DATABASE_URL
 const describeDb = url ? describe : describe.skip
@@ -183,5 +183,121 @@ describeDb('park data', () => {
     expect(month.freshness).toEqual({ weather: TODAY, hours: TODAY, busyness: TODAY })
     expect(month.horizonsShown).toEqual(['forecast', 'subseasonal', 'normal'])
     await expect(engine.calendarMonth('2026-13')).rejects.toThrow(/month/)
+  })
+
+  /**
+   * Which park, which day (D32): a trip with typed busyness, stored weather
+   * and hours gets a proposal with reasons; "Use this plan" writes each
+   * changed day and one event each; a hand pick survives a re-plan; another
+   * household can neither see nor apply it.
+   */
+  describe('which park, which day', () => {
+    const PARKS: ThemePark[] = ['magic_kingdom', 'epcot', 'hollywood_studios', 'animal_kingdom']
+    const days = ['2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30']
+    let tripId: string
+    const dayEvents = () =>
+      db
+        .select()
+        .from(schema.events)
+        .where(and(eq(schema.events.householdId, householdId), eq(schema.events.kind, 'trip_changed')))
+        .then((rows) => rows.map((r) => r.payload as { day_id?: string; trip_id: string; before: { park: string; plan: { parkChosen: boolean } } | null; after: { park: string; plan: { parkChosen: boolean } } | null }).filter((e) => e.day_id && e.trip_id === tripId))
+
+    beforeAll(async () => {
+      tripId = (await engine.createTrip({ name: 'Which park', startDate: '2026-10-26', endDate: '2026-10-31', travelers: [{ name: 'Josh', band: 'adult' }], car: null })).id
+      // Every park a 5, except: EPCOT 2 on the 27th and 28th, Animal Kingdom 3 on the 29th.
+      const typed = days.flatMap((date) => PARKS.map((park) => ({ date, park, level: (date === '2026-10-27' || date === '2026-10-28') && park === 'epcot' ? 2 : date === '2026-10-29' && park === 'animal_kingdom' ? 3 : 5 })))
+      await engine.recordCrowdLevels(typed, { destination: 'wdw', source: 'typed', fetchedOn: TODAY })
+      // The 30th is a wet day; the rest are dry and mild.
+      await engine.recordParkWeather(days.map((date) => ({ date, highF: 84, lowF: 68, precipChance: date === '2026-10-30' ? 70 : 10 })), { destination: 'wdw', horizon: 'forecast', source: 'open_meteo', fetchedOn: TODAY })
+      for (const park of PARKS) {
+        await engine.recordParkHours(days.map((date) => ({ date, opens: '09:00', closes: park === 'magic_kingdom' ? '22:00' : '20:00', earlyEntry: null, extendedEvening: null })), { destination: 'wdw', park, source: 'themeparks_wiki', fetchedOn: TODAY })
+      }
+    })
+
+    it('proposes a park for each open day from busyness, weather and hours, with the reasons in words', async () => {
+      const plan = await engine.parkDayPlan(tripId)
+      expect(plan.assignments.map((a) => [a.date, a.current, a.park])).toEqual([
+        ['2026-10-27', 'rest', 'epcot'],
+        ['2026-10-28', 'rest', 'magic_kingdom'],
+        ['2026-10-29', 'rest', 'animal_kingdom'],
+        ['2026-10-30', 'rest', 'hollywood_studios'],
+      ])
+      expect(plan.assignments[0]!.reasons).toEqual(['quietest that day (2)'])
+      expect(plan.assignments[1]!.reasons).toEqual(['how busy 5', 'open till 10 pm'])
+      expect(plan.assignments[3]!.reasons).toEqual(['quietest that day (5)', '70% rain, mostly under cover'])
+      expect(plan.unchanged).toEqual([])
+      expect(plan.missing).toEqual({ busyness: [], weather: [], hours: [] })
+      expect(plan.summary).toBe('4 days planned: EPCOT, Magic Kingdom, Animal Kingdom, Hollywood Studios')
+      // The trip screen carries the same proposal.
+      expect((await engine.tripPlanView(tripId))!.parkDayPlan.assignments.map((a) => a.park)).toEqual(['epcot', 'magic_kingdom', 'animal_kingdom', 'hollywood_studios'])
+    })
+
+    it('"Use this plan" writes each changed day as the ordinary park fact, one event per day, refusing a stale page', async () => {
+      const shown = (await engine.parkDayPlan(tripId)).assignments
+      const before = (await dayEvents()).length
+      await expect(engine.applyParkDayPlan(tripId, [{ dayId: shown[0]!.dayId, park: 'animal_kingdom' }])).rejects.toThrow(/changed since/)
+      expect((await dayEvents()).length).toBe(before)
+      expect(await engine.applyParkDayPlan(tripId, shown)).toBe(4)
+      const rows = await engine.listTripDays(tripId)
+      expect(rows.map((d) => d.park)).toEqual(['travel', 'epcot', 'magic_kingdom', 'animal_kingdom', 'hollywood_studios', 'travel'])
+      expect(rows.every((d) => d.plan.parkChosen === false)).toBe(true)
+      const written = (await dayEvents()).slice(before)
+      expect(written).toHaveLength(4)
+      expect(written.map((e) => [e.before?.park, e.after?.park, e.after?.plan.parkChosen])).toEqual([
+        ['rest', 'epcot', false],
+        ['rest', 'magic_kingdom', false],
+        ['rest', 'animal_kingdom', false],
+        ['rest', 'hollywood_studios', false],
+      ])
+      // Applied again, nothing changes and nothing is written.
+      expect(await engine.applyParkDayPlan(tripId)).toBe(0)
+      expect((await dayEvents()).length).toBe(before + 4)
+    })
+
+    it('a park picked by hand is your pick: kept, counted toward each-park-once, and planned around; "let the plan choose" releases it', async () => {
+      const rows = await engine.listTripDays(tripId)
+      const tuesday = rows.find((d) => d.date === '2026-10-27')!
+      await engine.updateTripDay(tripId, tuesday.id, { park: 'magic_kingdom', plan: { parkChosen: true } })
+      let plan = await engine.parkDayPlan(tripId)
+      expect(plan.unchanged).toEqual([{ dayId: tuesday.id, date: '2026-10-27', park: 'magic_kingdom' }])
+      expect(plan.assignments.map((a) => [a.date, a.park])).toEqual([
+        ['2026-10-28', 'epcot'],
+        ['2026-10-29', 'animal_kingdom'],
+        ['2026-10-30', 'hollywood_studios'],
+      ])
+      expect(await engine.applyParkDayPlan(tripId, plan.assignments)).toBe(1)
+      expect((await engine.listTripDays(tripId)).map((d) => [d.park, d.plan.parkChosen])).toEqual([
+        ['travel', false],
+        ['magic_kingdom', true],
+        ['epcot', false],
+        ['animal_kingdom', false],
+        ['hollywood_studios', false],
+        ['travel', false],
+      ])
+      // A rest day the person chose is kept as a rest day; a hand pick released goes back to the plan.
+      const thursday = (await engine.listTripDays(tripId)).find((d) => d.date === '2026-10-29')!
+      await engine.updateTripDay(tripId, thursday.id, { park: 'rest', plan: { parkChosen: true } })
+      plan = await engine.parkDayPlan(tripId)
+      expect(plan.assignments.map((a) => a.date)).toEqual(['2026-10-28', '2026-10-30'])
+      expect(plan.unchanged.map((u) => [u.date, u.park])).toEqual([
+        ['2026-10-27', 'magic_kingdom'],
+        ['2026-10-29', 'rest'],
+      ])
+      await engine.updateTripDay(tripId, tuesday.id, { plan: { parkChosen: false } })
+      plan = await engine.parkDayPlan(tripId)
+      expect(plan.assignments.map((a) => [a.date, a.current, a.park])).toEqual([
+        ['2026-10-27', 'magic_kingdom', 'epcot'],
+        ['2026-10-28', 'epcot', 'magic_kingdom'],
+        ['2026-10-30', 'hollywood_studios', 'hollywood_studios'],
+      ])
+    })
+
+    it('another household sees no plan and cannot apply one', async () => {
+      const [neighbour] = await db.insert(schema.households).values({ name: `Other ${crypto.randomUUID()}` }).returning()
+      const other = new Engine({ householdId: neighbour!.id, actorUserId: null, db, today: TODAY })
+      await expect(other.parkDayPlan(tripId)).rejects.toThrow(EngineError)
+      await expect(other.applyParkDayPlan(tripId)).rejects.toThrow(EngineError)
+      await db.delete(schema.households).where(eq(schema.households.id, neighbour!.id))
+    })
   })
 })

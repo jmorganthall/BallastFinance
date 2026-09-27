@@ -86,7 +86,7 @@ const day = (date: string, park: TripDay['park'] = 'rest', over: Partial<TripDay
   tripId: trip.id,
   date,
   park,
-  plan: { notes: '', ropeDrop: false },
+  plan: { notes: '', ropeDrop: false, parkChosen: false },
   sort: 0,
   ...over,
 })
