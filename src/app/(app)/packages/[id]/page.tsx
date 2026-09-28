@@ -13,7 +13,6 @@ import { notFound } from 'next/navigation'
 import { requireEngine } from '@/server/session'
 import { Card, Hint, humanDate, Money, Pill } from '@/components/ui'
 import { EditableTitle } from '@/components/editable-title'
-import { WeeklyNumber } from '@/components/weekly-number'
 import { AccrualChart } from '@/components/accrual-chart'
 import { ProgressBar } from '@/components/progress-bar'
 import {
@@ -25,7 +24,7 @@ import {
   retirePackageAction,
   updateLineItemAction,
 } from '@/server/actions'
-import { describeRecurrence, formatCents, previousOccurrence, savingSinceWords } from '@/domain'
+import { describeRecurrence, formatCents, previousOccurrence, steadySinceWords } from '@/domain'
 import { RecurrenceFields } from '@/components/recurrence-fields'
 import { SavingSinceFields } from '@/components/saving-since-fields'
 import { DeletePlan } from './delete-plan'
@@ -67,12 +66,17 @@ export default async function PackageDetailPage({
       })
     : []
   const isDone = view.package.state === 'retired'
-  // The day a plan started saving is the earliest day any of its parts runs
-  // from (D33), which for a part starting at its last occurrence is before
-  // the commit. A part whose own day differs says so on its card.
-  const savingSinceDate = view.savingSince ?? view.package.committedAt
-  const whatIf = isDraft ? await engine.whatIf(id) : []
-  const curve = isDraft || isDone ? null : await engine.packageCurve(id)
+  // Every money figure for a live plan is the one position's (D35): the same
+  // numbers the plans list, This week and the check-in read.
+  const position = isDraft || isDone ? null : await engine.position()
+  const plan = position?.plans.find((p) => p.package.id === id) ?? null
+  const partOf = new Map((plan?.parts ?? []).map((p) => [p.lineItem.id, p]))
+  const shortOn = new Map((position?.accounts ?? []).map((a) => [a.account.id, a.short?.on ?? null]))
+  // The day a plan started saving is the earliest day any of its parts'
+  // steady lines runs from (D33, D35). A part whose own day differs says so.
+  const savingSinceDate = plan?.savingSince ?? view.package.committedAt
+  const whatIf = isDraft ? await engine.whatIfCommit(id) : []
+  const curve = plan && plan.parts.length > 0 ? await engine.planChart(id) : null
   const accounts = await engine.reserveAccountsForViewer()
   const accountName = (accountId: string) =>
     accounts.find((a) => a.id === accountId)?.name ?? 'Unknown account'
@@ -80,18 +84,6 @@ export default async function PackageDetailPage({
 
   const live = view.items.filter((i) => i.lineItem.state !== 'retired')
   const retired = view.items.filter((i) => i.lineItem.state === 'retired')
-
-  // Whether the money counted in each account this plan draws on would sit
-  // differently if reshuffled; the line beside a part says so, and points at
-  // the check-in, where the reshuffle lives.
-  const spreads = new Map(
-    await Promise.all(
-      [...new Set(live.map((i) => i.lineItem.reserveAccountId))].map(
-        async (accountId) =>
-          [accountId, isDraft || isDone ? null : await engine.reshufflePreview(accountId)] as const,
-      ),
-    ),
-  )
 
   const accountOptions = accounts.map((a) => (
     <option key={a.id} value={a.id} disabled={!a.writable}>
@@ -144,15 +136,23 @@ export default async function PackageDetailPage({
               ) : (
                 <ul className="mt-2 space-y-1 text-sm">
                   {whatIf.map((line) => (
-                    <li key={line.accountId} className="flex justify-between gap-3">
-                      <span>{line.accountName}</span>
-                      <span className="tabular">
-                        <Money cents={line.currentPerWeekCents} /> →{' '}
-                        <strong>
-                          <Money cents={line.projectedPerWeekCents} />
-                        </strong>
-                        /wk
-                      </span>
+                    <li key={line.accountId}>
+                      <div className="flex justify-between gap-3">
+                        <span>{line.accountName}</span>
+                        <span className="tabular">
+                          <Money cents={line.weeklyNowCents} /> →{' '}
+                          <strong>
+                            <Money cents={line.weeklyAfterCents} />
+                          </strong>
+                          /wk
+                        </span>
+                      </div>
+                      {line.moveAfterCents > 0 && line.moveBy ? (
+                        <p className="text-xs text-[var(--color-ink-soft)]">
+                          And a one-time move of <Money cents={line.moveAfterCents} /> by{' '}
+                          {humanDate(line.moveBy)}: too soon for the weekly transfer to cover.
+                        </p>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
@@ -191,8 +191,9 @@ export default async function PackageDetailPage({
                         {offer ? (
                           <>
                             <p className="mt-2 hidden text-xs text-[var(--color-ink-soft)] group-has-[.tl-last:checked]/part:block">
-                              Should hold <Money cents={offer.cents} /> today; the check-in will say
-                              if it is not there.
+                              Saving steadily since then, <Money cents={offer.cents} /> would be here
+                              today. If the account does not have it, the part reads as catching up and
+                              the weekly transfer covers it by the due date.
                             </p>
                             <p className="mt-2 hidden text-xs text-[var(--color-ink-soft)] group-has-[.tl-commit:checked]/part:block">
                               You would have <Money cents={offer.cents} /> set aside by now if you
@@ -243,14 +244,27 @@ export default async function PackageDetailPage({
               </button>
             </form>
           </>
-        ) : !isDone ? (
+        ) : plan && plan.parts.length > 0 ? (
           <div className="mt-4">
-            <WeeklyNumber weekly={view.weekly} size="small" />
+            <p className="text-lg font-semibold">
+              <Money cents={plan.steadyPerWeekCents} />
+              <span className="text-base font-normal text-[var(--color-ink-soft)]"> / week steady</span>
+            </p>
+            <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+              <Hint detail="What saving steadily for each part costs a week. The bank transfer is set per account, not per plan: This week shows what each account needs, which can be more while a part catches up, or less when money already there covers it.">
+                Its share of the weekly transfer
+              </Hint>
+              ; the account sets the transfer.
+            </p>
             <ProgressBar
               className="mt-4"
-              totalCents={view.totalCents}
-              setAsideCents={view.shouldHaveSavedCents}
-              paceCents={view.paceCents}
+              totalCents={plan.totalCents}
+              countedCents={plan.countedCents}
+              savedForCents={plan.savedForCents}
+              coveringSoonerCents={plan.coveringSoonerCents}
+                        notYetHereCents={plan.notYetHereCents}
+              status={plan.status}
+              shortOn={plan.parts.map((p) => shortOn.get(p.accountId) ?? null).find((d) => d !== null)}
             />
           </div>
         ) : null}
@@ -259,12 +273,7 @@ export default async function PackageDetailPage({
       {curve ? (
         <Card className="mb-4">
           <h2 className="mb-3 text-sm font-semibold">How the money builds up</h2>
-          <AccrualChart
-            points={curve.points}
-            confirmed={curve.confirmed}
-            today={engine.today()}
-            targetCents={curve.targetCents}
-          />
+          <AccrualChart chart={curve} today={today} />
         </Card>
       ) : null}
 
@@ -274,10 +283,7 @@ export default async function PackageDetailPage({
 
       <ul className="space-y-3">
         {live.map((item) => {
-          const spread = spreads.get(item.lineItem.reserveAccountId) ?? null
-          const spreadLine = spread?.lines.find((l) => l.lineItemId === item.lineItem.id) ?? null
-          const wouldMove =
-            spread !== null && spreadLine !== null && spreadLine.holdsAfterCents !== spreadLine.holdsNowCents
+          const part = partOf.get(item.lineItem.id) ?? null
           return (
           <li key={item.lineItem.id}>
             <Card>
@@ -302,52 +308,35 @@ export default async function PackageDetailPage({
                 </strong>
               </p>
 
-              {!isDraft && !isDone ? (
+              {part ? (
                 <>
                   <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-                    <Money cents={item.shouldHaveSavedCents} /> set aside ·{' '}
-                    <Money cents={item.remainingCents} /> to go ·{' '}
-                    {formatCents(item.weekly.totalPerWeekCents)}/wk
+                    <Money cents={part.countedCents} /> here ·{' '}
+                    {formatCents(part.steadyPerWeekCents)}/wk steady
                   </p>
                   {/*
-                    Where this part's own timeline runs from (D33), when that
-                    is not the day the heading shows, or not the day the
-                    part's setting names. Both the date and the reason are
-                    the domain's.
+                    Where this part's steady line runs from (D33, D35), when
+                    that is not the day the heading shows. The date and the
+                    reason are the domain's.
                   */}
-                  {item.savingSince.date !== savingSinceDate || item.savingSince.chosenDate !== null ? (
+                  {part.savingSince.date !== savingSinceDate ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-                      Saving since {humanDate(item.savingSince.date)} —{' '}
-                      {savingSinceWords(item.savingSince.reason, humanDate)}.
-                      {item.savingSince.chosenDate !== null && item.lineItem.timelineStart === 'typed'
-                        ? item.savingSince.reason.kind === 'commit' || item.savingSince.reason.kind === 'added'
-                          ? ` The day you gave, ${humanDate(item.savingSince.chosenDate)}, is not before that, so it counts from here.`
-                          : ` The day you gave, ${humanDate(item.savingSince.chosenDate)}, will apply again once a new cycle starts.`
-                        : null}
+                      Saving since {humanDate(part.savingSince.date)} —{' '}
+                      {steadySinceWords(part.savingSince.reason)}.
                     </p>
                   ) : null}
                   <ProgressBar
                     className="mt-3"
-                    totalCents={item.totalCents}
-                    setAsideCents={item.shouldHaveSavedCents}
-                    paceCents={item.paceCents}
-                    paceSince={item.paceSince}
-                    dueDate={item.lineItem.dueDate}
+                    totalCents={part.totalCents}
+                    countedCents={part.countedCents}
+                    savedForCents={part.savedForCents}
+                    coveringSoonerCents={part.coveringSoonerCents}
+                    notYetHereCents={part.notYetHereCents}
+                    status={part.status}
+                    savingSince={{ date: part.savingSince.date, words: steadySinceWords(part.savingSince.reason) }}
+                    dueDate={part.outflowDate}
+                    shortOn={shortOn.get(part.accountId) ?? null}
                   />
-                  {wouldMove && spread && spreadLine ? (
-                    <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
-                      Reshuffled, this part would count <Money cents={spreadLine.holdsAfterCents} /> and
-                      the {spread.accountName} transfer would go from{' '}
-                      <Money cents={spread.perWeekNowCents} /> to <Money cents={spread.perWeekAfterCents} />{' '}
-                      a week.{' '}
-                      <Link
-                        href={`/check-in#spread-${spread.accountId}`}
-                        className="text-[var(--color-accent)] underline underline-offset-4"
-                      >
-                        Reshuffle {spread.accountName}
-                      </Link>
-                    </p>
-                  ) : null}
                 </>
               ) : null}
 
@@ -440,34 +429,6 @@ export default async function PackageDetailPage({
                 </details>
               ) : null}
 
-              {!isDraft &&
-              (item.components.length > 1 ||
-                item.components.some(
-                  (c) => c.kind === 'base' && c.startDate < (view.package.committedAt ?? c.startDate),
-                )) ? (
-                <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
-                  <Hint
-                    detail={item.components
-                      .map(
-                        (c) =>
-                          `${
-                            c.kind === 'base'
-                              ? c.startDate < (view.package.committedAt ?? c.startDate)
-                                ? 'Counted from before the plan started'
-                                : 'Original plan'
-                              : c.kind === 'opening'
-                                ? 'Already set aside'
-                                : 'Added when the plan changed'
-                          }: ${formatCents(c.amountCents)} over ${c.weeks} week${c.weeks === 1 ? '' : 's'}, ${c.startDate} to ${c.endDate}`,
-                      )
-                      .join(' · ')}
-                  >
-                    {item.components.length > 1
-                      ? `Made of ${item.components.length} pieces`
-                      : `Counted since ${humanDate(item.savingSince.date)}`}
-                  </Hint>
-                </p>
-              ) : null}
             </Card>
           </li>
           )

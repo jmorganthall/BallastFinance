@@ -221,6 +221,8 @@ export function driftAdjustmentsFrom(args: {
   issued: readonly IssuedInstruction[]
   confirmed: readonly ConfirmedInstruction[]
   ended?: readonly EndedInstruction[]
+  /** The household's transfer day (D31): what a stopped bump delivered is counted on it. */
+  transferWeekday?: Weekday
 }): { accepted: DriftAdjustment[]; pending: DriftAdjustment[] } {
   const done = new Set(args.confirmed.map((c) => c.instructionId))
   const endedOn = new Map((args.ended ?? []).map((e) => [e.instructionId, e.endedOn]))
@@ -246,17 +248,25 @@ export function driftAdjustmentsFrom(args: {
       accepted.push(adjustment)
       continue
     }
-    const shortened = stopAdjustment(adjustment, stoppedOn)
+    const shortened = stopAdjustment(adjustment, stoppedOn, args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY)
     if (shortened) accepted.push(shortened)
   }
   return { accepted, pending }
 }
 
 /** The part of a bump or cut that ran before it was stopped, or null if none did. */
-function stopAdjustment(a: DriftAdjustment, stoppedOn: CivilDate): DriftAdjustment | null {
+function stopAdjustment(
+  a: DriftAdjustment,
+  stoppedOn: CivilDate,
+  transferWeekday: Weekday,
+): DriftAdjustment | null {
   const endDate = minDate(a.endDate, stoppedOn)
   if (compareDates(endDate, a.startDate) <= 0) return null
-  const amountCents = componentDeliveredBy(driftAdjustmentComponent(a), endDate)
+  const amountCents = componentDeliveredBy(
+    driftAdjustmentComponent(a, transferWeekday),
+    endDate,
+    transferWeekday,
+  )
   if (amountCents === 0) return null
   return { ...a, endDate, amountCents }
 }
@@ -323,18 +333,19 @@ export function openCommitmentsFor(args: {
 /**
  * A one-time move marked done is a fact about the instruction, not about the
  * account; whether it lands on an account's ledger is decided here (D34). A
- * catch-up move into a reserve account counts in full and positive, a
- * move-out negative, at the amount the person confirmed if they gave one. A
- * share-out or a cover move is money the share-out already placed, so it is
- * not counted twice; a transfer change, a bump or a cut lands week by week
- * and is counted at the usual check-in.
+ * move into a reserve account counts in full and positive, a move-out
+ * negative, at the amount the person confirmed if they gave one. Since D35
+ * that includes a share-out's or a cover's move: the account's money today
+ * is what is physically in it, and that money is. Only a "left over" ask,
+ * which names no account, is not a move on any ledger; a transfer change, a
+ * bump or a cut lands week by week through the transfer, not here.
  */
 export function doneMoveOf(
   instruction: IssuedInstruction,
   confirmation: ConfirmedInstruction,
 ): DoneMove | null {
   const amount = confirmation.actualAmountCents ?? instruction.amountCents
-  if (instruction.type === 'one_time_move' && (instruction.purpose ?? 'catch_up') === 'catch_up') {
+  if (instruction.type === 'one_time_move' && instruction.purpose !== 'left_over') {
     return { instructionId: instruction.instructionId, amountCents: amount, confirmedOn: confirmation.confirmedOn }
   }
   if (instruction.type === 'one_time_move_out') {
@@ -383,55 +394,6 @@ export function adjustmentRemainingAfter(
   )
 }
 
-/**
- * What the open commitments will still deliver after the day a balance was
- * read (D18): the signed sum of every bump or cut's undelivered remainder past
- * that day, plus every open one-time move in full. A check-in adds this to
- * the raw gap, so a catch-up already running or already offered is never
- * offered a second time.
- */
-export function committedAfter(args: {
-  commitments: OpenCommitments
-  from: CivilDate
-  transferWeekday?: Weekday
-}): Cents {
-  const { commitments, from } = args
-  const transferWeekday = args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
-  const dated = [...commitments.running, ...commitments.pending].reduce(
-    (sum, a) => sum + adjustmentRemainingAfter(a, from, transferWeekday),
-    0,
-  )
-  const moves = commitments.pendingMoves.reduce((sum, m) => sum + m.amountCents, 0)
-  // Marked done since the last count: in the bank, not yet in any count (D34).
-  const done = commitments.doneMoves.reduce((sum, m) => sum + m.amountCents, 0)
-  return dated + moves + done
-}
-
-/**
- * What is waiting on the to-do list for this account, by kind and at full
- * amount, every figure positive. A fresh offer of the same kind replaces the
- * waiting one (D18), so the offer is sized to carry it; see `catchUpOptions`.
- */
-export interface PendingByKind {
-  bumpCents: Cents
-  cutCents: Cents
-  moveCents: Cents
-  moveOutCents: Cents
-}
-
-export function pendingByKind(commitments: OpenCommitments): PendingByKind {
-  const totals: PendingByKind = { bumpCents: 0, cutCents: 0, moveCents: 0, moveOutCents: 0 }
-  for (const a of commitments.pending) {
-    if (a.amountCents > 0) totals.bumpCents += a.amountCents
-    else totals.cutCents += -a.amountCents
-  }
-  for (const m of commitments.pendingMoves) {
-    if (m.amountCents > 0) totals.moveCents += m.amountCents
-    else totals.moveOutCents += -m.amountCents
-  }
-  return totals
-}
-
 /** The weekly figure a bump or cut reads at: the same rounding the transfer instruction uses. */
 export function adjustmentPerWeekCents(
   a: DriftAdjustment,
@@ -471,47 +433,6 @@ export function runningAdjustments(args: {
       remainingCents: adjustmentRemainingAfter(a, args.today, transferWeekday),
     }))
     .sort((a, b) => compareDates(a.endDate, b.endDate))
-}
-
-/**
- * What to put first when a fresh balance reads AHEAD on an account with a
- * catch-up bump running (D18): stop that bump today. The count, ease-off and
- * move-out choices then apply to what is left of the extra once the bump's
- * undelivered remainder is taken off it. If the remainder is more than the
- * extra, stopping leaves the account short by the difference, which the
- * next check-in picks up; the sentence says so rather than hiding it.
- *
- * With more than one bump running, the one ending last is offered: it is
- * the most recent catch-up, and the next check-in offers the next.
- */
-export interface StopCatchUpOffer extends RunningAdjustment {
-  /** The extra still to deal with once this bump stops. */
-  leftCents: Cents
-  /** How far short stopping leaves the account, when the bump had more to add than the extra. */
-  shortAfterCents: Cents
-}
-
-export function stopCatchUpOffer(args: {
-  running: readonly DriftAdjustment[]
-  today: CivilDate
-  extraCents: Cents
-  transferWeekday?: Weekday
-}): StopCatchUpOffer | null {
-  if (args.extraCents <= 0) return null
-  const bump = runningAdjustments(args)
-    .filter((a) => a.perWeekCents > 0)
-    .at(-1)
-  if (!bump) return null
-  return {
-    ...bump,
-    leftCents: Math.max(0, args.extraCents - bump.remainingCents),
-    shortAfterCents: Math.max(0, bump.remainingCents - args.extraCents),
-  }
-}
-
-/** The sentence for that offer. Plain language (PRD §9). */
-export function stopCatchUpSentence(offer: StopCatchUpOffer): string {
-  return `Stop the ${formatCents(offer.perWeekCents)} a week catch-up (it was going to run until ${offer.endDate})`
 }
 
 /**

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  committedAfter,
   doneMoveOf,
   doneMovesSummary,
   driftAdjustmentsFrom,
@@ -11,8 +10,6 @@ import {
   outstandingInstructions,
   perWeekOf,
   runningAdjustments,
-  stopCatchUpOffer,
-  stopCatchUpSentence,
   type IssuedInstruction,
 } from '../instructions'
 import { closeOutDrift, closeOutPrompts, dueState } from '../closeout'
@@ -244,24 +241,21 @@ describe('outstanding instructions', () => {
         { instructionId: 'move', amountCents: 5000 },
         { instructionId: 'out', amountCents: -1200 },
       ])
-      // Half way (4 of 8 Saturdays done by Nov 28): $80 of the bump and $40 of the cut still to come.
-      expect(committedAfter({ commitments, from: '2026-11-28' })).toBe(8000 - 4000 + 5000 - 1200)
-      // Before its first transfer everything is still to come; after its end, nothing dated is.
-      expect(committedAfter({ commitments, from: '2026-11-01' })).toBe(16000 - 8000 + 5000 - 1200)
-      expect(committedAfter({ commitments, from: '2027-01-01' })).toBe(5000 - 1200)
     })
 
     it('carries a move marked done since the last count as money the account holds (D34)', () => {
       const bump: DriftAdjustment = { id: 'bump', reserveAccountId: 'acct-annual', amountCents: 16000, startDate: '2026-11-01', endDate: '2026-12-26' }
       const move = issued({ instructionId: 'move', type: 'one_time_move', amountCents: 5000 })
       const out = issued({ instructionId: 'out', type: 'one_time_move_out', amountCents: 1200 })
-      // A catch-up move in at the amount confirmed, a move-out negative; a share-out, a cover
-      // and a transfer change are not moves on the ledger.
+      // A move in at the amount confirmed, a move-out negative; a transfer change is not a
+      // move on the ledger.
       expect(doneMoveOf(move, { instructionId: 'move', confirmedOn: '2026-11-05' })).toEqual({ instructionId: 'move', amountCents: 5000, confirmedOn: '2026-11-05' })
       expect(doneMoveOf(move, { instructionId: 'move', confirmedOn: '2026-11-05', actualAmountCents: 4800 })).toMatchObject({ amountCents: 4800 })
       expect(doneMoveOf(out, { instructionId: 'out', confirmedOn: '2026-11-05' })).toMatchObject({ amountCents: -1200 })
-      expect(doneMoveOf(issued({ instructionId: 's', type: 'one_time_move', purpose: 'share_out' }), { instructionId: 's', confirmedOn: '2026-11-05' })).toBeNull()
-      expect(doneMoveOf(issued({ instructionId: 'c', type: 'one_time_move', purpose: 'cover' }), { instructionId: 'c', confirmedOn: '2026-11-05' })).toBeNull()
+      // Since D35 a share-out's or a cover's move is money in the account like any other.
+      expect(doneMoveOf(issued({ instructionId: 's', type: 'one_time_move', purpose: 'share_out', amountCents: 700 }), { instructionId: 's', confirmedOn: '2026-11-05' })).toMatchObject({ amountCents: 700 })
+      expect(doneMoveOf(issued({ instructionId: 'c', type: 'one_time_move', purpose: 'cover', amountCents: 300 }), { instructionId: 'c', confirmedOn: '2026-11-05' })).toMatchObject({ amountCents: 300 })
+      expect(doneMoveOf(issued({ instructionId: 'l', type: 'one_time_move', purpose: 'left_over' }), { instructionId: 'l', confirmedOn: '2026-11-05' })).toBeNull()
       expect(doneMoveOf(issued({ instructionId: 't' }), { instructionId: 't', confirmedOn: '2026-11-05' })).toBeNull()
 
       const doneMoves = [
@@ -270,8 +264,6 @@ describe('outstanding instructions', () => {
       ]
       const commitments = openCommitmentsFor({ reserveAccountId: 'acct-annual', accepted: [bump], pending: [], outstanding: [], doneMoves })
       expect(commitments.doneMoves).toEqual(doneMoves)
-      // Half way through the bump, plus the net of what was moved and not yet counted.
-      expect(committedAfter({ commitments, from: '2026-11-28' })).toBe(8000 + 5000 - 1200)
       expect(doneMovesSummary(doneMoves)).toEqual({ inCents: 5000, outCents: 1200, netCents: 3800 })
       expect(likelyBalanceCents(50000, doneMoves)).toBe(53800)
       expect(likelyBalanceCents(null, doneMoves)).toBeNull()
@@ -280,20 +272,7 @@ describe('outstanding instructions', () => {
       expect(likelyBalanceCents(50000, [])).toBe(50000)
     })
 
-    it('offers to stop the running catch-up first when the account reads ahead', () => {
-      const bump: DriftAdjustment = { id: 'bump', reserveAccountId: 'acct-annual', amountCents: 16000, startDate: '2026-11-01', endDate: '2026-12-26' }
-      const cut: DriftAdjustment = { id: 'cut', reserveAccountId: 'acct-annual', amountCents: -8000, startDate: '2026-11-01', endDate: '2027-02-27' }
-      // Nov 21: 3 of 8 transfers done, $100 still to come from the bump.
-      const offer = stopCatchUpOffer({ running: [cut, bump], today: '2026-11-21', extraCents: 15000 })
-      expect(offer).toMatchObject({ instructionId: 'bump', perWeekCents: 2000, endDate: '2026-12-26', remainingCents: 10000, leftCents: 5000, shortAfterCents: 0 })
-      expect(stopCatchUpSentence(offer!)).toBe('Stop the $20.00 a week catch-up (it was going to run until 2026-12-26)')
-      // Less extra than the bump still adds: stopping leaves it short by the difference.
-      expect(stopCatchUpOffer({ running: [bump], today: '2026-11-21', extraCents: 3000 })).toMatchObject({ leftCents: 0, shortAfterCents: 7000 })
-      // Nothing to stop: a cut is not a catch-up, a finished bump is history, and behind is not ahead.
-      expect(stopCatchUpOffer({ running: [cut], today: '2026-11-21', extraCents: 15000 })).toBeNull()
-      expect(stopCatchUpOffer({ running: [bump], today: '2027-01-01', extraCents: 15000 })).toBeNull()
-      expect(stopCatchUpOffer({ running: [bump], today: '2026-11-21', extraCents: -100 })).toBeNull()
-    })
+
   })
 
   it('reads as a sentence a person can act on', () => {
