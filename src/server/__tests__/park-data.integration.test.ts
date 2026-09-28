@@ -200,6 +200,7 @@ describeDb('park data', () => {
         .select()
         .from(schema.events)
         .where(and(eq(schema.events.householdId, householdId), eq(schema.events.kind, 'trip_changed')))
+        .orderBy(schema.events.recordedAt, schema.events.id)
         .then((rows) => rows.map((r) => r.payload as { day_id?: string; trip_id: string; before: { park: string; plan: { parkChosen: boolean } } | null; after: { park: string; plan: { parkChosen: boolean } } | null }).filter((e) => e.day_id && e.trip_id === tripId))
 
     beforeAll(async () => {
