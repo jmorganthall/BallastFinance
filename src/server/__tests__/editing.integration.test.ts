@@ -34,6 +34,7 @@ describeDb('editing plans and debts', () => {
       .select()
       .from(schema.events)
       .where(and(eq(schema.events.householdId, householdId), eq(schema.events.kind, kind)))
+      .orderBy(schema.events.recordedAt)
 
   beforeAll(async () => {
     client = postgres(url!, { max: 4, prepare: false })
