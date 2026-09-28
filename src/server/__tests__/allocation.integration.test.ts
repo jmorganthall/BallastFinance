@@ -129,17 +129,48 @@ describeDb('allocation runs', () => {
   })
 
   it('covers what is short first, off the top, and splits the rest', async () => {
-    // A plan in Long Term Savings that should hold $400 by now, with $100
-    // actually there: $300 behind. Cover it, then share the rest by the rules.
+    // Since D35 a plan is short when its account needs a one-time move: money
+    // the weekly transfer cannot put there in time for something due soon (a
+    // gap the transfer can close is a transfer change, and takes no spare
+    // money). In Long Term Savings: $500 of gutters due Sat 3 Oct, two
+    // transfers away, and a $2,500 roof due Sat 18 Sep 2027, 52 away. The
+    // commit said $400 was set aside; a count today finds $100, and the count
+    // is what the account holds. The weekly amount W and the move M solve
+    //     W = (300000 − 10000 − M) / 52   and   50000 − 10000 − M − 2W = 0
+    // so M = $300 and W = $50. On $50 a week, 3 Oct has $200 for the $500
+    // due: $300 short, which the move exactly covers ($3,000 by 2027 too).
+    // Cover it, then share the rest by the rules.
     const [account] = await engine.listReserveAccounts()
     const created = await engine.createPackageFromIntake({
       contract_version: INTAKE_CONTRACT_VERSION,
       package: { name: 'Roof fund' },
-      line_items: [{ label: 'Roof', unit_amount: '4000', due_date: '2027-09-18', reserve_account: account!.id }],
+      line_items: [
+        { label: 'Gutters', unit_amount: '500', due_date: '2026-10-03', reserve_account: account!.id },
+        { label: 'Roof', unit_amount: '2500', due_date: '2027-09-18', reserve_account: account!.id },
+      ],
     })
     if (!created.ok) throw new Error(JSON.stringify(created.problems))
     await engine.commitPackage(created.packageId, { openingCents: 40000 })
     await engine.confirmBalance({ reserveAccountId: account!.id, amountCents: 10000 })
+
+    // Until the bank's transfer is known the account is not judged, but the
+    // move the suggested $50 depends on is asked for already, and it is what
+    // a share-out can cover.
+    expect(await engine.shortfalls()).toEqual([
+      expect.objectContaining({ kind: 'plan', targetId: account!.id, shortCents: 30000 }),
+    ])
+    const asks = (await engine.position()).todos
+    expect(asks).toEqual([
+      expect.objectContaining({ kind: 'set_transfer', reason: 'confirm', toCents: 5000 }),
+      expect.objectContaining({ kind: 'move_in', amountCents: 30000, byDate: '2026-10-03' }),
+    ])
+    await engine.confirmTransfer({ reserveAccountId: account!.id, perWeekCents: 5000 })
+
+    const lts = (await engine.position()).accounts.find((a) => a.account.id === account!.id)!
+    expect(lts.money.totalCents).toBe(10000)
+    expect(lts.weeklyExactCents).toBe(5000)
+    expect(lts.short).toEqual({ on: '2026-10-03', byCents: 30000 })
+    expect(lts.oneTimeMove).toEqual({ amountCents: 30000, byDate: '2026-10-03' })
 
     const short = await engine.shortfalls()
     expect(short).toEqual([
@@ -168,6 +199,16 @@ describeDb('allocation runs', () => {
     const partial = await engine.previewAllocation(50000, undefined, cover)
     expect(partial.topUps[0]!.amountCents).toBe(15000)
     expect(partial.splitCents).toBe(0)
+
+    // Once the cover is marked done the account holds it until the next
+    // count (D34): $400 plus two $50 transfers is the $500 due on 3 Oct, so
+    // it is short no more and nothing is asked of spare money for it.
+    await engine.confirmInstruction({ instructionId: topUp!.instructionId })
+    expect((await engine.shortfalls()).filter((s) => s.kind === 'plan')).toEqual([])
+    const covered = (await engine.position()).accounts.find((a) => a.account.id === account!.id)!
+    expect(covered.money.totalCents).toBe(40000)
+    expect(covered.status).toBe('on_track')
+    expect(covered.oneTimeMove).toBeNull()
   })
 
   describe('the order of operations, end to end (PRD §6)', () => {

@@ -1,17 +1,24 @@
 /**
  * The first step of a share-out: what is short, and what covering it leaves
- * for the split. Plans short = behind pace; debts short = a deal-rate balance
- * the minimums will not clear before the rate ends.
+ * for the split. A plan is short when its account needs a one-time move the
+ * weekly transfer cannot make in time (D35); a debt is short when a
+ * deal-rate balance the minimums will not clear before the rate ends.
  */
 
 import { describe, expect, it } from 'vitest'
 import { findShortfalls, takeTopUps, type Shortfall } from '../shortfall'
-import type { AccountView } from '../rollup'
+import type { AccountPosition } from '../position'
 import type { Debt } from '../debt'
 
 const TODAY = '2026-09-19'
 
-function view(over: { id: string; name: string; shouldHaveSavedCents: number; items?: number }): AccountView {
+function account(over: {
+  id: string
+  name: string
+  moneyCents?: number
+  move?: { amountCents: number; byDate: string } | null
+}): Pick<AccountPosition, 'account' | 'oneTimeMove' | 'money'> {
+  const total = over.moneyCents ?? 0
   return {
     account: {
       id: over.id,
@@ -22,11 +29,16 @@ function view(over: { id: string; name: string; shouldHaveSavedCents: number; it
       ownerUserId: null,
       active: true,
     },
-    weekly: { totalPerWeekCents: 0, basePerWeekCents: 0, catchUpGroups: [], lines: [] } as unknown as AccountView['weekly'],
-    pendingWeekly: null,
-    shouldHaveSavedCents: over.shouldHaveSavedCents,
-    outstandingCents: 0,
-    items: new Array(over.items ?? 1).fill(null) as unknown as AccountView['items'],
+    oneTimeMove: over.move ?? null,
+    money: {
+      from: 'count',
+      on: TODAY,
+      startCents: total,
+      transfersSinceCents: 0,
+      movesSinceCents: 0,
+      spendsSinceCents: 0,
+      totalCents: total,
+    },
   }
 }
 
@@ -46,12 +58,11 @@ function debt(over: Partial<Debt> & Pick<Debt, 'id' | 'name'>): Debt {
 }
 
 describe('what is short', () => {
-  it('names an account that holds less than its plans say it should', () => {
+  it('names an account that needs a one-time move, and only that', () => {
     const short = findShortfalls({
       accounts: [
-        { view: view({ id: 'a', name: 'Annual Expenses', shouldHaveSavedCents: 120000 }), confirmedCents: 80000 },
-        { view: view({ id: 'b', name: 'Gifts', shouldHaveSavedCents: 30000 }), confirmedCents: 30000 },
-        { view: view({ id: 'c', name: 'Ahead', shouldHaveSavedCents: 10000 }), confirmedCents: 25000 },
+        account({ id: 'a', name: 'Annual Expenses', moneyCents: 80000, move: { amountCents: 40000, byDate: '2026-10-03' } }),
+        account({ id: 'b', name: 'Gifts', moneyCents: 30000 }),
       ],
       debts: [],
       today: TODAY,
@@ -60,19 +71,8 @@ describe('what is short', () => {
       expect.objectContaining({ kind: 'plan', targetId: 'a', label: 'Annual Expenses', shortCents: 40000 }),
     ])
     expect(short[0]!.reason).toContain('$800.00')
-    expect(short[0]!.reason).toContain('$1,200.00')
-  })
-
-  it('skips an account with no balance recorded or nothing planned', () => {
-    const short = findShortfalls({
-      accounts: [
-        { view: view({ id: 'a', name: 'Unchecked', shouldHaveSavedCents: 120000 }), confirmedCents: null },
-        { view: view({ id: 'b', name: 'Empty', shouldHaveSavedCents: 0, items: 0 }), confirmedCents: 0 },
-      ],
-      debts: [],
-      today: TODAY,
-    })
-    expect(short).toEqual([])
+    expect(short[0]!.reason).toContain('$400.00')
+    expect(short[0]!.reason).toContain('2026-10-03')
   })
 
   it('names a deal-rate balance the minimums will not clear before the rate ends', () => {
@@ -121,11 +121,11 @@ describe('what is short', () => {
     expect(short).toEqual([])
   })
 
-  it('puts a deadline before a pace, and the bigger hole first within each', () => {
+  it("puts a debt's deadline before a plan's move, and the bigger hole first within each", () => {
     const short = findShortfalls({
       accounts: [
-        { view: view({ id: 'small', name: 'Small', shouldHaveSavedCents: 10000 }), confirmedCents: 9000 },
-        { view: view({ id: 'big', name: 'Big', shouldHaveSavedCents: 100000 }), confirmedCents: 50000 },
+        account({ id: 'small', name: 'Small', move: { amountCents: 1000, byDate: '2026-10-03' } }),
+        account({ id: 'big', name: 'Big', move: { amountCents: 50000, byDate: '2026-10-03' } }),
       ],
       debts: [
         debt({

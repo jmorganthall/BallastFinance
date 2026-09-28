@@ -282,39 +282,37 @@ export async function deletePackageAction(formData: FormData): Promise<void> {
 }
 
 /**
- * A check-in found more in an account than its plans had accrued, and the
- * person chose to count it toward those plans. The amounts arrive as one
- * hidden field per part, exactly as previewed.
+ * "Yes, the bank moves this" for a derived transfer to-do (D35): the amount
+ * the person says the recurring transfer is now set to. From then on the
+ * run-forward uses it. A box left as junk changes nothing.
  */
-export async function acceptOpeningsAction(formData: FormData): Promise<void> {
+export async function confirmTransferAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const items: { lineItemId: string; openingCents: number }[] = []
-  for (const [key, value] of formData.entries()) {
-    if (!key.startsWith('opening_')) continue
-    const openingCents = Number(value)
-    if (!Number.isInteger(openingCents) || openingCents < 0) continue
-    items.push({ lineItemId: key.slice('opening_'.length), openingCents })
-  }
-  if (items.length > 0) await engine.recordOpeningBalances(items)
+  const { parseAmountOrNull } = await import('@/domain')
+  const perWeekCents = parseAmountOrNull(String(formData.get('amount') ?? ''))
+  if (perWeekCents === null || perWeekCents < 0) return
+  await engine.confirmTransfer({
+    reserveAccountId: String(formData.get('reserve_account_id') ?? ''),
+    perWeekCents,
+  })
   revalidatePath('/')
   revalidatePath('/check-in')
   revalidatePath('/packages')
-  redirect('/check-in?counted=1')
 }
 
-/**
- * Re-spread what an account's plans count as held across its parts (PRD §6).
- * Only the account is posted: the engine works the spread out again as it
- * records it, so what lands is today's answer, never a stale preview.
- */
-export async function reshuffleAction(formData: FormData): Promise<void> {
+/** "Yes, I moved it" for the one-time move the position asks for (D35). */
+export async function confirmMoveInAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const accountId = String(formData.get('reserve_account_id') ?? '')
-  await engine.reshuffleAccount(accountId)
+  const { parseAmountOrNull } = await import('@/domain')
+  const amountCents = parseAmountOrNull(String(formData.get('amount') ?? ''))
+  if (amountCents === null || amountCents <= 0) return
+  await engine.confirmMoveIn({
+    reserveAccountId: String(formData.get('reserve_account_id') ?? ''),
+    amountCents,
+  })
   revalidatePath('/')
   revalidatePath('/check-in')
   revalidatePath('/packages')
-  redirect('/check-in?reshuffled=1')
 }
 
 export async function createReserveAccountAction(formData: FormData): Promise<void> {
@@ -342,10 +340,9 @@ export async function createReserveAccountAction(formData: FormData): Promise<vo
 // ---------------------------------------------------------------- Phase B
 
 /**
- * A check-in (PRD §5, capability 3). The user confirms what each account
- * actually holds; drift is the difference from what the plan says should be
- * there. Accepting a catch-up issues an instruction, and only confirming that
- * instruction changes the weekly number.
+ * A check-in (PRD §5, capability 3; D35). The user confirms what each
+ * account actually holds; the count replaces the likely balance as the
+ * account's money today, and the position runs forward again from it.
  */
 export async function confirmBalancesAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
@@ -370,46 +367,6 @@ export async function confirmBalancesAction(formData: FormData): Promise<void> {
   revalidatePath('/check-in')
   // The same form lives on This week (D34); it lands back where it was.
   redirect(formData.get('back') === 'home' ? '/?balances=1' : '/check-in?done=1')
-}
-
-/**
- * Accept one of the check-in's offers: the two ways back on track when an
- * account is behind, or the two when it is ahead. Each becomes an instruction,
- * and nothing changes until a human confirms it was done.
- */
-const DRIFT_OPTION_TYPES = {
-  one_time: 'one_time_move',
-  rate_bump: 'rate_bump',
-  one_time_out: 'one_time_move_out',
-  rate_cut: 'rate_cut',
-} as const
-
-export async function acceptCatchUpAction(formData: FormData): Promise<void> {
-  const { engine } = await requireEngine()
-  const accountId = String(formData.get('reserve_account_id'))
-  const accountName = String(formData.get('account_name'))
-  const amountCents = Number(formData.get('amount_cents'))
-  const kind = String(formData.get('kind')) as keyof typeof DRIFT_OPTION_TYPES
-  const endsOn = String(formData.get('ends_on') ?? '')
-
-  const type = DRIFT_OPTION_TYPES[kind]
-  if (!type) return
-  if (!Number.isFinite(amountCents) || amountCents <= 0) return
-
-  const dated = type === 'rate_bump' || type === 'rate_cut'
-  if (dated && !/^\d{4}-\d{2}-\d{2}$/.test(endsOn)) return
-
-  await engine.issueInstruction({
-    type,
-    amountCents,
-    targetId: accountId,
-    targetLabel: accountName,
-    ...(dated ? { endsOn } : {}),
-  })
-
-  revalidatePath('/')
-  revalidatePath('/check-in')
-  redirect('/')
 }
 
 export async function confirmInstructionAction(formData: FormData): Promise<void> {
