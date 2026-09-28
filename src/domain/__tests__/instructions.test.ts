@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   committedAfter,
+  doneMoveOf,
+  doneMovesSummary,
   driftAdjustmentsFrom,
   instructionSentence,
+  instructionSentenceParts,
+  likelyBalanceCents,
   openCommitmentsFor,
   outstandingInstructions,
   perWeekOf,
@@ -247,6 +251,35 @@ describe('outstanding instructions', () => {
       expect(committedAfter({ commitments, from: '2027-01-01' })).toBe(5000 - 1200)
     })
 
+    it('carries a move marked done since the last count as money the account holds (D34)', () => {
+      const bump: DriftAdjustment = { id: 'bump', reserveAccountId: 'acct-annual', amountCents: 16000, startDate: '2026-11-01', endDate: '2026-12-26' }
+      const move = issued({ instructionId: 'move', type: 'one_time_move', amountCents: 5000 })
+      const out = issued({ instructionId: 'out', type: 'one_time_move_out', amountCents: 1200 })
+      // A catch-up move in at the amount confirmed, a move-out negative; a share-out, a cover
+      // and a transfer change are not moves on the ledger.
+      expect(doneMoveOf(move, { instructionId: 'move', confirmedOn: '2026-11-05' })).toEqual({ instructionId: 'move', amountCents: 5000, confirmedOn: '2026-11-05' })
+      expect(doneMoveOf(move, { instructionId: 'move', confirmedOn: '2026-11-05', actualAmountCents: 4800 })).toMatchObject({ amountCents: 4800 })
+      expect(doneMoveOf(out, { instructionId: 'out', confirmedOn: '2026-11-05' })).toMatchObject({ amountCents: -1200 })
+      expect(doneMoveOf(issued({ instructionId: 's', type: 'one_time_move', purpose: 'share_out' }), { instructionId: 's', confirmedOn: '2026-11-05' })).toBeNull()
+      expect(doneMoveOf(issued({ instructionId: 'c', type: 'one_time_move', purpose: 'cover' }), { instructionId: 'c', confirmedOn: '2026-11-05' })).toBeNull()
+      expect(doneMoveOf(issued({ instructionId: 't' }), { instructionId: 't', confirmedOn: '2026-11-05' })).toBeNull()
+
+      const doneMoves = [
+        doneMoveOf(move, { instructionId: 'move', confirmedOn: '2026-11-05' })!,
+        doneMoveOf(out, { instructionId: 'out', confirmedOn: '2026-11-06' })!,
+      ]
+      const commitments = openCommitmentsFor({ reserveAccountId: 'acct-annual', accepted: [bump], pending: [], outstanding: [], doneMoves })
+      expect(commitments.doneMoves).toEqual(doneMoves)
+      // Half way through the bump, plus the net of what was moved and not yet counted.
+      expect(committedAfter({ commitments, from: '2026-11-28' })).toBe(8000 + 5000 - 1200)
+      expect(doneMovesSummary(doneMoves)).toEqual({ inCents: 5000, outCents: 1200, netCents: 3800 })
+      expect(likelyBalanceCents(50000, doneMoves)).toBe(53800)
+      expect(likelyBalanceCents(null, doneMoves)).toBeNull()
+      // Nothing done since the count: nothing carried, and the likely balance is the count.
+      expect(openCommitmentsFor({ reserveAccountId: 'acct-annual', accepted: [], pending: [], outstanding: [] }).doneMoves).toEqual([])
+      expect(likelyBalanceCents(50000, [])).toBe(50000)
+    })
+
     it('offers to stop the running catch-up first when the account reads ahead', () => {
       const bump: DriftAdjustment = { id: 'bump', reserveAccountId: 'acct-annual', amountCents: 16000, startDate: '2026-11-01', endDate: '2026-12-26' }
       const cut: DriftAdjustment = { id: 'cut', reserveAccountId: 'acct-annual', amountCents: -8000, startDate: '2026-11-01', endDate: '2027-02-27' }
@@ -264,6 +297,19 @@ describe('outstanding instructions', () => {
   })
 
   it('reads as a sentence a person can act on', () => {
+    // The pieces join to the sentence, and exactly one names where the money goes.
+    for (const i of [
+      issued({ instructionId: 'p1' }),
+      issued({ instructionId: 'p2', type: 'one_time_move', amountCents: 19000 }),
+      issued({ instructionId: 'p3', type: 'one_time_move', purpose: 'cover', amountCents: 622 }),
+      issued({ instructionId: 'p4', type: 'one_time_move_out', amountCents: 500 }),
+      issued({ instructionId: 'p5', type: 'debt_payment', targetLabel: 'Card' }),
+    ]) {
+      const parts = instructionSentenceParts(i)
+      expect(parts.map((p) => p.text).join('')).toBe(instructionSentence(i))
+      expect(parts.filter((p) => p.target).map((p) => p.text)).toEqual([i.targetLabel])
+    }
+    expect(instructionSentenceParts(issued({ instructionId: 'p6', type: 'one_time_move', purpose: 'left_over' })).some((p) => p.target)).toBe(false)
     expect(instructionSentence(issued({ instructionId: 'i1' }))).toBe(
       'In Capital One 360, set the recurring transfer into Annual Expenses to $210.00 per week.',
     )

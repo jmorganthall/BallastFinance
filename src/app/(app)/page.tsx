@@ -12,19 +12,55 @@ import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import { WeeklyNumber } from '@/components/weekly-number'
 import {
+  doneMovesSummary,
   formatCents,
-  instructionSentence,
+  instructionSentenceParts,
+  likelyBalanceCents,
   respreadEquivalentPerWeekCents,
   runningAdjustments,
   taskBucket,
+  type IssuedInstruction,
+  type Weekday,
 } from '@/domain'
-import { confirmInstructionAction, confirmSpendAction, endInstructionAction, toggleTaskAction } from '@/server/actions'
+import {
+  confirmBalancesAction,
+  confirmInstructionAction,
+  confirmSpendAction,
+  endInstructionAction,
+  toggleTaskAction,
+} from '@/server/actions'
 
 export const dynamic = 'force-dynamic'
 
-export default async function ThisWeekPage() {
+/**
+ * The to-do sentence, with the account the money goes to set apart (D34):
+ * bold and a gentle accent, so it is the first thing the eye finds. The
+ * words are the domain's; this only decides how one piece looks.
+ */
+function Sentence({ instruction, transferWeekday }: { instruction: IssuedInstruction; transferWeekday: Weekday }) {
+  return (
+    <p className="text-sm">
+      {instructionSentenceParts(instruction, transferWeekday).map((part, i) =>
+        part.target ? (
+          <strong key={i} className="font-semibold text-[var(--color-accent)]">
+            {part.text}
+          </strong>
+        ) : (
+          <span key={i}>{part.text}</span>
+        ),
+      )}
+    </p>
+  )
+}
+
+export default async function ThisWeekPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ balances?: string }>
+}) {
+  const { balances } = await searchParams
   const { engine, viewer } = await requireEngine()
-  const [accounts, outstanding, closeOuts, commitments, tripToDos, transferWeekday] =
+  const [accounts, outstanding, closeOuts, commitments, tripToDos, transferWeekday, lastCounts] =
     await Promise.all([
       engine.accountViews(),
       engine.outstandingInstructions(),
@@ -32,8 +68,25 @@ export default async function ThisWeekPage() {
       engine.openCommitmentsByAccount(),
       engine.comingUpTripTasks(3),
       engine.transferWeekday(),
+      engine.latestConfirmedBalances(),
     ])
   const today = engine.today()
+
+  // Accounts a done move has changed since they were last counted (D34): the
+  // moves are carried in every figure already; what is missing is the count.
+  const toCount = accounts
+    .map((view) => {
+      const moves = commitments.get(view.account.id)?.doneMoves ?? []
+      const last = lastCounts.get(view.account.id) ?? null
+      return {
+        view,
+        moves,
+        last,
+        summary: doneMovesSummary(moves),
+        likelyCents: likelyBalanceCents(last?.amountCents ?? null, moves),
+      }
+    })
+    .filter((a) => a.moves.length > 0)
 
   // What can be done today, and what is held back until a later day (the
   // second half of the fun money). Different lists, so "now" is never in doubt.
@@ -141,7 +194,7 @@ export default async function ThisWeekPage() {
               return (
               <li key={instruction.instructionId}>
                 <Card>
-                  <p className="text-sm">{instructionSentence(instruction, transferWeekday)}</p>
+                  <Sentence instruction={instruction} transferWeekday={transferWeekday} />
                   {target && onceDone ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
                       That makes the {target.account.name} transfer{' '}
@@ -193,6 +246,90 @@ export default async function ThisWeekPage() {
               )
             })}
           </ul>
+          {toCount.length > 0 ? (
+            <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+              When these are done, update what{' '}
+              {toCount.map((a) => a.view.account.name).join(' and ')} {toCount.length === 1 ? 'holds' : 'hold'}.
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {balances ? (
+        <Card className="mb-4 bg-[var(--color-ahead-soft)]">
+          <p className="text-sm font-medium text-[var(--color-ahead)]">Balances recorded.</p>
+        </Card>
+      ) : null}
+
+      {/*
+        * A move marked done is money the account holds (D34). The figures
+        * already carry it; once nothing is left to do, ask for the count that
+        * makes it a fact. The likely balance is an offer to confirm, computed
+        * by the domain and never stored.
+        */}
+      {dueNow.length === 0 && toCount.length > 0 ? (
+        <section className="mb-5">
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            Update what these accounts hold
+          </h2>
+          <form action={confirmBalancesAction} className="space-y-3">
+            <input type="hidden" name="back" value="home" />
+            {toCount.map(({ view, last, summary, likelyCents }) => (
+              <Card key={view.account.id}>
+                <p className="font-medium">{view.account.name}</p>
+                <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                  {last ? (
+                    <>
+                      Since you last counted it on {humanDate(last.on)} at <Money cents={last.amountCents} />, you moved
+                    </>
+                  ) : (
+                    <>It has never been counted, and you moved</>
+                  )}
+                  {summary.inCents > 0 ? (
+                    <>
+                      {' '}
+                      <Money cents={summary.inCents} /> in
+                    </>
+                  ) : null}
+                  {summary.inCents > 0 && summary.outCents > 0 ? ' and' : null}
+                  {summary.outCents > 0 ? (
+                    <>
+                      {' '}
+                      <Money cents={summary.outCents} /> out
+                    </>
+                  ) : null}
+                  {likelyCents !== null ? (
+                    <>
+                      , so it likely holds <Money cents={likelyCents} /> now.
+                    </>
+                  ) : (
+                    '.'
+                  )}
+                </p>
+                <label className="mt-3 block text-sm font-medium">
+                  What it actually holds
+                  <input
+                    name={`balance_${view.account.id}`}
+                    inputMode="decimal"
+                    defaultValue={
+                      likelyCents !== null ? formatCents(likelyCents).replace('$', '').replace(/,/g, '') : undefined
+                    }
+                    placeholder={formatCents(view.shouldHaveSavedCents).replace('$', '')}
+                    className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
+                  />
+                </label>
+              </Card>
+            ))}
+            <button
+              type="submit"
+              className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"
+            >
+              Record these balances
+            </button>
+            <p className="text-center text-xs text-[var(--color-ink-soft)]">
+              Open Capital One and check the figure first; clear a box to skip that account.
+            </p>
+          </form>
         </section>
       ) : null}
 
@@ -206,7 +343,7 @@ export default async function ThisWeekPage() {
               <li key={instruction.instructionId}>
                 <Card className="border-dashed">
                   <div className="flex items-start justify-between gap-3">
-                    <p className="text-sm">{instructionSentence(instruction, transferWeekday)}</p>
+                    <Sentence instruction={instruction} transferWeekday={transferWeekday} />
                     <Pill tone="neutral">From {humanDate(instruction.availableOn!)}</Pill>
                   </div>
                   {instruction.note ? (

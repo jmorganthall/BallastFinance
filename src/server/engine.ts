@@ -10,7 +10,7 @@
  * this file calls but never duplicates: there is no arithmetic in this layer.
  */
 
-import { and, count, eq, gte, isNotNull, isNull, lte, sql } from 'drizzle-orm'
+import { and, count, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
 import { db as defaultDb, type Db } from '@/db/client'
 import {
   assets as assetsTable,
@@ -67,6 +67,8 @@ import {
   driftAdjustmentsFrom,
   openCommitmentsFor,
   outstandingInstructions,
+  doneMoveOf,
+  type DoneMove,
   packageViews,
   todayIn,
   validateIntake,
@@ -1470,10 +1472,11 @@ export class Engine {
    * this to the domain; it works nothing out for itself.
    */
   async openCommitmentsByAccount(): Promise<Map<Id, OpenCommitments>> {
-    const [accounts, adjustments, outstanding] = await Promise.all([
+    const [accounts, adjustments, outstanding, doneMoves] = await Promise.all([
       this.listReserveAccounts(),
       this.driftAdjustments(),
       this.outstandingInstructions(),
+      this.doneMovesSinceCount(),
     ])
     return new Map(
       accounts.map((account) => [
@@ -1483,9 +1486,57 @@ export class Engine {
           accepted: adjustments.accepted,
           pending: adjustments.pending,
           outstanding,
+          doneMoves: doneMoves.get(account.id) ?? [],
         }),
       ]),
     )
+  }
+
+  /**
+   * The one-time moves marked done since each account was last counted
+   * (D34): money the person says is in the account that no count has seen.
+   * Which came after which is the order the events were recorded, not the
+   * calendar day, so a count entered later the same day supersedes a move
+   * marked done that morning. That is a question of order, answered here;
+   * whether a confirmation is a move on an account, and what the moves add up
+   * to, is the domain's (`doneMoveOf`, `likelyBalanceCents`).
+   */
+  async doneMovesSinceCount(): Promise<Map<Id, DoneMove[]>> {
+    const [issued, rows] = await Promise.all([
+      this.listIssuedInstructions(),
+      this.db
+        .select()
+        .from(events)
+        .where(
+          and(
+            eq(events.householdId, this.householdId),
+            inArray(events.kind, ['balance_confirmed', 'instruction_confirmed']),
+          ),
+        )
+        .orderBy(events.recordedAt, events.id),
+    ])
+    const byId = new Map(issued.map((i) => [i.instructionId, i]))
+    const since = new Map<Id, DoneMove[]>()
+    for (const row of rows) {
+      if (row.kind === 'balance_confirmed') {
+        const p = row.payload as { reserve_account_id: Id }
+        since.set(p.reserve_account_id, [])
+        continue
+      }
+      const p = row.payload as { instruction_id: Id; actual_amount_cents: Cents | null }
+      const instruction = byId.get(p.instruction_id)
+      if (!instruction) continue
+      const move = doneMoveOf(instruction, {
+        instructionId: p.instruction_id,
+        confirmedOn: row.occurredAt as CivilDate,
+        actualAmountCents: p.actual_amount_cents ?? undefined,
+      })
+      if (!move) continue
+      const list = since.get(instruction.targetId) ?? []
+      list.push(move)
+      since.set(instruction.targetId, list)
+    }
+    return since
   }
 
   /** The confirmed bumps and cuts: the only ones the live figures read. */

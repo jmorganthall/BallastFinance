@@ -264,9 +264,9 @@ function stopAdjustment(a: DriftAdjustment, stoppedOn: CivilDate): DriftAdjustme
 /**
  * Everything still on the way into (or out of) one account that a check-in
  * must not offer again (D18): bumps and cuts running or waiting, and one-time
- * catch-up moves and move-outs still on the to-do list. A one-time move
- * already marked done is not here: that money is in the bank, and the next
- * balance the person reads includes it.
+ * catch-up moves and move-outs still on the to-do list, and the one-time
+ * moves marked done since the account was last counted (D34): that money is
+ * in the bank, and until a count includes it the math must carry it too.
  */
 export interface OpenCommitments {
   reserveAccountId: Id
@@ -276,6 +276,21 @@ export interface OpenCommitments {
   pending: DriftAdjustment[]
   /** One-time catch-up moves (positive) and move-outs (negative) still open, at their full amount. */
   pendingMoves: { instructionId: Id; amountCents: Cents }[]
+  /**
+   * One-time moves marked done since this account's balance was last counted
+   * (D34): money the person says is in the account that no count has seen
+   * yet. Signed like `pendingMoves`, at the amount it was confirmed at. Which
+   * moves came after the last count is settled by the order the events were
+   * recorded, which the engine answers; the domain only sums.
+   */
+  doneMoves: DoneMove[]
+}
+
+/** A one-time move a person marked done, signed: into the account positive, out of it negative. */
+export interface DoneMove {
+  instructionId: Id
+  amountCents: Cents
+  confirmedOn: CivilDate
 }
 
 export function openCommitmentsFor(args: {
@@ -283,6 +298,8 @@ export function openCommitmentsFor(args: {
   accepted: readonly DriftAdjustment[]
   pending: readonly DriftAdjustment[]
   outstanding: readonly OutstandingInstruction[]
+  /** This account's moves marked done since its last count, from the engine. */
+  doneMoves?: readonly DoneMove[]
 }): OpenCommitments {
   const mine = (a: DriftAdjustment) => a.reserveAccountId === args.reserveAccountId
   const pendingMoves: OpenCommitments['pendingMoves'] = []
@@ -299,7 +316,59 @@ export function openCommitmentsFor(args: {
     running: args.accepted.filter(mine),
     pending: args.pending.filter(mine),
     pendingMoves,
+    doneMoves: [...(args.doneMoves ?? [])],
   }
+}
+
+/**
+ * A one-time move marked done is a fact about the instruction, not about the
+ * account; whether it lands on an account's ledger is decided here (D34). A
+ * catch-up move into a reserve account counts in full and positive, a
+ * move-out negative, at the amount the person confirmed if they gave one. A
+ * share-out or a cover move is money the share-out already placed, so it is
+ * not counted twice; a transfer change, a bump or a cut lands week by week
+ * and is counted at the usual check-in.
+ */
+export function doneMoveOf(
+  instruction: IssuedInstruction,
+  confirmation: ConfirmedInstruction,
+): DoneMove | null {
+  const amount = confirmation.actualAmountCents ?? instruction.amountCents
+  if (instruction.type === 'one_time_move' && (instruction.purpose ?? 'catch_up') === 'catch_up') {
+    return { instructionId: instruction.instructionId, amountCents: amount, confirmedOn: confirmation.confirmedOn }
+  }
+  if (instruction.type === 'one_time_move_out') {
+    return { instructionId: instruction.instructionId, amountCents: -amount, confirmedOn: confirmation.confirmedOn }
+  }
+  return null
+}
+
+/** What the done moves add up to, in and out, so a screen can say it in words. */
+export function doneMovesSummary(moves: readonly DoneMove[]): {
+  inCents: Cents
+  outCents: Cents
+  netCents: Cents
+} {
+  let inCents = 0
+  let outCents = 0
+  for (const m of moves) {
+    if (m.amountCents >= 0) inCents += m.amountCents
+    else outCents += -m.amountCents
+  }
+  return { inCents, outCents, netCents: inCents - outCents }
+}
+
+/**
+ * What an account likely holds now: its last count plus every move marked
+ * done since (D34). An offer to be confirmed, never a figure stored; with no
+ * count ever recorded there is nothing to add to, so null.
+ */
+export function likelyBalanceCents(
+  lastCountCents: Cents | null,
+  moves: readonly DoneMove[],
+): Cents | null {
+  if (lastCountCents === null) return null
+  return lastCountCents + doneMovesSummary(moves).netCents
 }
 
 /** What a bump or cut will still put into (positive) or take out of (negative) the account after `from`. */
@@ -333,7 +402,9 @@ export function committedAfter(args: {
     0,
   )
   const moves = commitments.pendingMoves.reduce((sum, m) => sum + m.amountCents, 0)
-  return dated + moves
+  // Marked done since the last count: in the bank, not yet in any count (D34).
+  const done = commitments.doneMoves.reduce((sum, m) => sum + m.amountCents, 0)
+  return dated + moves + done
 }
 
 /**
@@ -471,9 +542,32 @@ export function instructionSentence(
   instruction: IssuedInstruction,
   transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
 ): string {
+  return instructionSentenceParts(instruction, transferWeekday)
+    .map((part) => part.text)
+    .join('')
+}
+
+/**
+ * A piece of the sentence. The account or debt the money goes to is marked
+ * so a screen can set it apart (D34: bold, a gentle colour); the words are
+ * exactly those of `instructionSentence`, which joins these.
+ */
+export interface SentencePart {
+  text: string
+  /** True on the piece that names where the money goes. */
+  target?: true
+}
+
+export function instructionSentenceParts(
+  instruction: IssuedInstruction,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): SentencePart[] {
+  const t = (text: string): SentencePart => ({ text })
+  const target: SentencePart = { text: instruction.targetLabel, target: true }
+  const amount = formatCents(instruction.amountCents)
   switch (instruction.type) {
     case 'set_weekly_transfer':
-      return `In Capital One 360, set the recurring transfer into ${instruction.targetLabel} to ${formatCents(instruction.amountCents)} per week.`
+      return [t('In Capital One 360, set the recurring transfer into '), target, t(` to ${amount} per week.`)]
     case 'one_time_move': {
       const later =
         instruction.availableOn && compareDates(instruction.availableOn, instruction.issuedOn) > 0
@@ -482,25 +576,33 @@ export function instructionSentence(
       switch (instruction.purpose ?? 'catch_up') {
         case 'share_out':
           return later
-            ? `On ${later}, move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel}.`
-            : `Move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel}, its share of what was spare.`
+            ? [t(`On ${later}, move ${amount} into `), target, t('.')]
+            : [t(`Move ${amount} into `), target, t(', its share of what was spare.')]
         case 'cover':
-          return `Move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel} once, to cover what it is behind.`
+          return [t(`Move ${amount} into `), target, t(' once, to cover what it is behind.')]
         case 'left_over':
-          return `Decide where ${formatCents(instruction.amountCents)} goes; it was the debt share with nowhere useful to go.`
+          return [t(`Decide where ${amount} goes; it was the debt share with nowhere useful to go.`)]
         case 'catch_up':
-          return `Move ${formatCents(instruction.amountCents)} into ${instruction.targetLabel} once, to catch up.`
+          return [t(`Move ${amount} into `), target, t(' once, to catch up.')]
       }
     }
     case 'one_time_move_out':
-      return `Move ${formatCents(instruction.amountCents)} out of ${instruction.targetLabel} once; it holds more than the plan needs.`
+      return [t(`Move ${amount} out of `), target, t(' once; it holds more than the plan needs.')]
     case 'rate_bump':
-      return `Add ${formatCents(perWeekOf(instruction, transferWeekday))} a week to the ${instruction.targetLabel} transfer until ${instruction.endsOn}, to catch up.`
+      return [
+        t(`Add ${formatCents(perWeekOf(instruction, transferWeekday))} a week to the `),
+        target,
+        t(` transfer until ${instruction.endsOn}, to catch up.`),
+      ]
     case 'rate_cut':
-      return `Take ${formatCents(perWeekOf(instruction, transferWeekday))} a week off the ${instruction.targetLabel} transfer until ${instruction.endsOn}; the extra you already hold covers it.`
+      return [
+        t(`Take ${formatCents(perWeekOf(instruction, transferWeekday))} a week off the `),
+        target,
+        t(` transfer until ${instruction.endsOn}; the extra you already hold covers it.`),
+      ]
     case 'debt_payment':
-      return `Pay ${formatCents(instruction.amountCents)} toward ${instruction.targetLabel}.`
+      return [t(`Pay ${amount} toward `), target, t('.')]
     case 'spend_confirmation':
-      return `Did the ${instruction.targetLabel} money get spent from your savings?`
+      return [t('Did the '), target, t(' money get spent from your savings?')]
   }
 }

@@ -368,7 +368,8 @@ export async function confirmBalancesAction(formData: FormData): Promise<void> {
 
   revalidatePath('/')
   revalidatePath('/check-in')
-  redirect('/check-in?done=1')
+  // The same form lives on This week (D34); it lands back where it was.
+  redirect(formData.get('back') === 'home' ? '/?balances=1' : '/check-in?done=1')
 }
 
 /**

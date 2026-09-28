@@ -292,6 +292,40 @@ describeDb('the adjustment lifecycle (D18)', () => {
     expect((await view()).weekly.catchUp).toHaveLength(1)
   })
 
+  it('a one-time move marked done counts as held until the next count includes it (D34)', async () => {
+    pin('2026-11-14')
+    const before = await view()
+    // $50 short of the plan (a bump from earlier is still running, so the figures are read as changes).
+    await engine.confirmBalance({ reserveAccountId: accountId, amountCents: before.shouldHaveSavedCents - 5000 })
+    const base = await netDrift()
+    expect(base.driftCents).toBe(base.committedCents - 5000)
+    const id = await engine.issueInstruction({ type: 'one_time_move', amountCents: 5000, targetId: accountId, targetLabel: 'Annual Expenses' })
+    expect((await netDrift()).driftCents).toBe(base.driftCents + 5000)
+    expect((await engine.openCommitmentsByAccount()).get(accountId)!.doneMoves).toEqual([])
+
+    // Marked done: it leaves the to-do list and the money is still carried, now as held.
+    await engine.confirmInstruction({ instructionId: id })
+    expect(await engine.outstandingInstructions()).toHaveLength(0)
+    const open = (await engine.openCommitmentsByAccount()).get(accountId)!
+    expect(open.pendingMoves).toEqual([])
+    expect(open.doneMoves).toEqual([{ instructionId: id, amountCents: 5000, confirmedOn: '2026-11-14' }])
+    expect(await netDrift()).toMatchObject({ committedCents: base.committedCents + 5000, driftCents: base.driftCents + 5000 })
+
+    // A count entered later the same day includes it, so it is carried no more.
+    await engine.confirmBalance({ reserveAccountId: accountId, amountCents: before.shouldHaveSavedCents })
+    expect((await engine.openCommitmentsByAccount()).get(accountId)!.doneMoves).toEqual([])
+    expect(await netDrift()).toMatchObject({ committedCents: base.committedCents, driftCents: base.driftCents + 5000 })
+
+    // A move-out marked done at a different amount than asked is carried at the amount given.
+    const outId = await engine.issueInstruction({ type: 'one_time_move_out', amountCents: 1000, targetId: accountId, targetLabel: 'Annual Expenses' })
+    await engine.confirmInstruction({ instructionId: outId, actualAmountCents: 800 })
+    expect((await engine.openCommitmentsByAccount()).get(accountId)!.doneMoves).toEqual([{ instructionId: outId, amountCents: -800, confirmedOn: '2026-11-14' }])
+    expect((await netDrift()).committedCents).toBe(base.committedCents - 800)
+    await engine.confirmBalance({ reserveAccountId: accountId, amountCents: before.shouldHaveSavedCents - 800 })
+    expect((await engine.openCommitmentsByAccount()).get(accountId)!.doneMoves).toEqual([])
+    expect((await netDrift()).driftCents).toBe(base.driftCents + 5000 - 800)
+  })
+
   it('stops a running bump that day: the weekly figure drops, should-hold does not move', async () => {
     pin('2026-11-18')
     const before = await view()

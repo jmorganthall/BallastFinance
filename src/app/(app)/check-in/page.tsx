@@ -22,7 +22,9 @@ import {
   catchUpOptions,
   committedAfter,
   computeDrift,
+  doneMovesSummary,
   formatCents,
+  likelyBalanceCents,
   pendingByKind,
   runningAdjustments,
   stopCatchUpOffer,
@@ -88,6 +90,11 @@ export default async function CheckInPage({
           <form action={confirmBalancesAction} className="space-y-4">
             {live.map((view) => {
               const last = confirmed.get(view.account.id)
+              // Moves marked done since the last count (D34): the likely balance
+              // is offered in the box, and the count typed is the fact.
+              const moves = commitments.get(view.account.id)?.doneMoves ?? []
+              const moved = doneMovesSummary(moves)
+              const likely = likelyBalanceCents(last?.amountCents ?? null, moves)
               return (
                 <Card key={view.account.id}>
                   <h2 className="font-semibold">{view.account.name}</h2>
@@ -99,11 +106,41 @@ export default async function CheckInPage({
                       </>
                     ) : null}
                   </p>
+                  {moves.length > 0 ? (
+                    <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                      Since then you moved
+                      {moved.inCents > 0 ? (
+                        <>
+                          {' '}
+                          <Money cents={moved.inCents} /> in
+                        </>
+                      ) : null}
+                      {moved.inCents > 0 && moved.outCents > 0 ? ' and' : null}
+                      {moved.outCents > 0 ? (
+                        <>
+                          {' '}
+                          <Money cents={moved.outCents} /> out
+                        </>
+                      ) : null}
+                      {likely !== null ? (
+                        <>
+                          , so it likely holds <Money cents={likely} />.
+                        </>
+                      ) : (
+                        '.'
+                      )}
+                    </p>
+                  ) : null}
                   <label className="mt-3 block text-sm font-medium">
                     What it actually holds
                     <input
                       name={`balance_${view.account.id}`}
                       inputMode="decimal"
+                      defaultValue={
+                        moves.length > 0 && likely !== null
+                          ? formatCents(likely).replace('$', '').replace(/,/g, '')
+                          : undefined
+                      }
                       placeholder={formatCents(view.shouldHaveSavedCents).replace('$', '')}
                       className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
                     />
