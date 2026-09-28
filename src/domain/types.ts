@@ -7,7 +7,7 @@
  * parameter, which is what makes every curve and rate reproducible in a test.
  */
 
-import type { CivilDate } from './dates'
+import { compareDates, type CivilDate } from './dates'
 import type { Cents } from './money'
 import type { Recurrence } from './recurrence'
 
@@ -63,10 +63,82 @@ export interface Package {
  * runs from the last time it came round, so "should hold today" is already
  * the elapsed share of the cycle and the weekly figure is the steady rate.
  * 'commit' is the older reading -- the plan starts the day it is committed
- * and the elapsed share is offered as an opening instead (D8). A one-off is
- * always 'commit'; it has no last time.
+ * and the elapsed share is offered as an opening instead (D8). 'typed' (D33)
+ * is another day a person gives, held in `timelineStartDate`, for a
+ * household that has been setting money aside for a bill since some other
+ * day than either of those. A one-off is always 'commit'; it has no last
+ * time, and it states what it already holds as an opening.
  */
-export type TimelineStart = 'last_occurrence' | 'commit'
+export type TimelineStart = 'last_occurrence' | 'commit' | 'typed'
+
+/**
+ * A choice of where a timeline starts, as a form or a caller states it: the
+ * kind, and the day when the kind is 'typed'. The two D30 kinds may be given
+ * as a bare string, which is how every caller from before D33 gives them.
+ */
+export interface TimelineStartChoice {
+  kind: TimelineStart
+  date?: CivilDate | null
+}
+
+/** One reading of a choice, however it was given. */
+export function timelineChoiceOf(
+  choice: TimelineStart | TimelineStartChoice,
+): { timelineStart: TimelineStart; timelineStartDate: CivilDate | null } {
+  const kind = typeof choice === 'string' ? choice : choice.kind
+  const date = typeof choice === 'string' ? null : (choice.date ?? null)
+  return { timelineStart: kind, timelineStartDate: kind === 'typed' ? date : null }
+}
+
+/**
+ * How a `line_item_changed` event records where a timeline starts, in its
+ * `timeline_start: { before, after }`: the D30 kinds as the bare string they
+ * were always written as, and a typed start as `{ kind: 'typed', date }`,
+ * so a log written before D33 reads exactly as it did.
+ */
+export type TimelineStartRecord = TimelineStart | { kind: 'typed'; date: CivilDate }
+
+/**
+ * Whether a choice of where a timeline starts can be kept on a part (D33),
+ * and the plain words when it cannot. A one-off is always 'commit' with no
+ * day: it has no last time, and states what it holds as an opening. A day
+ * given must be on or before today and before the day the part is needed;
+ * any other kind carries no day.
+ */
+export function resolveTimelineStart(args: {
+  recurrence: Recurrence | null
+  choice: TimelineStart | TimelineStartChoice
+  dueDate: CivilDate
+  today: CivilDate
+}):
+  | { ok: true; timelineStart: TimelineStart; timelineStartDate: CivilDate | null }
+  | { ok: false; problem: string } {
+  if (!args.recurrence) return { ok: true, timelineStart: 'commit', timelineStartDate: null }
+  const { timelineStart, timelineStartDate } = timelineChoiceOf(args.choice)
+  if (timelineStart !== 'typed') return { ok: true, timelineStart, timelineStartDate: null }
+  if (!timelineStartDate) {
+    return { ok: false, problem: 'Pick the day you have been saving for this since.' }
+  }
+  if (compareDates(timelineStartDate, args.today) > 0) {
+    return { ok: false, problem: 'The day you have been saving since cannot be after today.' }
+  }
+  if (compareDates(timelineStartDate, args.dueDate) >= 0) {
+    return {
+      ok: false,
+      problem: 'The day you have been saving since has to be before the day it is needed.',
+    }
+  }
+  return { ok: true, timelineStart, timelineStartDate }
+}
+
+export function timelineStartRecord(
+  timelineStart: TimelineStart,
+  timelineStartDate: CivilDate | null,
+): TimelineStartRecord {
+  return timelineStart === 'typed' && timelineStartDate
+    ? { kind: 'typed', date: timelineStartDate }
+    : timelineStart
+}
 
 /** The default for a part: from its last occurrence when it has one. */
 export function defaultTimelineStart(recurrence: Recurrence | null | undefined): TimelineStart {
@@ -93,6 +165,12 @@ export interface LineItem {
    * event so the log still explains why the weekly number moved.
    */
   timelineStart: TimelineStart
+  /**
+   * The day a person gave (D33): present exactly when `timelineStart` is
+   * 'typed', on or before the day it was given and before the due date. Like
+   * the kind, a fact on the part and not in `LineItemSnapshot`.
+   */
+  timelineStartDate: CivilDate | null
 }
 
 /** Total obligation of a line item. The one place unit x quantity is computed. */

@@ -19,6 +19,7 @@ import { recurrenceOf, rollToFuture, RECURRENCE_UNITS, type Recurrence } from '.
 import {
   canWriteAccount,
   defaultTimelineStart,
+  resolveTimelineStart,
   type Id,
   type Package,
   type PackageState,
@@ -80,9 +81,12 @@ const intakeLineItemSchema = z.object({
    * that does not send it gets the default -- from the last time it came
    * round for a part that repeats, from the commit for a one-off. A one-off
    * is always 'commit' whatever is sent, because it has no last time; that
-   * is a definition, not a guess, so it is not refused.
+   * is a definition, not a guess, so it is not refused. 'typed' (D33) names
+   * the day in `timeline_start_date`, which is refused when it is missing,
+   * after today, or not before the due date.
    */
-  timeline_start: z.enum(['last_occurrence', 'commit']).optional(),
+  timeline_start: z.enum(['last_occurrence', 'commit', 'typed']).optional(),
+  timeline_start_date: z.string().optional(),
 })
 
 const intakePackageSchema = z.object({
@@ -113,6 +117,8 @@ export interface NormalisedLineItem {
   reserveAccountId: Id
   recurrence: Recurrence | null
   timelineStart: TimelineStart
+  /** Present exactly when `timelineStart` is 'typed' (D33). */
+  timelineStartDate: CivilDate | null
 }
 
 export interface NormalisedIntake {
@@ -246,6 +252,42 @@ export function validateIntake(raw: unknown, context: IntakeContext): IntakeResu
       })
     }
 
+    // Where the timeline starts (D30, D33): a one-off is 'commit' by
+    // definition; a day given is checked against today and the due date.
+    let timelineStart: TimelineStart = 'commit'
+    let timelineStartDate: CivilDate | null = null
+    if (dueDate && item.recurrence) {
+      const kind = item.timeline_start ?? defaultTimelineStart(item.recurrence)
+      let given: CivilDate | null = null
+      let wellFormed = true
+      if (kind === 'typed' && item.timeline_start_date !== undefined) {
+        try {
+          assertCivilDate(item.timeline_start_date)
+          given = item.timeline_start_date
+        } catch {
+          wellFormed = false
+          problems.push({
+            path: at('timeline_start_date'),
+            message: `Not a date: "${item.timeline_start_date}". Use YYYY-MM-DD.`,
+          })
+        }
+      }
+      if (wellFormed) {
+        const resolved = resolveTimelineStart({
+          recurrence: item.recurrence,
+          choice: { kind, date: given },
+          dueDate,
+          today: context.today,
+        })
+        if (resolved.ok) {
+          timelineStart = resolved.timelineStart
+          timelineStartDate = resolved.timelineStartDate
+        } else {
+          problems.push({ path: at('timeline_start_date'), message: resolved.problem })
+        }
+      }
+    }
+
     if (dueDate && account && unitAmountCents > 0 && canWriteAccount(account, context.actorUserId ?? null)) {
       lineItems.push({
         label: item.label,
@@ -254,9 +296,8 @@ export function validateIntake(raw: unknown, context: IntakeContext): IntakeResu
         dueDate,
         reserveAccountId: account.id,
         recurrence: item.recurrence,
-        timelineStart: item.recurrence
-          ? (item.timeline_start ?? defaultTimelineStart(item.recurrence))
-          : 'commit',
+        timelineStart,
+        timelineStartDate,
       })
     }
   })

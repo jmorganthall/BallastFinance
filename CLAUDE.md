@@ -223,26 +223,48 @@ principles, and they are non-negotiable.
   and the date. It never touches money math and never runs on a schedule.
   Do not import it anywhere but the engine, and do not add a second caller.
   Unreachable from the sandbox: tested with a fake fetch only.
-- **A repeating part's timeline starts at its last occurrence** (PRD D30,
-  rev 42). `line_items.timeline_start` (migration 0015) is
-  `'last_occurrence'` for a new part that comes round again and `'commit'`
-  for a one-off (a CHECK enforces the latter); the column default is
-  `'commit'` so rows from before D30 behave exactly as they did. Under
-  `last_occurrence` the base component runs from `previousOccurrence(due)`
-  at total ÷ cycle weeks, so on the commit day should-hold is already the
-  elapsed share -- the same number as `evenPaceCents` for the same window --
-  and the pace and the money timeline agree; whether the money is there is
-  the check-in's job, and no opening is suggested. The rules for where a
-  base starts live in one place, `baseStartDate` in `src/domain/accrual.ts`:
-  a cycle a spend began, a cycle a check-in count or a reshuffle began, and
-  a cycle that opens with money (an opening typed at commit, a sheet's
-  "reserved now") run from the cycle date under either setting -- a stated balance is where
-  a timeline begins, and that is what keeps "should hold rises to match
-  what is there" true. Like the recurrence, the setting is a fact on the
-  part and not part of `LineItemSnapshot`: the math reads the current
-  setting over the whole cycle, and `updateLineItem` records a toggle on a
+- **A repeating part's timeline starts at its last occurrence, or at a day a
+  person gives: "Saving since"** (PRD D30, rev 42; D33, rev 46).
+  `line_items.timeline_start` (migration 0015) is `'last_occurrence'` for a
+  new part that comes round again and `'commit'` for a one-off (a CHECK
+  enforces the latter); the column default is `'commit'` so rows from
+  before D30 behave exactly as they did. D33 adds the third value `'typed'`
+  with `timeline_start_date` beside it (migration 0016; a CHECK makes the
+  date present exactly when the choice is typed, written as a text
+  comparison because the migrator applies every pending file in one
+  transaction and a value `ALTER TYPE ... ADD VALUE` adds cannot be used as
+  the enum until that commits). Under `last_occurrence` the base component
+  runs from `previousOccurrence(due)`, and under `typed` from the day given,
+  at total ÷ the weeks from there to the due date, so on the commit day
+  should-hold is already the elapsed share -- the same number as
+  `evenPaceCents` for the same window -- and the pace and the money timeline
+  agree; whether the money is there is the check-in's job, and no opening is
+  suggested under either. The rules for where a base starts live in one
+  place, `savingSince` in `src/domain/accrual.ts`, which `baseStartDate`
+  reads and which also names the reason: a cycle a spend began, a cycle a
+  check-in count or a reshuffle began, and a cycle that opens with money (an
+  opening typed at commit, a sheet's "reserved now") run from the cycle date
+  whatever the setting -- a stated balance is where a timeline begins, and
+  that is what keeps "should hold rises to match what is there" true -- and
+  a typed day on or after the cycle start is read as the cycle start, the
+  setting left on the part, inert until a cycle it can apply to.
+  `LineItemView.savingSince` (`{ date, reason, chosenDate }`, words from
+  `savingSinceWords`) and `PackageView.savingSince` (the earliest across the
+  live parts: the plan's heading, and where `packageCurve` starts the chart)
+  are computed, never stored; the screen shows them and works nothing out.
+  A typed day must be on or before today and before the due date
+  (`resolveTimelineStart` in `src/domain/types.ts`, one set of plain words
+  for the intake, the engine and the forms); a one-off is always `'commit'`
+  with no day. Like the recurrence, the setting is a fact on the part and
+  not part of `LineItemSnapshot`: the math reads the current setting over
+  the whole cycle, and `updateLineItem` records a change of kind or day on a
   `line_item_changed` event with equal money snapshots (a zero delta, no
-  component) and `timeline_start: { before, after }` beside them.
+  component) and `timeline_start: { before, after }` beside them, each side
+  a `TimelineStartRecord`: the bare string for the two D30 kinds, exactly as
+  D30 wrote it, and `{ kind: 'typed', date }` for a day given. On screen the
+  question is "Saving since" with three answers (`SavingSinceFields`, at
+  commit and on the part's edit form), and the pace of a typed part runs
+  from its day.
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software. The trip planner's
   usual figures are a constant in `src/domain/trip.ts`, laid over by a
@@ -251,7 +273,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 736 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 761 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

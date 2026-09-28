@@ -25,8 +25,9 @@ import {
   retirePackageAction,
   updateLineItemAction,
 } from '@/server/actions'
-import { describeRecurrence, formatCents, previousOccurrence } from '@/domain'
+import { describeRecurrence, formatCents, previousOccurrence, savingSinceWords } from '@/domain'
 import { RecurrenceFields } from '@/components/recurrence-fields'
+import { SavingSinceFields } from '@/components/saving-since-fields'
 import { DeletePlan } from './delete-plan'
 
 export const dynamic = 'force-dynamic'
@@ -52,6 +53,7 @@ export default async function PackageDetailPage({
   if (!view) notFound()
 
   const isDraft = view.package.state === 'simulated'
+  const today = engine.today()
   // What a repeating part would already hold, had saving started the last
   // time it came round. With the timeline starting there (D30, the default)
   // that is what the part should hold today; with it starting at the commit
@@ -65,6 +67,10 @@ export default async function PackageDetailPage({
       })
     : []
   const isDone = view.package.state === 'retired'
+  // The day a plan started saving is the earliest day any of its parts runs
+  // from (D33), which for a part starting at its last occurrence is before
+  // the commit. A part whose own day differs says so on its card.
+  const savingSinceDate = view.savingSince ?? view.package.committedAt
   const whatIf = isDraft ? await engine.whatIf(id) : []
   const curve = isDraft || isDone ? null : await engine.packageCurve(id)
   const accounts = await engine.reserveAccountsForViewer()
@@ -106,7 +112,7 @@ export default async function PackageDetailPage({
             ? 'A draft. Nothing is being set aside yet.'
             : isDone
               ? 'Finished. Nothing more is being set aside for this.'
-              : `Saving since ${humanDate(view.package.committedAt!)}.`
+              : `Saving since ${humanDate(savingSinceDate!)}.`
         }
       />
 
@@ -154,60 +160,68 @@ export default async function PackageDetailPage({
             </div>
 
             {/*
-              One form. A repeating part starts its timeline from the last
-              time it came round unless its box is unticked; an unticked part
-              starts today and is offered what it would have set aside by
-              now. The reveals are CSS on the checkbox state, so the page
-              stays server-rendered: nothing here is worked out in the browser.
+              One form. Each repeating part is asked "Saving since" once (D30,
+              D33): the last time it came round, the day the plan starts
+              (today), or another day. A part starting today is offered what
+              it would have set aside by now. The reveals are CSS on the
+              radio state, so the page stays server-rendered: nothing here is
+              worked out in the browser.
             */}
             <form action={commitPackageAction} className="group mt-4 space-y-3">
               <input type="hidden" name="package_id" value={view.package.id} />
 
-              {elapsed.length > 0 ? (
+              {repeating.length > 0 ? (
                 <div className="space-y-2 rounded-xl border-2 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3">
                   <p className="text-sm font-medium">Parts that come round again</p>
-                  {elapsed.map((s) => (
-                    <div key={s.lineItemId} className="rounded-lg bg-[var(--color-card)] p-2">
-                      <input type="hidden" name="timeline_part" value={s.lineItemId} />
-                      <input
-                        type="checkbox"
-                        id={`timeline-${s.lineItemId}`}
-                        name="timeline_from_last"
-                        value={s.lineItemId}
-                        defaultChecked
-                        className="tl peer mr-2 align-middle"
-                      />
-                      <label htmlFor={`timeline-${s.lineItemId}`} className="text-sm">
-                        <strong>{s.label}:</strong> start the timeline from the last time this came
-                        round ({humanDate(s.lastOccurrence)})
-                      </label>
-                      <p className="mt-1 hidden text-xs text-[var(--color-ink-soft)] peer-checked:block">
-                        Should hold <Money cents={s.cents} /> today; the check-in will say if it is
-                        not there.
-                      </p>
-                      <p className="mt-1 text-xs text-[var(--color-ink-soft)] peer-checked:hidden">
-                        Starts today instead. You would have <Money cents={s.cents} /> set aside by
-                        now if you had been saving since {humanDate(s.lastOccurrence)} — is that
-                        about what you have?
-                      </p>
-                    </div>
-                  ))}
-                  <button
-                    type="submit"
-                    name="use_suggested"
-                    value="1"
-                    className="hidden w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white group-has-[.tl:not(:checked)]:block"
-                  >
-                    Yes, start with what I would have set aside by now
-                  </button>
+                  {repeating.map((item) => {
+                    const offer = elapsed.find((s) => s.lineItemId === item.lineItem.id) ?? null
+                    const last = previousOccurrence(item.lineItem.dueDate, item.lineItem.recurrence)!
+                    return (
+                      <div key={item.lineItem.id} className="group/part rounded-lg bg-[var(--color-card)] p-2">
+                        <p className="mb-2 text-sm font-medium">{item.lineItem.label}</p>
+                        <SavingSinceFields
+                          lineItemId={item.lineItem.id}
+                          lastOccurrence={last}
+                          planStarted={today}
+                          today={today}
+                          current={item.lineItem.timelineStart}
+                          currentDate={item.lineItem.timelineStartDate}
+                          planStartedLabel="Today, when the plan starts"
+                        />
+                        {offer ? (
+                          <>
+                            <p className="mt-2 hidden text-xs text-[var(--color-ink-soft)] group-has-[.tl-last:checked]/part:block">
+                              Should hold <Money cents={offer.cents} /> today; the check-in will say
+                              if it is not there.
+                            </p>
+                            <p className="mt-2 hidden text-xs text-[var(--color-ink-soft)] group-has-[.tl-commit:checked]/part:block">
+                              You would have <Money cents={offer.cents} /> set aside by now if you
+                              had been saving since {humanDate(offer.lastOccurrence)} — is that about
+                              what you have?
+                            </p>
+                          </>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                  {elapsed.length > 0 ? (
+                    <button
+                      type="submit"
+                      name="use_suggested"
+                      value="1"
+                      className="hidden w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white group-has-[.tl-commit:checked]:block"
+                    >
+                      Yes, start with what I would have set aside by now
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
 
               <label
                 className={`block text-sm font-medium ${
-                  live.some((i) => i.lineItem.recurrence === null) || elapsed.length === 0
+                  live.some((i) => i.lineItem.recurrence === null) || repeating.length === 0
                     ? ''
-                    : 'hidden group-has-[.tl:not(:checked)]:block'
+                    : 'hidden group-has-[.tl-commit:checked]:block'
                 }`}
               >
                 Already set aside for this (optional)
@@ -221,7 +235,7 @@ export default async function PackageDetailPage({
                 type="submit"
                 className={`w-full rounded-xl px-4 py-3 font-medium ${
                   elapsed.length > 0
-                    ? 'border border-[var(--color-line)] group-has-[.tl:not(:checked)]:bg-transparent group-has-[.tl:not(:checked)]:text-[var(--color-ink)] bg-[var(--color-accent)] text-white'
+                    ? 'border border-[var(--color-line)] group-has-[.tl-commit:checked]:bg-transparent group-has-[.tl-commit:checked]:text-[var(--color-ink)] bg-[var(--color-accent)] text-white'
                     : 'bg-[var(--color-accent)] text-white'
                 }`}
               >
@@ -295,6 +309,23 @@ export default async function PackageDetailPage({
                     <Money cents={item.remainingCents} /> to go ·{' '}
                     {formatCents(item.weekly.totalPerWeekCents)}/wk
                   </p>
+                  {/*
+                    Where this part's own timeline runs from (D33), when that
+                    is not the day the heading shows, or not the day the
+                    part's setting names. Both the date and the reason are
+                    the domain's.
+                  */}
+                  {item.savingSince.date !== savingSinceDate || item.savingSince.chosenDate !== null ? (
+                    <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                      Saving since {humanDate(item.savingSince.date)} —{' '}
+                      {savingSinceWords(item.savingSince.reason, humanDate)}.
+                      {item.savingSince.chosenDate !== null && item.lineItem.timelineStart === 'typed'
+                        ? item.savingSince.reason.kind === 'commit' || item.savingSince.reason.kind === 'added'
+                          ? ` The day you gave, ${humanDate(item.savingSince.chosenDate)}, is not before that, so it counts from here.`
+                          : ` The day you gave, ${humanDate(item.savingSince.chosenDate)}, will apply again once a new cycle starts.`
+                        : null}
+                    </p>
+                  ) : null}
                   <ProgressBar
                     className="mt-3"
                     totalCents={item.totalCents}
@@ -366,25 +397,17 @@ export default async function PackageDetailPage({
                       <RecurrenceFields defaultValue={item.lineItem.recurrence} />
                     </div>
                     {item.lineItem.recurrence !== null ? (
-                      <div className="text-sm">
+                      <div className="rounded-lg bg-[var(--color-surface)] p-2">
                         <input type="hidden" name="timeline_shown" value="1" />
-                        <input type="hidden" name="timeline_part" value={item.lineItem.id} />
-                        <input
-                          type="checkbox"
-                          id={`edit-timeline-${item.lineItem.id}`}
-                          name="timeline_from_last"
-                          value={item.lineItem.id}
-                          defaultChecked={item.lineItem.timelineStart === 'last_occurrence'}
-                          className="mr-2 align-middle"
+                        <SavingSinceFields
+                          lineItemId={item.lineItem.id}
+                          lastOccurrence={previousOccurrence(item.lineItem.dueDate, item.lineItem.recurrence)!}
+                          planStarted={view.package.committedAt ?? today}
+                          today={today}
+                          current={item.lineItem.timelineStart}
+                          currentDate={item.lineItem.timelineStartDate}
+                          planStartedLabel={isDraft ? 'Today, when the plan starts' : 'The day the plan started'}
                         />
-                        <label htmlFor={`edit-timeline-${item.lineItem.id}`}>
-                          Start the timeline from the last time this came round (
-                          {humanDate(previousOccurrence(item.lineItem.dueDate, item.lineItem.recurrence)!)})
-                        </label>
-                        <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-                          Ticked, it should already hold its share of the cycle and the weekly
-                          amount is the steady one. Unticked, it starts from the day the plan did.
-                        </p>
                       </div>
                     ) : null}
                     <label className="block text-sm font-medium">
@@ -430,7 +453,7 @@ export default async function PackageDetailPage({
                           `${
                             c.kind === 'base'
                               ? c.startDate < (view.package.committedAt ?? c.startDate)
-                                ? 'Since last time it came round'
+                                ? 'Counted from before the plan started'
                                 : 'Original plan'
                               : c.kind === 'opening'
                                 ? 'Already set aside'
@@ -441,7 +464,7 @@ export default async function PackageDetailPage({
                   >
                     {item.components.length > 1
                       ? `Made of ${item.components.length} pieces`
-                      : 'Counted since last time it came round'}
+                      : `Counted since ${humanDate(item.savingSince.date)}`}
                   </Hint>
                 </p>
               ) : null}

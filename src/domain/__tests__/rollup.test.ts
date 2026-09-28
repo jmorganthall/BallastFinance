@@ -61,6 +61,7 @@ function li(over: Partial<LineItem> & Pick<LineItem, 'id'>): LineItem {
     state: 'accruing',
     recurrence: null,
     timelineStart: 'commit',
+    timelineStartDate: null,
     ...over,
   }
 }
@@ -886,5 +887,61 @@ describe('progress against the pace', () => {
     // Saving started the day it was confirmed, so it is exactly on its pace.
     expect(item.paceCents).toBe(item.shouldHaveSavedCents)
     expect(progressOf(item).status).toBe('on_track')
+  })
+})
+
+describe('"Saving since" on the plan and on each part (PRD D33)', () => {
+  // Progressive, $844 every six months, next due 9 Jan 2027: the last one
+  // was 9 Jul 2026. Committed 19 Sep 2026, with a one-off beside it.
+  const progressive = (over: Partial<LineItem> = {}) =>
+    li({
+      id: 'li-progressive',
+      label: 'Progressive',
+      unitAmountCents: 84400,
+      dueDate: '2027-01-09',
+      recurrence: { every: 6, unit: 'month' },
+      timelineStart: 'last_occurrence',
+      ...over,
+    })
+  const oneOff = li({ id: 'li-tickets', label: 'Park tickets' })
+  const views = (items: LineItem[], cycleStarts: DerivationInput['cycleStarts'] = []) =>
+    packageViews({ today: TODAY, accounts: [annual], packages: [pkg()], lineItems: items, cycleStarts })[0]!
+
+  it('heads the plan with the earliest day any part runs from, not the commit', () => {
+    const view = views([progressive(), oneOff])
+    expect(view.savingSince).toBe('2026-07-09')
+    const byId = Object.fromEntries(view.items.map((i) => [i.lineItem.id, i.savingSince]))
+    expect(byId['li-progressive']).toEqual({ date: '2026-07-09', reason: { kind: 'last_occurrence' }, chosenDate: null })
+    expect(byId['li-tickets']).toEqual({ date: TODAY, reason: { kind: 'commit' }, chosenDate: null })
+  })
+
+  it('runs a part from the day given, measures its pace from there, and heads the plan with it when earliest', () => {
+    const view = views([progressive({ timelineStart: 'typed', timelineStartDate: '2026-05-01' }), oneOff])
+    const item = view.items.find((i) => i.lineItem.id === 'li-progressive')!
+    expect(item.components[0]!.startDate).toBe('2026-05-01')
+    expect(item.savingSince).toEqual({ date: '2026-05-01', reason: { kind: 'typed' }, chosenDate: null })
+    expect(item.paceSince).toBe('2026-05-01')
+    // The money timeline and the pace are one line under a day given, as under D30.
+    expect(item.shouldHaveSavedCents).toBe(item.paceCents)
+    expect(progressOf(item).status).toBe('on_track')
+    expect(view.savingSince).toBe('2026-05-01')
+  })
+
+  it('leaves a day given inert on a counted cycle, and says so beside the date it does run from', () => {
+    const view = views(
+      [progressive({ timelineStart: 'typed', timelineStartDate: '2026-05-01' })],
+      [{ lineItemId: 'li-progressive', startDate: TODAY, openingCents: 30000, recordedOrder: 0, origin: 'counted' }],
+    )
+    const item = view.items[0]!
+    expect(item.components.map((c) => [c.kind, c.startDate])).toEqual([
+      ['opening', TODAY],
+      ['base', TODAY],
+    ])
+    expect(item.savingSince).toEqual({ date: TODAY, reason: { kind: 'opened', on: TODAY }, chosenDate: '2026-05-01' })
+    expect(view.savingSince).toBe(TODAY)
+  })
+
+  it('has no heading date for a plan with nothing live', () => {
+    expect(views([li({ id: 'li-gone', state: 'retired' })]).savingSince).toBeNull()
   })
 })

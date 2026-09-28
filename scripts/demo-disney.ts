@@ -15,10 +15,10 @@ const annual = { id: 'a1', householdId: 'h', name: 'Annual Expenses', institutio
 const longTerm = { id: 'a2', householdId: 'h', name: 'Long Term Savings', institutionLabel: '', scope: 'household' as const, ownerUserId: null, active: true }
 
 const items: LineItem[] = [
-  { id: 'i1', packageId: 'p1', label: 'Park tickets', unitAmountCents: 60000, quantity: 3, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: null, timelineStart: 'commit' },
-  { id: 'i2', packageId: 'p1', label: 'Airfare',      unitAmountCents: 45000, quantity: 3, dueDate: '2026-11-21', reserveAccountId: 'a1', state: 'accruing', recurrence: null, timelineStart: 'commit' },
-  { id: 'i3', packageId: 'p1', label: 'Lodging',      unitAmountCents: 120000, quantity: 1, dueDate: '2027-01-16', reserveAccountId: 'a2', state: 'accruing', recurrence: null, timelineStart: 'commit' },
-  { id: 'i4', packageId: 'p1', label: 'Park food',    unitAmountCents: 9000,  quantity: 5, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: null, timelineStart: 'commit' },
+  { id: 'i1', packageId: 'p1', label: 'Park tickets', unitAmountCents: 60000, quantity: 3, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: null, timelineStart: 'commit', timelineStartDate: null },
+  { id: 'i2', packageId: 'p1', label: 'Airfare',      unitAmountCents: 45000, quantity: 3, dueDate: '2026-11-21', reserveAccountId: 'a1', state: 'accruing', recurrence: null, timelineStart: 'commit', timelineStartDate: null },
+  { id: 'i3', packageId: 'p1', label: 'Lodging',      unitAmountCents: 120000, quantity: 1, dueDate: '2027-01-16', reserveAccountId: 'a2', state: 'accruing', recurrence: null, timelineStart: 'commit', timelineStartDate: null },
+  { id: 'i4', packageId: 'p1', label: 'Park food',    unitAmountCents: 9000,  quantity: 5, dueDate: '2027-01-16', reserveAccountId: 'a1', state: 'accruing', recurrence: null, timelineStart: 'commit', timelineStartDate: null },
 ]
 
 const input: DerivationInput = {
@@ -80,7 +80,7 @@ for (const timelineStart of ['commit', 'last_occurrence'] as const) {
     accounts: [annual],
     packages: [{ id: 'p2', householdId: 'h', name: 'Car', state: 'active', module: 'manual', detail: null, createdAt: TODAY, committedAt: TODAY }],
     lineItems: [
-      { id: 'i5', packageId: 'p2', label: 'Progressive', unitAmountCents: 84400, quantity: 1, dueDate: '2027-01-09', reserveAccountId: 'a1', state: 'accruing', recurrence: { every: 6, unit: 'month' }, timelineStart },
+      { id: 'i5', packageId: 'p2', label: 'Progressive', unitAmountCents: 84400, quantity: 1, dueDate: '2027-01-09', reserveAccountId: 'a1', state: 'accruing', recurrence: { every: 6, unit: 'month' }, timelineStart, timelineStartDate: null },
     ],
   })
   const item = view!.items[0]!

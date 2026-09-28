@@ -51,6 +51,7 @@ describe('a valid intake', () => {
         reserveAccountId: 'acct-annual',
         recurrence: null,
         timelineStart: 'commit',
+        timelineStartDate: null,
       },
     ])
   })
@@ -91,6 +92,54 @@ describe('a valid intake', () => {
       context,
     )
     expect(result.ok && result.value.lineItems[0]!.recurrence).toEqual({ every: 3, unit: 'week' })
+  })
+
+  describe('a day a person gave as "Saving since" (PRD D33)', () => {
+    const repeating = () => ({ ...intake().line_items[0], recurrence: { every: 1, unit: 'year' } })
+
+    it('keeps a typed day that is on or before today and before the due date', () => {
+      const result = validateIntake(
+        intake({ line_items: [{ ...repeating(), timeline_start: 'typed', timeline_start_date: '2026-05-01' }] }),
+        context,
+      )
+      expect(result.ok && result.value.lineItems[0]!.timelineStart).toBe('typed')
+      expect(result.ok && result.value.lineItems[0]!.timelineStartDate).toBe('2026-05-01')
+    })
+
+    it('refuses a typed day that is missing, malformed, or after today', () => {
+      // A due date at intake is always ahead of today, so a day at or past it
+      // is already after today; that rule is the resolver's own test.
+      const problemsOf = (over: Record<string, unknown>) => {
+        const result = validateIntake(
+          intake({ line_items: [{ ...repeating(), timeline_start: 'typed', ...over }] }),
+          context,
+        )
+        return result.ok ? [] : result.problems.map((p) => p.message)
+      }
+      expect(problemsOf({})).toEqual(['Pick the day you have been saving for this since.'])
+      expect(problemsOf({ timeline_start_date: 'May 1' })).toEqual(['Not a date: "May 1". Use YYYY-MM-DD.'])
+      expect(problemsOf({ timeline_start_date: '2026-09-20' })).toEqual([
+        'The day you have been saving since cannot be after today.',
+      ])
+    })
+
+    it('carries no day under the other kinds, and never on a one-off', () => {
+      const last = validateIntake(
+        intake({
+          line_items: [{ ...repeating(), timeline_start: 'last_occurrence', timeline_start_date: '2026-05-01' }],
+        }),
+        context,
+      )
+      expect(last.ok && last.value.lineItems[0]!.timelineStartDate).toBeNull()
+      const oneOff = validateIntake(
+        intake({
+          line_items: [{ ...intake().line_items[0], timeline_start: 'typed', timeline_start_date: '2026-05-01' }],
+        }),
+        context,
+      )
+      expect(oneOff.ok && oneOff.value.lineItems[0]!.timelineStart).toBe('commit')
+      expect(oneOff.ok && oneOff.value.lineItems[0]!.timelineStartDate).toBeNull()
+    })
   })
 
   it('still understands the fixed names the first version used', () => {

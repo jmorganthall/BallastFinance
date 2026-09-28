@@ -36,7 +36,7 @@ describeDb('planning a trip', () => {
   ]
 
   const events = (kind: 'trip_changed') =>
-    db.select().from(schema.events).where(and(eq(schema.events.householdId, householdId), eq(schema.events.kind, kind)))
+    db.select().from(schema.events).where(and(eq(schema.events.householdId, householdId), eq(schema.events.kind, kind))).orderBy(schema.events.recordedAt, schema.events.id)
 
   beforeAll(async () => {
     client = postgres(url!, { max: 4, prepare: false })

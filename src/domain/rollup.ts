@@ -17,8 +17,10 @@ import {
   shouldHaveSaved,
   shouldHaveSavedForItem,
   evenPaceCents,
+  savingSinceForLineItem,
   weeklyBreakdown,
   type RateComponent,
+  type SavingSince,
   type WeeklyBreakdown,
 } from './accrual'
 import { previousOccurrence } from './recurrence'
@@ -113,6 +115,11 @@ export interface LineItemView {
   paceCents: Cents
   /** When that even save would have started. */
   paceSince: CivilDate
+  /**
+   * The day the part's money timeline runs from and why (PRD D33): what the
+   * screen shows as "Saving since". Computed here, never stored.
+   */
+  savingSince: SavingSince
   weekly: WeeklyBreakdown
   /** Past its due date and not yet confirmed spent -- it keeps nagging (PRD §5). */
   isOverdue: boolean
@@ -125,6 +132,11 @@ export interface PackageView {
   shouldHaveSavedCents: Cents
   /** The parts' paces added up: where the plan's money would be by today, saved evenly. */
   paceCents: Cents
+  /**
+   * The earliest day any live part's timeline runs from (PRD D33): the plan's
+   * "Saving since". Null when the plan has no live part.
+   */
+  savingSince: CivilDate | null
   weekly: WeeklyBreakdown
 }
 
@@ -161,7 +173,11 @@ function effectiveCommitDate(pkg: Package, today: CivilDate): CivilDate {
  * since" -- or from the day it was actually confirmed spent and started over,
  * when that came later, so a spend confirmed a few days late does not read
  * as a cycle behind. Under D30 a repeating part's money timeline runs from
- * the same place by default, so its should-hold and its pace are one line. A one-off is measured from the day it existed in a live
+ * the same place by default, so its should-hold and its pace are one line.
+ * A part with a day of its own (D33, 'typed') is measured from that day in
+ * place of its last occurrence: the person said the saving began then, and
+ * a pace from anywhere else would read the part as behind or ahead of a
+ * line nobody chose. A one-off is measured from the day it existed in a live
  * plan: the commit, or the day it was added to one. A check-in count only
  * restates what was already there and never moves the clock.
  */
@@ -174,7 +190,13 @@ function paceWindowStart(args: {
   const mine = args.cycles.filter(
     (c) => c.lineItemId === args.lineItem.id && compareDates(c.startDate, args.today) <= 0,
   )
-  const last = previousOccurrence(args.lineItem.dueDate, args.lineItem.recurrence)
+  const typed =
+    args.lineItem.timelineStart === 'typed' &&
+    args.lineItem.timelineStartDate &&
+    compareDates(args.lineItem.timelineStartDate, args.lineItem.dueDate) < 0
+      ? args.lineItem.timelineStartDate
+      : null
+  const last = typed ?? previousOccurrence(args.lineItem.dueDate, args.lineItem.recurrence)
   if (last) {
     const rolled = mine
       .filter((c) => c.origin === 'rolled')
@@ -201,15 +223,18 @@ function viewLineItem(args: {
 }): LineItemView {
   const { lineItem, pkg, today, transferWeekday, changes } = args
   const cycle = currentCycle(lineItem.id, args.cycles, today)
-  const components = componentsForLineItem({
+  const frame = {
     lineItem,
     commitDate: effectiveCommitDate(pkg, today),
     changes,
     cycleStartDate: cycle?.startDate,
     cycleOrigin: cycle?.origin,
     openingCents: cycle?.openingCents,
-    transferWeekday,
-  })
+  }
+  const components = componentsForLineItem({ ...frame, transferWeekday })
+  // The same facts, read the same way, so the date on screen is the date
+  // the base component actually runs from.
+  const savingSince = savingSinceForLineItem(frame)
   const totalCents = lineItemTotalCents(lineItem)
   const shouldHaveSavedCents = shouldHaveSavedForItem(components, today, totalCents, transferWeekday)
   const paceSince = paceWindowStart({ lineItem, pkg, cycles: args.cycles, today })
@@ -229,6 +254,7 @@ function viewLineItem(args: {
     remainingCents: Math.max(0, totalCents - shouldHaveSavedCents),
     paceCents,
     paceSince,
+    savingSince,
     weekly: weeklyBreakdown(components, today, 0, transferWeekday),
     isOverdue: compareDates(today, lineItem.dueDate) > 0 && lineItem.state !== 'retired',
   }
@@ -259,6 +285,15 @@ export function packageViews(input: DerivationInput): PackageView[] {
       totalCents: live.reduce((s, v) => s + v.totalCents, 0),
       shouldHaveSavedCents: live.reduce((s, v) => s + v.shouldHaveSavedCents, 0),
       paceCents: live.reduce((s, v) => s + v.paceCents, 0),
+      // The earliest day any part runs from: a plan whose parts start at
+      // their last occurrence is not "saving since" the commit (D33).
+      savingSince: live.reduce<CivilDate | null>(
+        (earliest, v) =>
+          earliest === null || compareDates(v.savingSince.date, earliest) < 0
+            ? v.savingSince.date
+            : earliest,
+        null,
+      ),
       weekly: weeklyBreakdown(components, today, 0, transferWeekday),
     }
   })

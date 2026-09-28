@@ -385,6 +385,7 @@ describe('close-out', () => {
       state: 'accruing',
       recurrence: null,
       timelineStart: 'commit',
+      timelineStartDate: null,
       ...over,
     }
   }
