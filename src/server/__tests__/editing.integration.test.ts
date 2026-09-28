@@ -775,8 +775,9 @@ describeDb('editing plans and debts', () => {
       expect(item.status).toBe('on_track')
     })
 
-    it('refuses a one-off that starts anywhere but the commit, at the database', async () => {
-      // The engine coerces; the CHECK is the backstop for anything that bypasses it.
+    it('refuses a one-off that starts at a last time it never had, at the database', async () => {
+      // The engine starts it at the commit (D36); the CHECK is the backstop
+      // for anything that bypasses the engine.
       await engine.updateLineItem(gutterId, { timelineStart: 'last_occurrence' })
       expect((await engine.listLineItems()).find((i) => i.id === gutterId)!.timelineStart).toBe('commit')
       const failure = await db
@@ -788,7 +789,7 @@ describeDb('editing plans and debts', () => {
           (error: unknown) => error as { message: string; cause?: { constraint_name?: string } },
         )
       expect(failure).not.toBeNull()
-      expect(failure!.cause?.constraint_name ?? failure!.message).toMatch(/line_items_one_off_starts_at_commit/)
+      expect(failure!.cause?.constraint_name ?? failure!.message).toMatch(/line_items_one_off_has_no_last_occurrence/)
     })
 
     it('starts the steady line again at the spend date once confirmed spent, and rolls forward', async () => {
@@ -928,11 +929,57 @@ describeDb('editing plans and debts', () => {
       expect(a.weeklyExactCents).toBe(8572)
     })
 
-    it('keeps a one-off at the commit with no day, and the database refuses a typed choice without one', async () => {
+    it('lets a one-off save from a day given too (D36): its own line moves, what the account is asked for does not', async () => {
+      const changesBefore = (await changesTo(gutterId)).length
       await engine.updateLineItem(gutterId, { timelineStart: 'typed', timelineStartDate: '2026-03-15' })
-      const gutter = (await engine.listLineItems()).find((i) => i.id === gutterId)!
-      expect([gutter.timelineStart, gutter.timelineStartDate]).toEqual(['commit', null])
+      const { a } = await standing(engine, houseAccountId)
+      const gutter = part(a, gutterId)
+      expect([gutter.lineItem.timelineStart, gutter.lineItem.timelineStartDate]).toEqual(['typed', '2026-03-15'])
+      expect(gutter.savingSince).toEqual({ date: '2026-03-15', reason: 'typed' })
+      // What the form offers as the other answer is still the day the plan started.
+      expect(gutter.startedOn).toEqual({ date: '2026-09-26', reason: 'plan_started' })
+      // Since Sunday 15 Mar: 28 of its 35 Saturdays gone, 30000 × 28 / 35 = 24000.
+      expect(gutter.savedForCents).toBe(24000)
+      expect(gutter.steadyPerWeekCents).toBe(858) // ceil(30000 / 35)
+      // Due the same day, the one-off comes first by name, so the $900 now
+      // reaches its line and the insurance is counted what is left.
+      expect(gutter.countedCents).toBe(24000)
+      expect(gutter.status).toBe('on_track')
+      expect(part(a, insuranceId).countedCents).toBe(66000)
+      expect(part(a, insuranceId).status).toBe('catching_up')
+      // What has to be there by 15 Nov did not move: ceil((150000 − 90000) / 7).
+      expect(a.weeklyExactCents).toBe(8572)
 
+      const changes = await changesTo(gutterId)
+      expect(changes).toHaveLength(changesBefore + 1)
+      expect(changes.at(-1)!.before).toEqual(changes.at(-1)!.after)
+      expect(changes.at(-1)!.timeline_start).toEqual({ before: 'commit', after: { kind: 'typed', date: '2026-03-15' } })
+
+      // The same plain words refuse a day after today on a one-off.
+      await expect(
+        engine.updateLineItem(gutterId, { timelineStart: 'typed', timelineStartDate: '2026-09-27' }),
+      ).rejects.toThrow('The day you have been saving since cannot be after today.')
+    })
+
+    it('keeps a day given when a part starts or stops repeating, and starts a part that stops on its last time where the plan did', async () => {
+      await engine.updateLineItem(gutterId, { recurrence: { every: 1, unit: 'year' } })
+      let gutter = (await engine.listLineItems()).find((i) => i.id === gutterId)!
+      expect([gutter.timelineStart, gutter.timelineStartDate]).toEqual(['typed', '2026-03-15'])
+      await engine.updateLineItem(gutterId, { recurrence: null })
+      gutter = (await engine.listLineItems()).find((i) => i.id === gutterId)!
+      expect([gutter.timelineStart, gutter.timelineStartDate]).toEqual(['typed', '2026-03-15'])
+
+      // Back to where the plan started: the day is cleared.
+      await engine.updateLineItem(gutterId, { timelineStart: 'commit' })
+      const { a } = await standing(engine, houseAccountId)
+      expect(part(a, gutterId).savingSince).toEqual({ date: '2026-09-26', reason: 'plan_started' })
+      expect((await changesTo(gutterId)).at(-1)!.timeline_start).toEqual({
+        before: { kind: 'typed', date: '2026-03-15' },
+        after: 'commit',
+      })
+    })
+
+    it('the database refuses a typed choice without a day', async () => {
       const failure = await db
         .update(schema.lineItems)
         .set({ timelineStart: 'typed', timelineStartDate: null })

@@ -87,6 +87,7 @@ import {
   type TimelineStart,
   type TimelineStartChoice,
   defaultTimelineStart,
+  nextTimelineStart,
   resolveTimelineStart,
   timelineChoiceOf,
   timelineStartRecord,
@@ -594,8 +595,9 @@ export class Engine {
       /**
        * Where each part's timeline starts, as the commit form had it: a kind,
        * or a kind with the day when it is 'typed' (D33). A part not named
-       * keeps what it has; a one-off is always 'commit'. A day that is after
-       * today or not before the due date refuses the commit.
+       * keeps what it has; a one-off is 'commit' or a day given (D36), never
+       * a last time. A day that is after today or not before the due date
+       * refuses the commit.
        */
       timelineStartByLineItem?: Readonly<Record<Id, TimelineStart | TimelineStartChoice>>
     } = {},
@@ -872,7 +874,7 @@ export class Engine {
    * catch-up component (PRD §3, §5). Writing the row without the event would
    * silently erase the reason a weekly number changed.
    *
-   * Where the timeline starts (D30, D33) is recorded on the same event as
+   * Where the timeline starts (D30, D33, D36) is recorded on the same event as
    * `timeline_start: { before, after }`, each side a `TimelineStartRecord`:
    * the bare kind for 'last_occurrence' and 'commit', exactly as D30 wrote
    * it, and `{ kind: 'typed', date }` for a day a person gave, so a log from
@@ -924,26 +926,24 @@ export class Engine {
         reserveAccountId: patch.reserveAccountId ?? before.reserveAccountId,
       }
 
-      // Where the timeline starts (D30, D33) follows the recurrence: a one-off
-      // is always 'commit'; a part that starts repeating with nothing said
-      // gets the default for a repeating part; otherwise what was asked, or
-      // what it had. A day given is checked against today and the due date
-      // as it will be after this save; any other kind clears the day.
+      // Where the timeline starts (D30, D33, D36): one decision in the domain
+      // for every caller that changes a part, judged against the part as it
+      // will be after this save.
       const { recurrence, timelineStart: askedStart, timelineStartDate: askedDate, ...columns } = patch
       const recurrenceAfter =
         'recurrence' in patch ? (recurrence ?? null) : recurrenceOf(row.recurEvery, row.recurUnit)
-      const kindAsked: TimelineStart =
-        askedStart ??
-        (row.recurEvery === null && recurrenceAfter
-          ? defaultTimelineStart(recurrenceAfter)
-          : row.timelineStart)
-      const resolved = resolveTimelineStart({
-        recurrence: recurrenceAfter,
-        choice: {
-          kind: kindAsked,
-          date: 'timelineStartDate' in patch ? (askedDate ?? null) : row.timelineStartDate,
+      const resolved = nextTimelineStart({
+        current: {
+          recurrence: recurrenceOf(row.recurEvery, row.recurUnit),
+          timelineStart: row.timelineStart,
+          timelineStartDate: row.timelineStartDate as CivilDate | null,
         },
-        dueDate: after.dueDate,
+        asked: {
+          ...(askedStart !== undefined ? { kind: askedStart } : {}),
+          ...('timelineStartDate' in patch ? { date: askedDate ?? null } : {}),
+        },
+        recurrence: recurrenceAfter,
+        dueDate: after.dueDate as CivilDate,
         today,
       })
       if (!resolved.ok) throw new EngineError(resolved.problem)
@@ -965,8 +965,7 @@ export class Engine {
         before.quantity !== after.quantity ||
         before.dueDate !== after.dueDate ||
         before.reserveAccountId !== after.reserveAccountId
-      const movesTimeline =
-        timelineStartAfter !== row.timelineStart || timelineDateAfter !== row.timelineStartDate
+      const movesTimeline = resolved.changed
 
       // A label-only edit is not a plan change and must not create a component.
       // A timeline change moves the weekly number without moving money: the

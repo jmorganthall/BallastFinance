@@ -1,16 +1,19 @@
 /**
- * "Saving since": where a repeating part's money timeline begins, as one
- * question with three answers (PRD D30, D33). The last time it came round
- * is the default for a new part; the day the plan started is the older
- * reading, under which the elapsed share is offered as an opening instead;
- * another day is typed, for a household that has been setting money aside
- * for this since some other day.
+ * "Saving since": where a part's money timeline begins, as one question
+ * (PRD D30, D33, D36). A repeating part has three answers: the last time it
+ * came round (the default for a new one), the day the plan started (the
+ * older reading, under which the elapsed share is offered as an opening
+ * instead), or another day, typed. A one-off has no last time, so it has
+ * the other two, and the day the plan started (or the day it was added) is
+ * its default.
  *
  * Server-rendered, no client JavaScript: the date box under "another day"
  * is revealed by CSS on the radio state, and the dates shown are the
- * domain's. The form posts `timeline_part`, `timeline_start_<id>` and
- * `timeline_date_<id>`; the engine judges the day against today and the
- * due date, so nothing here decides anything.
+ * domain's. The form posts `timeline_part`, `timeline_start_<id>`,
+ * `timeline_date_<id>` and what the part had in `timeline_was_<id>`, so a
+ * save can tell an answer a person changed from one left as it was; the
+ * engine judges the day against today and the due date, so nothing here
+ * decides anything.
  */
 
 import { humanDate } from '@/components/ui'
@@ -29,9 +32,9 @@ export function SavingSinceFields({
   planStartedLabel = 'The day the plan started',
 }: {
   lineItemId: string
-  /** The last time the part came round, from the domain. */
-  lastOccurrence: CivilDate
-  /** The commit date, or today for a draft. */
+  /** The last time the part came round, from the domain; null for a one-off, which never did. */
+  lastOccurrence: CivilDate | null
+  /** The commit date or the day the part was added (the position's `startedOn`), or today for a draft. */
   planStarted: CivilDate
   today: CivilDate
   current?: TimelineStart
@@ -64,12 +67,19 @@ export function SavingSinceFields({
     <fieldset className="group/since space-y-2">
       <legend className="text-sm font-medium">Saving since</legend>
       <input type="hidden" name="timeline_part" value={lineItemId} />
-      {choice(
-        'last_occurrence',
-        'tl-last',
-        `The last time this came round (${humanDate(lastOccurrence)})`,
-        'It should already hold its share of the cycle, and the weekly amount is the steady one.',
-      )}
+      <input
+        type="hidden"
+        name={`timeline_was_${lineItemId}`}
+        value={current === 'typed' && currentDate ? `typed:${currentDate}` : current}
+      />
+      {lastOccurrence
+        ? choice(
+            'last_occurrence',
+            'tl-last',
+            `The last time this came round (${humanDate(lastOccurrence)})`,
+            'It should already hold its share of the cycle, and the weekly amount is the steady one.',
+          )
+        : null}
       {choice(
         'commit',
         'tl-commit',

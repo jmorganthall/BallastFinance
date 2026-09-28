@@ -123,7 +123,7 @@ describe('a valid intake', () => {
       ])
     })
 
-    it('carries no day under the other kinds, and never on a one-off', () => {
+    it('carries no day under the other kinds', () => {
       const last = validateIntake(
         intake({
           line_items: [{ ...repeating(), timeline_start: 'last_occurrence', timeline_start_date: '2026-05-01' }],
@@ -131,14 +131,27 @@ describe('a valid intake', () => {
         context,
       )
       expect(last.ok && last.value.lineItems[0]!.timelineStartDate).toBeNull()
+    })
+
+    it('keeps a typed day on a one-off too, judged by the same rules (D36)', () => {
       const oneOff = validateIntake(
         intake({
           line_items: [{ ...intake().line_items[0], timeline_start: 'typed', timeline_start_date: '2026-05-01' }],
         }),
         context,
       )
-      expect(oneOff.ok && oneOff.value.lineItems[0]!.timelineStart).toBe('commit')
-      expect(oneOff.ok && oneOff.value.lineItems[0]!.timelineStartDate).toBeNull()
+      expect(oneOff.ok && oneOff.value.lineItems[0]!.timelineStart).toBe('typed')
+      expect(oneOff.ok && oneOff.value.lineItems[0]!.timelineStartDate).toBe('2026-05-01')
+
+      const later = validateIntake(
+        intake({
+          line_items: [{ ...intake().line_items[0], timeline_start: 'typed', timeline_start_date: '2026-09-20' }],
+        }),
+        context,
+      )
+      expect(later.ok ? [] : later.problems.map((p) => p.message)).toEqual([
+        'The day you have been saving since cannot be after today.',
+      ])
     })
   })
 

@@ -6,6 +6,7 @@ import {
   NEAR_TRANSFERS,
   position,
   requirementsFor,
+  partStartedOn,
   steadyLineStart,
   type PositionInput,
 } from '../position'
@@ -407,6 +408,29 @@ describe("a part's steady line starts where the person said", () => {
       steadyLineStart({ lineItem: li({ id: 'x', dueDate: due, recurrence: yearly, timelineStart: 'commit' }), pkg: plan, cycles: [], today: TODAY }),
     ).toEqual({ date: '2026-09-01', reason: 'plan_started' })
   })
+  it('on a one-off, where the plan started unless a day is given, and never at a last time (D36)', () => {
+    expect(
+      steadyLineStart({ lineItem: li({ id: 'x', dueDate: due }), pkg: plan, cycles: [], today: TODAY }),
+    ).toEqual({ date: '2026-09-01', reason: 'plan_started' })
+    expect(
+      steadyLineStart({
+        lineItem: li({ id: 'x', dueDate: due, timelineStart: 'typed', timelineStartDate: '2026-06-15' }),
+        pkg: plan,
+        cycles: [],
+        today: TODAY,
+      }),
+    ).toEqual({ date: '2026-06-15', reason: 'typed' })
+    expect(
+      steadyLineStart({ lineItem: li({ id: 'x', dueDate: due, timelineStart: 'last_occurrence' }), pkg: plan, cycles: [], today: TODAY }),
+    ).toEqual({ date: '2026-09-01', reason: 'plan_started' })
+  })
+  it('offers the day the part was added when it joined a running plan, whatever it is set to', () => {
+    const added: LineItemCycle[] = [{ lineItemId: 'x', startDate: '2026-09-10', openingCents: 0, origin: 'added' }]
+    const typed = li({ id: 'x', dueDate: due, timelineStart: 'typed', timelineStartDate: '2026-06-15' })
+    expect(partStartedOn({ lineItem: typed, pkg: plan, cycles: added, today: TODAY })).toEqual({ date: '2026-09-10', reason: 'added' })
+    expect(steadyLineStart({ lineItem: typed, pkg: plan, cycles: added, today: TODAY })).toEqual({ date: '2026-06-15', reason: 'typed' })
+    expect(partStartedOn({ lineItem: typed, pkg: plan, cycles: [], today: TODAY })).toEqual({ date: '2026-09-01', reason: 'plan_started' })
+  })
   it('never at a count, and at the spend date after a spend', () => {
     const cycles: LineItemCycle[] = [
       { lineItemId: 'x', startDate: '2026-09-27', openingCents: 0, origin: 'counted' },
@@ -465,8 +489,10 @@ describe('invariants over randomised households (D35)', () => {
           quantity: 1 + int(3),
           dueDate,
           recurrence: recurring ? { every: 1 + int(3), unit: UNITS[1 + int(3)]! } : null,
-          timelineStart: !recurring ? 'commit' : kind === 0 ? 'commit' : kind === 1 ? 'last_occurrence' : 'typed',
-          timelineStartDate: recurring && kind === 2 ? addDays(today, -int(200)) : null,
+          // A one-off starts where the plan does or on a day given (D36); it
+          // has no last time it came round.
+          timelineStart: kind === 2 ? 'typed' : !recurring || kind === 0 ? 'commit' : 'last_occurrence',
+          timelineStartDate: kind === 2 ? addDays(today, -int(200)) : null,
         })
       })
       const facts: PositionInput = {
@@ -558,6 +584,30 @@ describe('invariants over randomised households (D35)', () => {
       if (p.allCaughtUp) {
         for (const a of p.accounts.filter((x) => x.parts.length > 0)) expect(a.status).toBe('on_track')
         expect(p.todos.some((t) => t.blocking)).toBe(false)
+      }
+
+      // 6. Where a one-off starts (D36) moves its own steady line and
+      // nothing an account is asked for: moving every one-off's start to a
+      // day given, or back to where the plan started, leaves each account's
+      // weekly amount, status, one-time move and transfer change as they were.
+      const moved = position({
+        ...facts,
+        lineItems: lineItems.map((item, i) =>
+          item.recurrence
+            ? item
+            : item.timelineStart === 'typed'
+              ? { ...item, timelineStart: 'commit' as const, timelineStartDate: null }
+              : { ...item, timelineStart: 'typed' as const, timelineStartDate: addDays(today, -(1 + ((i * 37) % 300))) },
+        ),
+      })
+      for (const a of p.accounts) {
+        const b = moved.accounts.find((x) => x.account.id === a.account.id)!
+        expect(b.weeklyExactCents).toBe(a.weeklyExactCents)
+        expect(b.weeklyCents).toBe(a.weeklyCents)
+        expect(b.status).toBe(a.status)
+        expect(b.oneTimeMove).toEqual(a.oneTimeMove)
+        expect(b.transferChange).toEqual(a.transferChange)
+        for (const x of b.parts) if (!x.lineItem.recurrence) expect(x.savingSince.reason).not.toBe('last_occurrence')
       }
     }
   })

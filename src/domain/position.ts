@@ -185,6 +185,12 @@ export interface PartPosition {
   /** When it goes out: its due date, or today when it is overdue and still owed. */
   outflowDate: CivilDate
   isOverdue: boolean
+  /**
+   * The day its plan started, or the day it was added to a running plan
+   * (`partStartedOn`): where it starts when nobody said otherwise, and the
+   * date the "Saving since" question offers, whatever it is set to now.
+   */
+  startedOn: { date: CivilDate; reason: 'plan_started' | 'added' }
   /** The day its steady line starts, and why. What the screen calls "Saving since". */
   savingSince: { date: CivilDate; reason: SteadySinceReason }
   /** The slope of the steady line: its share of the transfer, rounded up. */
@@ -348,12 +354,34 @@ function latestStart(
 }
 
 /**
- * Where a part's steady line starts (D33 as amended by D35). The person's
- * choice decides: the last time it came round, the day the plan started (or
- * the part was added to it), or a day typed. After a spend the new cycle
- * starts on the spend date, whatever the choice, since that is when it last
- * came round. A count, a reshuffle or an opening never moves it: money
- * placed on a part says nothing about when saving for it began.
+ * The day a part joined the saving: the day its plan started, or the day it
+ * was added to a plan already running, whichever is later. It is where a
+ * part starts when nobody said otherwise, and the date the "Saving since"
+ * question offers as "the day the plan started" (or "the day it was
+ * added"), whatever the part is set to now.
+ */
+export function partStartedOn(args: {
+  lineItem: LineItem
+  pkg: Package
+  cycles: readonly LineItemCycle[]
+  today: CivilDate
+}): { date: CivilDate; reason: 'plan_started' | 'added' } {
+  const { lineItem, pkg, cycles, today } = args
+  const added = latestStart(cycles, lineItem.id, 'added', today)
+  const commit = pkg.committedAt ?? today
+  return added && compareDates(added, commit) > 0
+    ? { date: added, reason: 'added' }
+    : { date: commit, reason: 'plan_started' }
+}
+
+/**
+ * Where a part's steady line starts (D33 as amended by D35 and D36). The
+ * person's choice decides: the last time it came round (a part that
+ * repeats), the day the plan started (or the part was added to it), or a
+ * day typed, on any part. After a spend the new cycle starts on the spend
+ * date, whatever the choice, since that is when it last came round. A
+ * count, a reshuffle or an opening never moves it: money placed on a part
+ * says nothing about when saving for it began.
  */
 export function steadyLineStart(args: {
   lineItem: LineItem
@@ -361,26 +389,17 @@ export function steadyLineStart(args: {
   cycles: readonly LineItemCycle[]
   today: CivilDate
 }): { date: CivilDate; reason: SteadySinceReason } {
-  const { lineItem, pkg, cycles, today } = args
-  const added = latestStart(cycles, lineItem.id, 'added', today)
-  const commit = pkg.committedAt ?? today
-  const started =
-    added && compareDates(added, commit) > 0
-      ? { date: added, reason: 'added' as const }
-      : { date: commit, reason: 'plan_started' as const }
-
-  let chosen: { date: CivilDate; reason: SteadySinceReason } = started
-  if (isRecurring(lineItem.recurrence)) {
-    if (
-      lineItem.timelineStart === 'typed' &&
-      lineItem.timelineStartDate &&
-      compareDates(lineItem.timelineStartDate, lineItem.dueDate) < 0
-    ) {
-      chosen = { date: lineItem.timelineStartDate, reason: 'typed' }
-    } else if (lineItem.timelineStart !== 'commit') {
-      const last = previousOccurrence(lineItem.dueDate, lineItem.recurrence)
-      if (last) chosen = { date: last, reason: 'last_occurrence' }
-    }
+  const { lineItem, cycles, today } = args
+  let chosen: { date: CivilDate; reason: SteadySinceReason } = partStartedOn(args)
+  if (
+    lineItem.timelineStart === 'typed' &&
+    lineItem.timelineStartDate &&
+    compareDates(lineItem.timelineStartDate, lineItem.dueDate) < 0
+  ) {
+    chosen = { date: lineItem.timelineStartDate, reason: 'typed' }
+  } else if (isRecurring(lineItem.recurrence) && lineItem.timelineStart !== 'commit') {
+    const last = previousOccurrence(lineItem.dueDate, lineItem.recurrence)
+    if (last) chosen = { date: last, reason: 'last_occurrence' }
   }
 
   const rolled = latestStart(cycles, lineItem.id, 'rolled', today)
@@ -395,6 +414,7 @@ interface PartFrame {
   totalCents: Cents
   outflowDate: CivilDate
   isOverdue: boolean
+  startedOn: { date: CivilDate; reason: 'plan_started' | 'added' }
   savingSince: { date: CivilDate; reason: SteadySinceReason }
   steadyPerWeekCents: Cents
   savedForCents: Cents
@@ -420,6 +440,7 @@ function frameOf(args: {
     totalCents,
     outflowDate: isOverdue ? today : lineItem.dueDate,
     isOverdue,
+    startedOn: partStartedOn(args),
     savingSince,
     steadyPerWeekCents: ceilDiv(
       Math.max(0, totalCents),

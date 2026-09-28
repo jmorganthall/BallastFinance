@@ -10,7 +10,7 @@ import {
   type RateComponent,
 } from '../accrual'
 import { accrualWeeksBetween, type CivilDate, type Weekday } from '../dates'
-import { resolveTimelineStart, timelineStartRecord } from '../types'
+import { nextTimelineStart, resolveTimelineStart, timelineStartRecord } from '../types'
 
 // What is left of the component arithmetic after D35: a sum delivered evenly
 // over the transfer days in a window. The steady line and the bumps and cuts
@@ -116,16 +116,85 @@ describe('"Saving since" is a day a person can give (PRD D33)', () => {
       ).toEqual({ ok: false, problem: 'The day you have been saving since has to be before the day it is needed.' })
     })
 
-    it('makes a one-off start at the commit whatever was asked', () => {
+    it('keeps a day given on a one-off by the same rules, and starts it at the commit when asked for a last time it never had (D36)', () => {
       expect(
         resolveTimelineStart({ recurrence: null, choice: { kind: 'typed', date: '2026-03-15' }, dueDate: NOV, today: TODAY }),
+      ).toEqual({ ok: true, timelineStart: 'typed', timelineStartDate: '2026-03-15' })
+      expect(
+        resolveTimelineStart({ recurrence: null, choice: { kind: 'typed', date: '2026-09-27' }, dueDate: NOV, today: TODAY }),
+      ).toEqual({ ok: false, problem: 'The day you have been saving since cannot be after today.' })
+      expect(
+        resolveTimelineStart({ recurrence: null, choice: { kind: 'typed', date: null }, dueDate: NOV, today: TODAY }),
+      ).toEqual({ ok: false, problem: 'Pick the day you have been saving for this since.' })
+      expect(
+        resolveTimelineStart({ recurrence: null, choice: { kind: 'last_occurrence', date: '2026-03-15' }, dueDate: NOV, today: TODAY }),
       ).toEqual({ ok: true, timelineStart: 'commit', timelineStartDate: null })
+      expect(resolveTimelineStart({ recurrence: null, choice: 'commit', dueDate: NOV, today: TODAY })).toEqual({
+        ok: true,
+        timelineStart: 'commit',
+        timelineStartDate: null,
+      })
     })
 
     it('records the D30 kinds as before and a day given with its date', () => {
       expect(timelineStartRecord('last_occurrence', null)).toBe('last_occurrence')
       expect(timelineStartRecord('commit', null)).toBe('commit')
       expect(timelineStartRecord('typed', '2026-03-15')).toEqual({ kind: 'typed', date: '2026-03-15' })
+    })
+  })
+
+  describe('where a part starts after a change to it (D36)', () => {
+    const yearly = { every: 1, unit: 'year' } as const
+    const oneOff = { recurrence: null, timelineStart: 'commit' as const, timelineStartDate: null }
+    const typedOneOff = { recurrence: null, timelineStart: 'typed' as const, timelineStartDate: '2026-08-01' }
+    const next = (args: Omit<Parameters<typeof nextTimelineStart>[0], 'today' | 'dueDate'> & { dueDate?: CivilDate }) =>
+      nextTimelineStart({ dueDate: NOV, today: TODAY, ...args })
+
+    it('keeps what the part has when nothing is said, and says it did not move', () => {
+      expect(next({ current: typedOneOff, recurrence: null })).toEqual({
+        ok: true,
+        timelineStart: 'typed',
+        timelineStartDate: '2026-08-01',
+        changed: false,
+      })
+    })
+
+    it('takes what was asked, and says whether it moved', () => {
+      expect(next({ current: oneOff, asked: { kind: 'typed', date: '2026-08-01' }, recurrence: null })).toEqual({
+        ok: true,
+        timelineStart: 'typed',
+        timelineStartDate: '2026-08-01',
+        changed: true,
+      })
+      expect(next({ current: typedOneOff, asked: { kind: 'commit', date: null }, recurrence: null })).toEqual({
+        ok: true,
+        timelineStart: 'commit',
+        timelineStartDate: null,
+        changed: true,
+      })
+    })
+
+    it('gives a part that starts repeating the default for one, unless it already had a day given', () => {
+      expect(next({ current: oneOff, recurrence: yearly })).toMatchObject({ ok: true, timelineStart: 'last_occurrence', changed: true })
+      expect(next({ current: typedOneOff, recurrence: yearly })).toMatchObject({
+        ok: true,
+        timelineStart: 'typed',
+        timelineStartDate: '2026-08-01',
+        changed: false,
+      })
+    })
+
+    it('starts a part that stops repeating on "the last time it came round" where the plan does', () => {
+      expect(
+        next({ current: { recurrence: yearly, timelineStart: 'last_occurrence', timelineStartDate: null }, recurrence: null }),
+      ).toEqual({ ok: true, timelineStart: 'commit', timelineStartDate: null, changed: true })
+    })
+
+    it('judges a day kept against the part as it will be, in the same plain words', () => {
+      expect(next({ current: typedOneOff, recurrence: null, dueDate: '2026-07-31' })).toEqual({
+        ok: false,
+        problem: 'The day you have been saving since has to be before the day it is needed.',
+      })
     })
   })
 })

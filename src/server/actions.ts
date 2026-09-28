@@ -64,27 +64,29 @@ export async function createPackageAction(
 }
 
 /**
- * "Saving since" for each repeating part, as the commit or edit form posted
- * it (PRD D30, D33): one question with three answers -- the last time it
- * came round, the day the plan started, or another day, typed. The form
- * names every part it asked (`timeline_part`), and for each posts
- * `timeline_start_<id>` and, under "another day", `timeline_date_<id>`. A
- * part the form did not ask about keeps its setting. Nothing is checked
- * here beyond the shape: the engine judges the day against today and the
- * due date, in plain words.
+ * "Saving since" for each part, as the commit or edit form posted it (PRD
+ * D30, D33, D36): one question -- the last time it came round (a part that
+ * repeats), the day the plan started, or another day, typed. The form names
+ * every part it asked (`timeline_part`), and for each posts
+ * `timeline_start_<id>`, under "another day" `timeline_date_<id>`, and what
+ * the part had in `timeline_was_<id>`. An answer left as it was is not a
+ * choice, so it is not passed on: the part keeps what it has, and one that
+ * starts repeating in the same save gets the default for a repeating part.
+ * Nothing is checked here beyond the shape: the engine judges the day
+ * against today and the due date, in plain words.
  */
 function readTimelineChoices(formData: FormData): Record<string, TimelineStartChoice> {
   const shown = formData.getAll('timeline_part').map(String)
   const kinds: readonly TimelineStart[] = ['last_occurrence', 'commit', 'typed']
   return Object.fromEntries(
-    shown.map((id) => {
+    shown.flatMap((id) => {
       const posted = String(formData.get(`timeline_start_${id}`) ?? '')
       const kind = kinds.find((k) => k === posted) ?? 'last_occurrence'
-      const date = String(formData.get(`timeline_date_${id}`) ?? '').trim()
-      return [
-        id,
-        { kind, date: kind === 'typed' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null },
-      ]
+      const typed = String(formData.get(`timeline_date_${id}`) ?? '').trim()
+      const date = kind === 'typed' && /^\d{4}-\d{2}-\d{2}$/.test(typed) ? typed : null
+      const was = formData.get(`timeline_was_${id}`)
+      if (was !== null && String(was) === (kind === 'typed' ? `typed:${date ?? ''}` : kind)) return []
+      return [[id, { kind, date }]]
     }),
   )
 }
@@ -158,8 +160,9 @@ export async function updateLineItemAction(formData: FormData): Promise<void> {
   const reserveAccountId = String(formData.get('reserve_account') ?? '')
   if (!reserveAccountId) fail('Pick the account it is saved in.')
 
-  // The question is only on the form for a part that already repeats; a
-  // part that starts repeating with this save gets the default for one.
+  // Every part is asked "Saving since" (D36); an answer left as it was is
+  // not passed on, so a part that starts repeating with this save gets the
+  // default for one.
   const choice = formData.get('timeline_shown') ? readTimelineChoices(formData)[lineItemId] : undefined
 
   try {

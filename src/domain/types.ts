@@ -66,8 +66,9 @@ export interface Package {
  * and the elapsed share is offered as an opening instead (D8). 'typed' (D33)
  * is another day a person gives, held in `timelineStartDate`, for a
  * household that has been setting money aside for a bill since some other
- * day than either of those. A one-off is always 'commit'; it has no last
- * time, and it states what it already holds as an opening.
+ * day than either of those. A one-off (D36) is 'commit' or 'typed': it has
+ * no last time it came round, so it starts the day the plan started (or the
+ * day it was added) unless a person gives an earlier day.
  */
 export type TimelineStart = 'last_occurrence' | 'commit' | 'typed'
 
@@ -99,11 +100,12 @@ export function timelineChoiceOf(
 export type TimelineStartRecord = TimelineStart | { kind: 'typed'; date: CivilDate }
 
 /**
- * Whether a choice of where a timeline starts can be kept on a part (D33),
- * and the plain words when it cannot. A one-off is always 'commit' with no
- * day: it has no last time, and states what it holds as an opening. A day
- * given must be on or before today and before the day the part is needed;
- * any other kind carries no day.
+ * Whether a choice of where a timeline starts can be kept on a part (D33,
+ * D36), and the plain words when it cannot. A one-off has no last time it
+ * came round: asked for one, it starts where the plan does, which is a
+ * definition and not refused. A day given, on any part, must be on or
+ * before today and before the day the part is needed; any other kind
+ * carries no day.
  */
 export function resolveTimelineStart(args: {
   recurrence: Recurrence | null
@@ -113,8 +115,10 @@ export function resolveTimelineStart(args: {
 }):
   | { ok: true; timelineStart: TimelineStart; timelineStartDate: CivilDate | null }
   | { ok: false; problem: string } {
-  if (!args.recurrence) return { ok: true, timelineStart: 'commit', timelineStartDate: null }
   const { timelineStart, timelineStartDate } = timelineChoiceOf(args.choice)
+  if (!args.recurrence && timelineStart === 'last_occurrence') {
+    return { ok: true, timelineStart: 'commit', timelineStartDate: null }
+  }
   if (timelineStart !== 'typed') return { ok: true, timelineStart, timelineStartDate: null }
   if (!timelineStartDate) {
     return { ok: false, problem: 'Pick the day you have been saving for this since.' }
@@ -129,6 +133,57 @@ export function resolveTimelineStart(args: {
     }
   }
   return { ok: true, timelineStart, timelineStartDate }
+}
+
+/**
+ * Where a part's timeline starts after a change to it (D30, D33, D36): the
+ * one decision for every caller that changes a part, whether a person
+ * changed this part on its own or a change to the whole plan asks the same
+ * of each of its parts. What was not said keeps what the part has; a part
+ * that starts repeating with nothing said about it gets the default for a
+ * repeating part, unless it already had a day given, which it keeps; a
+ * part that stops repeating while "the last time it came round" starts
+ * where the plan does. The result is judged against the part as it will
+ * be after the change, and says whether it moved, so a caller asking this
+ * of many parts can list which would change and which cannot take it, in
+ * the same plain words.
+ */
+export function nextTimelineStart(args: {
+  current: {
+    recurrence: Recurrence | null
+    timelineStart: TimelineStart
+    timelineStartDate: CivilDate | null
+  }
+  /** What a person said. A field left out was not said. */
+  asked?: { kind?: TimelineStart; date?: CivilDate | null }
+  /** The part's recurrence and due date as they will be after the change. */
+  recurrence: Recurrence | null
+  dueDate: CivilDate
+  today: CivilDate
+}):
+  | { ok: true; timelineStart: TimelineStart; timelineStartDate: CivilDate | null; changed: boolean }
+  | { ok: false; problem: string } {
+  const { current, asked } = args
+  const startsRepeating = current.recurrence === null && args.recurrence !== null
+  const kind =
+    asked?.kind ??
+    (startsRepeating && current.timelineStart !== 'typed'
+      ? defaultTimelineStart(args.recurrence)
+      : current.timelineStart)
+  const date = asked && 'date' in asked ? (asked.date ?? null) : current.timelineStartDate
+  const resolved = resolveTimelineStart({
+    recurrence: args.recurrence,
+    choice: { kind, date },
+    dueDate: args.dueDate,
+    today: args.today,
+  })
+  if (!resolved.ok) return resolved
+  return {
+    ...resolved,
+    changed:
+      resolved.timelineStart !== current.timelineStart ||
+      resolved.timelineStartDate !== current.timelineStartDate,
+  }
 }
 
 export function timelineStartRecord(

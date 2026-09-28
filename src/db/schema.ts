@@ -291,10 +291,12 @@ export const lineItems = pgTable(
   },
   (t) => [
     index('line_items_package_idx').on(t.packageId),
-    // A one-off has no last time it came round, so its timeline starts at commit.
+    // A one-off has no last time it came round: its timeline starts where
+    // the plan does, or on a day a person gave (D36). Compared as text, like
+    // the check below.
     check(
-      'line_items_one_off_starts_at_commit',
-      sql`${t.recurEvery} is not null or ${t.timelineStart} = 'commit'`,
+      'line_items_one_off_has_no_last_occurrence',
+      sql`${t.recurEvery} is not null or ${t.timelineStart}::text <> 'last_occurrence'`,
     ),
     // A day is given exactly when the choice is 'typed'. Compared as text so
     // the migration that adds the enum value can add this in the same

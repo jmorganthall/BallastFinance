@@ -266,8 +266,12 @@ principles, and they are non-negotiable.
 - **A part's steady line starts where the person said: "Saving since"**
   (PRD D30, rev 42; D33, rev 46; D35). `line_items.timeline_start`
   (migration 0015) is `'last_occurrence'` for a new part that comes round
-  again and `'commit'` for a one-off (a CHECK enforces the latter); the
-  column default is `'commit'`. D33 adds `'typed'` with `timeline_start_date`
+  again and `'commit'` for a one-off; the column default is `'commit'`. A
+  one-off can be given a day too (D36, migration 0017): it is `'commit'` or
+  `'typed'`, never `'last_occurrence'` (CHECK
+  `line_items_one_off_has_no_last_occurrence`, which replaced 0015's
+  one-off-is-commit CHECK); asked for a last time it never had, it starts at
+  the commit rather than being refused. D33 adds `'typed'` with `timeline_start_date`
   beside it (migration 0016; a CHECK makes the date present exactly when the
   choice is typed, written as a text comparison because the migrator applies
   every pending file in one transaction and a value `ALTER TYPE ... ADD VALUE`
@@ -279,12 +283,26 @@ principles, and they are non-negotiable.
   heading and where its chart starts) are computed, never stored. A typed day
   must be on or before today and before the due date (`resolveTimelineStart`
   in `src/domain/types.ts`, one set of plain words for the intake, the engine
-  and the forms). The setting is a fact on the part and not part of
+  and the forms). What a change to a part does to its start is one domain
+  decision, `nextTimelineStart` (what was not said keeps what the part has; a
+  part that starts repeating with nothing said gets the repeating default
+  unless it had a day given; the result says whether it `changed`), so a
+  later plan-wide change can ask it of every part and list which would move
+  and which cannot take it; do not re-derive that rule in the engine or a
+  form. Moving a one-off's start moves its own steady line, its "/wk steady"
+  and its On track / Catching up word, never an account's weekly amount,
+  status, one-time move or transfer change (invariant 6 in `position.test.ts`).
+  The setting is a fact on the part and not part of
   `LineItemSnapshot`; `updateLineItem` records a change of kind or day on a
   `line_item_changed` event with equal money snapshots and
   `timeline_start: { before, after }` beside them, each side a
-  `TimelineStartRecord`. On screen the question is "Saving since" with three
-  answers (`SavingSinceFields`, at commit and on the part's edit form).
+  `TimelineStartRecord`. On screen the question is "Saving since"
+  (`SavingSinceFields`): three answers for a repeating part, two for a
+  one-off (no last time), on every part's edit form, and at commit for the
+  repeating parts only. "The day the plan started" shows
+  `PartPosition.startedOn`, which is the day the part was added when it
+  joined a running plan. The form posts what the part had in
+  `timeline_was_<id>`, and an answer left as it was is not passed on.
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software. The trip planner's
   usual figures are a constant in `src/domain/trip.ts`, laid over by a
@@ -293,7 +311,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 687 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 697 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

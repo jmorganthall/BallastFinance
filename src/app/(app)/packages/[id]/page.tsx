@@ -385,20 +385,34 @@ export default async function PackageDetailPage({
                       </label>
                       <RecurrenceFields defaultValue={item.lineItem.recurrence} />
                     </div>
-                    {item.lineItem.recurrence !== null ? (
-                      <div className="rounded-lg bg-[var(--color-surface)] p-2">
-                        <input type="hidden" name="timeline_shown" value="1" />
-                        <SavingSinceFields
-                          lineItemId={item.lineItem.id}
-                          lastOccurrence={previousOccurrence(item.lineItem.dueDate, item.lineItem.recurrence)!}
-                          planStarted={view.package.committedAt ?? today}
-                          today={today}
-                          current={item.lineItem.timelineStart}
-                          currentDate={item.lineItem.timelineStartDate}
-                          planStartedLabel={isDraft ? 'Today, when the plan starts' : 'The day the plan started'}
-                        />
-                      </div>
-                    ) : null}
+                    {/*
+                      Every part is asked "Saving since" (D36): a one-off has
+                      no last time, so it is offered the day the plan started
+                      (or the day it was added, as the position has it) and
+                      another day.
+                    */}
+                    <div className="rounded-lg bg-[var(--color-surface)] p-2">
+                      <input type="hidden" name="timeline_shown" value="1" />
+                      <SavingSinceFields
+                        lineItemId={item.lineItem.id}
+                        lastOccurrence={
+                          item.lineItem.recurrence
+                            ? previousOccurrence(item.lineItem.dueDate, item.lineItem.recurrence)
+                            : null
+                        }
+                        planStarted={part?.startedOn.date ?? view.package.committedAt ?? today}
+                        today={today}
+                        current={item.lineItem.timelineStart}
+                        currentDate={item.lineItem.timelineStartDate}
+                        planStartedLabel={
+                          isDraft
+                            ? 'Today, when the plan starts'
+                            : part?.startedOn.reason === 'added'
+                              ? 'The day it was added to the plan'
+                              : 'The day the plan started'
+                        }
+                      />
+                    </div>
                     <label className="block text-sm font-medium">
                       Save it in
                       <select

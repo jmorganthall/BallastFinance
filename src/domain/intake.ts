@@ -80,10 +80,11 @@ const intakeLineItemSchema = z.object({
    * Where the part's money timeline begins (PRD D30). Additive: a producer
    * that does not send it gets the default -- from the last time it came
    * round for a part that repeats, from the commit for a one-off. A one-off
-   * is always 'commit' whatever is sent, because it has no last time; that
-   * is a definition, not a guess, so it is not refused. 'typed' (D33) names
-   * the day in `timeline_start_date`, which is refused when it is missing,
-   * after today, or not before the due date.
+   * sent 'last_occurrence' starts at the commit, because it has no last
+   * time; that is a definition, not a guess, so it is not refused. 'typed'
+   * (D33, and on a one-off D36) names the day in `timeline_start_date`,
+   * which is refused when it is missing, after today, or not before the due
+   * date.
    */
   timeline_start: z.enum(['last_occurrence', 'commit', 'typed']).optional(),
   timeline_start_date: z.string().optional(),
@@ -252,11 +253,12 @@ export function validateIntake(raw: unknown, context: IntakeContext): IntakeResu
       })
     }
 
-    // Where the timeline starts (D30, D33): a one-off is 'commit' by
-    // definition; a day given is checked against today and the due date.
+    // Where the timeline starts (D30, D33, D36): a one-off has no last time,
+    // so it is 'commit' unless a day is given; a day given is checked
+    // against today and the due date.
     let timelineStart: TimelineStart = 'commit'
     let timelineStartDate: CivilDate | null = null
-    if (dueDate && item.recurrence) {
+    if (dueDate) {
       const kind = item.timeline_start ?? defaultTimelineStart(item.recurrence)
       let given: CivilDate | null = null
       let wellFormed = true
