@@ -505,6 +505,124 @@ describeDb('editing plans and debts', () => {
     })
   })
 
+  describe('"Saving since" is a day a person can see and change (PRD D33)', () => {
+    let packageId: string
+    let insuranceId: string
+    let gutterId: string
+
+    it('commits with a day given: the base runs from it, the heading and the chart start there, and no opening is offered', async () => {
+      pin('2026-09-26')
+      const created = await engine.createPackageFromIntake({
+        contract_version: INTAKE_CONTRACT_VERSION,
+        package: { name: 'Saving since a day' },
+        line_items: [
+          { label: 'Home insurance', unit_amount: '1200', due_date: '2026-11-15', reserve_account: accountId, recurrence: { every: 1, unit: 'year' } },
+          { label: 'Gutter clean', unit_amount: '300', due_date: '2026-11-15', reserve_account: accountId },
+        ],
+      })
+      if (!created.ok) throw new Error(JSON.stringify(created.problems))
+      packageId = created.packageId
+      const items = (await engine.listLineItems()).filter((i) => i.packageId === packageId)
+      insuranceId = items.find((i) => i.label === 'Home insurance')!.id
+      gutterId = items.find((i) => i.label === 'Gutter clean')!.id
+
+      const choice = { [insuranceId]: { kind: 'typed' as const, date: '2026-03-15' } }
+      expect(await engine.suggestedOpenings(packageId, { timelineStartByLineItem: choice })).toEqual([])
+      await engine.commitPackage(packageId, { openingCents: 10000, timelineStartByLineItem: choice })
+
+      const view = (await engine.packageViews()).find((v) => v.package.id === packageId)!
+      const insurance = view.items.find((i) => i.lineItem.id === insuranceId)!
+      expect(insurance.lineItem.timelineStart).toBe('typed')
+      expect(insurance.lineItem.timelineStartDate).toBe('2026-03-15')
+      expect(insurance.components.map((c) => [c.kind, c.startDate, c.endDate])).toEqual([['base', '2026-03-15', '2026-11-15']])
+      expect(insurance.savingSince).toEqual({ date: '2026-03-15', reason: { kind: 'typed' }, chosenDate: null })
+      expect(insurance.paceSince).toBe('2026-03-15')
+      expect(insurance.shouldHaveSavedCents).toBe(insurance.paceCents)
+      // The $100 typed at commit went to the one-off, as under D30.
+      expect(view.items.find((i) => i.lineItem.id === gutterId)!.shouldHaveSavedCents).toBe(10000)
+      // The plan is headed by the earliest day any part runs from, and the chart starts there too.
+      expect(view.savingSince).toBe('2026-03-15')
+      const curve = (await engine.packageCurve(packageId))!
+      expect(curve.from).toBe('2026-03-15')
+      expect(curve.points[0]!.date).toBe('2026-03-15')
+    })
+
+    it('refuses a day after today or not before the due date, and a typed choice with no day, in plain words', async () => {
+      await expect(
+        engine.updateLineItem(insuranceId, { timelineStart: 'typed', timelineStartDate: '2026-09-27' }),
+      ).rejects.toThrow('The day you have been saving since cannot be after today.')
+      await expect(
+        engine.updateLineItem(insuranceId, { timelineStart: 'typed', timelineStartDate: null }),
+      ).rejects.toThrow('Pick the day you have been saving for this since.')
+      await expect(
+        engine.updateLineItem(insuranceId, { dueDate: '2026-03-15' }),
+      ).rejects.toThrow('The day you have been saving since has to be before the day it is needed.')
+    })
+
+    it('changing the day is a line_item_changed event with equal money snapshots and the day in timeline_start', async () => {
+      const changesBefore = (await engine.listLineItemChanges()).filter((c) => c.lineItemId === insuranceId).length
+      await engine.updateLineItem(insuranceId, { timelineStartDate: '2026-01-10' })
+      const item = (await engine.packageViews())
+        .find((v) => v.package.id === packageId)!
+        .items.find((i) => i.lineItem.id === insuranceId)!
+      expect(item.components[0]!.startDate).toBe('2026-01-10')
+      const changes = (await engine.listLineItemChanges()).filter((c) => c.lineItemId === insuranceId)
+      expect(changes).toHaveLength(changesBefore + 1)
+      expect(changes.at(-1)!.before).toEqual(changes.at(-1)!.after)
+      const mine = (await eventsOfKind('line_item_changed')).filter(
+        (e) => (e.payload as { line_item_id: string }).line_item_id === insuranceId,
+      )
+      expect(mine.at(-1)!.payload).toMatchObject({
+        timeline_start: { before: { kind: 'typed', date: '2026-03-15' }, after: { kind: 'typed', date: '2026-01-10' } },
+      })
+
+      // Back to the last occurrence: the day is cleared, and the record reads as D30 wrote it.
+      await engine.updateLineItem(insuranceId, { timelineStart: 'last_occurrence' })
+      const back = (await engine.listLineItems()).find((i) => i.id === insuranceId)!
+      expect(back.timelineStart).toBe('last_occurrence')
+      expect(back.timelineStartDate).toBeNull()
+      const last = (await eventsOfKind('line_item_changed'))
+        .filter((e) => (e.payload as { line_item_id: string }).line_item_id === insuranceId)
+        .at(-1)!
+      expect(last.payload).toMatchObject({
+        timeline_start: { before: { kind: 'typed', date: '2026-01-10' }, after: 'last_occurrence' },
+      })
+    })
+
+    it('leaves a day given inert on a counted cycle, and the view says why', async () => {
+      await engine.updateLineItem(insuranceId, { timelineStart: 'typed', timelineStartDate: '2026-03-15' })
+      await engine.recordOpeningBalances([{ lineItemId: insuranceId, openingCents: 90000 }])
+      const item = (await engine.packageViews())
+        .find((v) => v.package.id === packageId)!
+        .items.find((i) => i.lineItem.id === insuranceId)!
+      expect(item.components.map((c) => [c.kind, c.startDate])).toEqual([
+        ['opening', '2026-09-26'],
+        ['base', '2026-09-26'],
+      ])
+      expect(item.shouldHaveSavedCents).toBe(90000)
+      expect(item.savingSince).toEqual({ date: '2026-09-26', reason: { kind: 'opened', on: '2026-09-26' }, chosenDate: '2026-03-15' })
+      expect(item.lineItem.timelineStartDate).toBe('2026-03-15')
+    })
+
+    it('keeps a one-off at the commit with no day, and the database refuses a typed choice without one', async () => {
+      await engine.updateLineItem(gutterId, { timelineStart: 'typed', timelineStartDate: '2026-03-15' })
+      const gutter = (await engine.listLineItems()).find((i) => i.id === gutterId)!
+      expect([gutter.timelineStart, gutter.timelineStartDate]).toEqual(['commit', null])
+
+      const failure = await db
+        .update(schema.lineItems)
+        .set({ timelineStart: 'typed', timelineStartDate: null })
+        .where(eq(schema.lineItems.id, insuranceId))
+        .then(
+          () => null,
+          (error: unknown) => error as { message: string; cause?: { constraint_name?: string } },
+        )
+      expect(failure).not.toBeNull()
+      expect(failure!.cause?.constraint_name ?? failure!.message).toMatch(/line_items_typed_start_has_date/)
+      pin('2026-09-19')
+    })
+  })
+
   describe('counting toward a plan on the day it was committed', () => {
     it('takes the counted figure over the same-day commit opening', async () => {
       // The spreadsheet import commits every plan with its "reserved now"

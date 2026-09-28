@@ -84,7 +84,11 @@ import {
   type LineItemSnapshot,
   type Recurrence,
   type TimelineStart,
+  type TimelineStartChoice,
   defaultTimelineStart,
+  resolveTimelineStart,
+  timelineChoiceOf,
+  timelineStartRecord,
   type Package,
   type PackageView,
   type AccountScope,
@@ -535,6 +539,7 @@ export class Engine {
             recurEvery: item.recurrence?.every ?? null,
             recurUnit: item.recurrence?.unit ?? null,
             timelineStart: item.timelineStart,
+            timelineStartDate: item.timelineStartDate,
             state: 'planned' as const,
           })),
         )
@@ -560,9 +565,10 @@ export class Engine {
    * counts the elapsed share of its cycle, so a single declared opening is
    * shared only across the parts that start at the commit; the money is real
    * either way, and what those parts do not count shows as extra at the next
-   * check-in. When every part starts at its last occurrence the opening is
-   * shared across all of them, and each then runs from the commit (see
-   * `componentsForLineItem`): a stated balance is where a timeline begins.
+   * check-in. When every part starts at its last occurrence or at a day a
+   * person gave (D33) the opening is shared across all of them, and each
+   * then runs from the commit (see `componentsForLineItem`): a stated
+   * balance is where a timeline begins.
    */
   async commitPackage(
     packageId: Id,
@@ -576,10 +582,12 @@ export class Engine {
        */
       openingByLineItem?: Readonly<Record<Id, Cents>>
       /**
-       * Where each part's timeline starts, as the commit form had it. A part
-       * not named keeps what it has; a one-off is always 'commit'.
+       * Where each part's timeline starts, as the commit form had it: a kind,
+       * or a kind with the day when it is 'typed' (D33). A part not named
+       * keeps what it has; a one-off is always 'commit'. A day that is after
+       * today or not before the due date refuses the commit.
        */
-      timelineStartByLineItem?: Readonly<Record<Id, TimelineStart>>
+      timelineStartByLineItem?: Readonly<Record<Id, TimelineStart | TimelineStartChoice>>
     } = {},
   ): Promise<void> {
     const today = this.today()
@@ -606,15 +614,28 @@ export class Engine {
       const starts = options.timelineStartByLineItem ?? {}
       const items = planned.map((item) => {
         const wanted = starts[item.id]
-        const timelineStart: TimelineStart =
-          item.recurEvery === null ? 'commit' : (wanted ?? item.timelineStart)
-        return { ...item, timelineStart }
+        const resolved = resolveTimelineStart({
+          recurrence: recurrenceOf(item.recurEvery, item.recurUnit),
+          choice: wanted ?? { kind: item.timelineStart, date: item.timelineStartDate },
+          dueDate: item.dueDate as CivilDate,
+          today,
+        })
+        if (!resolved.ok) throw new EngineError(`${item.label}: ${resolved.problem}`)
+        return {
+          ...item,
+          timelineStart: resolved.timelineStart,
+          timelineStartDate: resolved.timelineStartDate,
+        }
       })
       for (const [index, item] of items.entries()) {
-        if (item.timelineStart !== planned[index]!.timelineStart) {
+        const was = planned[index]!
+        if (
+          item.timelineStart !== was.timelineStart ||
+          item.timelineStartDate !== was.timelineStartDate
+        ) {
           await tx
             .update(lineItemsTable)
-            .set({ timelineStart: item.timelineStart })
+            .set({ timelineStart: item.timelineStart, timelineStartDate: item.timelineStartDate })
             .where(eq(lineItemsTable.id, item.id))
         }
       }
@@ -680,10 +701,11 @@ export class Engine {
     options: {
       /**
        * Where each part's timeline would start, as the commit form has it
-       * right now. A part starting at its last occurrence gets no offer
-       * (D30); one starting at the commit gets the D8 figure.
+       * right now. A part starting at its last occurrence or at a day a
+       * person gave gets no offer (D30, D33); one starting at the commit
+       * gets the D8 figure.
        */
-      timelineStartByLineItem?: Readonly<Record<Id, TimelineStart>>
+      timelineStartByLineItem?: Readonly<Record<Id, TimelineStart | TimelineStartChoice>>
     } = {},
   ): Promise<{ lineItemId: Id; label: string; lastOccurrence: CivilDate; cents: Cents }[]> {
     const today = this.today()
@@ -707,7 +729,10 @@ export class Engine {
         dueDate: item.dueDate,
         recurrence: item.recurrence,
         today,
-        timelineStart: options.timelineStartByLineItem?.[item.id] ?? item.timelineStart,
+        timelineStart: (() => {
+          const wanted = options.timelineStartByLineItem?.[item.id]
+          return wanted ? timelineChoiceOf(wanted).timelineStart : item.timelineStart
+        })(),
         transferWeekday,
       })
       return suggestion
@@ -836,13 +861,26 @@ export class Engine {
    * append-only event, and it is that event the accrual math reads to build the
    * catch-up component (PRD §3, §5). Writing the row without the event would
    * silently erase the reason a weekly number changed.
+   *
+   * Where the timeline starts (D30, D33) is recorded on the same event as
+   * `timeline_start: { before, after }`, each side a `TimelineStartRecord`:
+   * the bare kind for 'last_occurrence' and 'commit', exactly as D30 wrote
+   * it, and `{ kind: 'typed', date }` for a day a person gave, so a log from
+   * before D33 reads unchanged and a typed day is never lost from the log.
    */
   async updateLineItem(
     lineItemId: Id,
     patch: Partial<
       Pick<
         LineItem,
-        'label' | 'unitAmountCents' | 'quantity' | 'dueDate' | 'reserveAccountId' | 'recurrence' | 'timelineStart'
+        | 'label'
+        | 'unitAmountCents'
+        | 'quantity'
+        | 'dueDate'
+        | 'reserveAccountId'
+        | 'recurrence'
+        | 'timelineStart'
+        | 'timelineStartDate'
       >
     >,
   ): Promise<void> {
@@ -876,17 +914,30 @@ export class Engine {
         reserveAccountId: patch.reserveAccountId ?? before.reserveAccountId,
       }
 
-      // Where the timeline starts (D30) follows the recurrence: a one-off is
-      // always 'commit'; a part that starts repeating with nothing said gets
-      // the default for a repeating part; otherwise what was asked, or what
-      // it had.
-      const { recurrence, timelineStart: askedStart, ...columns } = patch
+      // Where the timeline starts (D30, D33) follows the recurrence: a one-off
+      // is always 'commit'; a part that starts repeating with nothing said
+      // gets the default for a repeating part; otherwise what was asked, or
+      // what it had. A day given is checked against today and the due date
+      // as it will be after this save; any other kind clears the day.
+      const { recurrence, timelineStart: askedStart, timelineStartDate: askedDate, ...columns } = patch
       const recurrenceAfter =
         'recurrence' in patch ? (recurrence ?? null) : recurrenceOf(row.recurEvery, row.recurUnit)
-      const timelineStartAfter: TimelineStart = !recurrenceAfter
-        ? 'commit'
-        : (askedStart ??
-          (row.recurEvery === null ? defaultTimelineStart(recurrenceAfter) : row.timelineStart))
+      const kindAsked: TimelineStart =
+        askedStart ??
+        (row.recurEvery === null && recurrenceAfter
+          ? defaultTimelineStart(recurrenceAfter)
+          : row.timelineStart)
+      const resolved = resolveTimelineStart({
+        recurrence: recurrenceAfter,
+        choice: {
+          kind: kindAsked,
+          date: 'timelineStartDate' in patch ? (askedDate ?? null) : row.timelineStartDate,
+        },
+        dueDate: after.dueDate,
+        today,
+      })
+      if (!resolved.ok) throw new EngineError(resolved.problem)
+      const { timelineStart: timelineStartAfter, timelineStartDate: timelineDateAfter } = resolved
       await tx
         .update(lineItemsTable)
         .set({
@@ -895,6 +946,7 @@ export class Engine {
             ? { recurEvery: recurrence?.every ?? null, recurUnit: recurrence?.unit ?? null }
             : {}),
           timelineStart: timelineStartAfter,
+          timelineStartDate: timelineDateAfter,
         })
         .where(eq(lineItemsTable.id, lineItemId))
 
@@ -903,13 +955,14 @@ export class Engine {
         before.quantity !== after.quantity ||
         before.dueDate !== after.dueDate ||
         before.reserveAccountId !== after.reserveAccountId
-      const movesTimeline = timelineStartAfter !== row.timelineStart
+      const movesTimeline =
+        timelineStartAfter !== row.timelineStart || timelineDateAfter !== row.timelineStartDate
 
       // A label-only edit is not a plan change and must not create a component.
-      // A timeline toggle moves the weekly number without moving money: the
+      // A timeline change moves the weekly number without moving money: the
       // snapshots stay equal (a zero delta, so no component -- the math reads
-      // the part's current setting over the whole cycle), and the toggle is
-      // written beside them so the log still explains the change.
+      // the part's current setting over the whole cycle), and the change is
+      // written beside them so the log still explains it.
       if (movesMoney || movesTimeline) {
         await tx.insert(events).values({
           householdId: this.householdId,
@@ -921,7 +974,12 @@ export class Engine {
             before,
             after,
             ...(movesTimeline
-              ? { timeline_start: { before: row.timelineStart, after: timelineStartAfter } }
+              ? {
+                  timeline_start: {
+                    before: timelineStartRecord(row.timelineStart, row.timelineStartDate),
+                    after: timelineStartRecord(timelineStartAfter, timelineDateAfter),
+                  },
+                }
               : {}),
           },
         })
@@ -945,6 +1003,8 @@ export class Engine {
       recurrence?: Recurrence | null
       /** Where its timeline starts (D30). Absent: the default for its recurrence. */
       timelineStart?: TimelineStart
+      /** The day, when `timelineStart` is 'typed' (D33). */
+      timelineStartDate?: CivilDate | null
     },
   ): Promise<Id> {
     const today = this.today()
@@ -968,6 +1028,17 @@ export class Engine {
       const dueDate = rollToFuture(item.dueDate, recurrence, today)
       if (dueDate <= today) throw new EngineError('The date has to be ahead of us')
 
+      const start = resolveTimelineStart({
+        recurrence,
+        choice: {
+          kind: item.timelineStart ?? defaultTimelineStart(recurrence),
+          date: item.timelineStartDate ?? null,
+        },
+        dueDate,
+        today,
+      })
+      if (!start.ok) throw new EngineError(start.problem)
+
       const [row] = await tx
         .insert(lineItemsTable)
         .values({
@@ -980,7 +1051,8 @@ export class Engine {
           reserveAccountId: item.reserveAccountId,
           recurEvery: recurrence?.every ?? null,
           recurUnit: recurrence?.unit ?? null,
-          timelineStart: recurrence ? (item.timelineStart ?? defaultTimelineStart(recurrence)) : 'commit',
+          timelineStart: start.timelineStart,
+          timelineStartDate: start.timelineStartDate,
           state: pkg.state === 'active' ? 'accruing' : 'planned',
         })
         .returning({ id: lineItemsTable.id })
@@ -1274,7 +1346,11 @@ export class Engine {
     const live = view.items.filter((i) => i.lineItem.state !== 'retired')
     if (live.length === 0) return null
 
-    const from = view.package.committedAt ?? view.package.createdAt
+    // The curve starts where the plan's money timeline does (D33): the
+    // earliest day any part runs from, the same date the heading shows. A
+    // plan whose parts start at their last occurrence did not begin at the
+    // commit, and a chart that started there would hide the elapsed share.
+    const from = view.savingSince ?? view.package.committedAt ?? view.package.createdAt
     const to = live.map((i) => i.lineItem.dueDate).sort().at(-1)!
     const targetCents = view.totalCents
 
@@ -4655,5 +4731,6 @@ function toLineItem(r: typeof lineItemsTable.$inferSelect): LineItem {
     state: r.state,
     recurrence: recurrenceOf(r.recurEvery, r.recurUnit),
     timelineStart: r.timelineStart,
+    timelineStartDate: (r.timelineStartDate as CivilDate | null) ?? null,
   }
 }

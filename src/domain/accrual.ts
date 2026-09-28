@@ -4,8 +4,9 @@
  * Model (D2): a line item's savings plan is a set of rate COMPONENTS, each
  * running over its own window. At commit one `base` component spreads the whole
  * amount to the due date -- from the commit date for a one-off, and by default
- * from the last time it came round for a part that repeats (D30), so the
- * money timeline and the pace are one line. Every later edit leaves existing
+ * from the last time it came round for a part that repeats (D30), or from a
+ * day a person gave (D33), so the money timeline and the pace are one line.
+ * Every later edit leaves existing
  * components untouched and adds one `catch_up` component covering only the delta,
  * spread from the edit date to the due date. That is what keeps the ongoing
  * transfer stable and makes every adjustment visible and dated, rather than
@@ -166,6 +167,11 @@ function snapshotTotal(s: LineItemSnapshot): Cents {
  *
  *   - a one-off, or a part set to 'commit': the cycle start -- the commit,
  *     the day it was added, or the day it was confirmed spent and rolled.
+ *   - a part set to 'typed' whose cycle opens at $0: the day the person gave
+ *     (D33), when that is before the cycle start, at total ÷ the weeks from
+ *     there to the due date. A day on or after the cycle start is read as
+ *     the cycle start; the setting stays on the part, inert until a cycle
+ *     it can apply to.
  *   - a part set to 'last_occurrence' whose cycle opens at $0: the last time
  *     it came round, when that is before the cycle start. Should-have-saved
  *     on the commit day is then the elapsed share of the cycle, exactly what
@@ -205,30 +211,7 @@ export function componentsForLineItem(args: {
 }): RateComponent[] {
   const { lineItem } = args
   const transferWeekday = args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
-  const commitDate = args.cycleStartDate
-    ? maxDate(args.commitDate, args.cycleStartDate)
-    : args.commitDate
-
-  const changes = [...(args.changes ?? [])]
-    .filter((c) => c.lineItemId === lineItem.id)
-    // Edits made during a settled cycle are history, not part of this plan.
-    .filter((c) => compareDates(c.occurredAt, commitDate) >= 0)
-    .sort((a, b) => compareDates(a.occurredAt, b.occurredAt))
-
-  // State at commit is the state before the first edit, or the current state if none.
-  const first = changes[0]
-  const atCommit: LineItemSnapshot = first
-    ? first.before
-    : {
-        unitAmountCents: lineItem.unitAmountCents,
-        quantity: lineItem.quantity,
-        dueDate: lineItem.dueDate,
-        reserveAccountId: lineItem.reserveAccountId,
-      }
-
-  // An opening balance cannot exceed what the item costs; the surplus is the
-  // account's business, not this line item's.
-  const openingCents = Math.max(0, Math.min(args.openingCents ?? 0, snapshotTotal(atCommit)))
+  const { commitDate, changes, atCommit, openingCents } = cycleFrame(args)
 
   const components: RateComponent[] = []
 
@@ -251,6 +234,7 @@ export function componentsForLineItem(args: {
       reserveAccountId: atCommit.reserveAccountId,
       startDate: baseStartDate({
         timelineStart: lineItem.timelineStart,
+        timelineStartDate: lineItem.timelineStartDate,
         recurrence: lineItem.recurrence,
         dueDate: atCommit.dueDate,
         cycleStartDate: commitDate,
@@ -298,12 +282,63 @@ export function componentsForLineItem(args: {
 }
 
 /**
- * Where a part's base component starts (PRD D30; the rules are spelled out on
- * `componentsForLineItem`). One definition, so the label a screen puts on the
- * component and the arithmetic behind it can never disagree.
+ * The cycle a part's components are built in: its start, the edits that fall
+ * inside it, the part as it stood when the cycle began, and the money it
+ * opened with. One reading of the facts, shared by `componentsForLineItem`
+ * and `savingSinceForLineItem`, so the date a screen names is the date the
+ * arithmetic ran from.
+ */
+function cycleFrame(args: {
+  lineItem: LineItem
+  commitDate: CivilDate
+  changes?: readonly LineItemChange[]
+  cycleStartDate?: CivilDate
+  openingCents?: Cents
+}): {
+  commitDate: CivilDate
+  changes: LineItemChange[]
+  atCommit: LineItemSnapshot
+  openingCents: Cents
+} {
+  const { lineItem } = args
+  const commitDate = args.cycleStartDate
+    ? maxDate(args.commitDate, args.cycleStartDate)
+    : args.commitDate
+
+  const changes = [...(args.changes ?? [])]
+    .filter((c) => c.lineItemId === lineItem.id)
+    // Edits made during a settled cycle are history, not part of this plan.
+    .filter((c) => compareDates(c.occurredAt, commitDate) >= 0)
+    .sort((a, b) => compareDates(a.occurredAt, b.occurredAt))
+
+  // State at commit is the state before the first edit, or the current state if none.
+  const first = changes[0]
+  const atCommit: LineItemSnapshot = first
+    ? first.before
+    : {
+        unitAmountCents: lineItem.unitAmountCents,
+        quantity: lineItem.quantity,
+        dueDate: lineItem.dueDate,
+        reserveAccountId: lineItem.reserveAccountId,
+      }
+
+  // An opening balance cannot exceed what the item costs; the surplus is the
+  // account's business, not this line item's.
+  const openingCents = Math.max(0, Math.min(args.openingCents ?? 0, snapshotTotal(atCommit)))
+
+  return { commitDate, changes, atCommit, openingCents }
+}
+
+/**
+ * Where a part's base component starts (PRD D30, D33; the rules are spelled
+ * out on `componentsForLineItem`). One definition, so the label a screen puts
+ * on the component and the arithmetic behind it can never disagree. The
+ * reason behind the date is `savingSince`, which this reads.
  */
 export function baseStartDate(args: {
   timelineStart: TimelineStart
+  /** The day a person gave (D33); read only under 'typed'. */
+  timelineStartDate?: CivilDate | null
   recurrence: Recurrence | null
   dueDate: CivilDate
   /** The cycle's own start: the commit, an add, a roll or a count. */
@@ -311,12 +346,129 @@ export function baseStartDate(args: {
   cycleOrigin?: CycleOrigin
   openingCents?: Cents
 }): CivilDate {
-  if (args.timelineStart !== 'last_occurrence') return args.cycleStartDate
-  if ((args.openingCents ?? 0) > 0) return args.cycleStartDate
-  if (args.cycleOrigin === 'rolled' || args.cycleOrigin === 'counted') return args.cycleStartDate
-  const last = previousOccurrence(args.dueDate, args.recurrence)
-  if (!last || compareDates(last, args.cycleStartDate) >= 0) return args.cycleStartDate
-  return last
+  return savingSince(args).date
+}
+
+/**
+ * Why a part's timeline runs from the day it does. The words for each are in
+ * `savingSinceWords`; a screen shows those and never works the reason out.
+ */
+export type SavingSinceReason =
+  /** The last time the part came round (D30's default). */
+  | { kind: 'last_occurrence' }
+  /** The day the plan started: the commit. */
+  | { kind: 'commit' }
+  /** The day the part was added to a plan that was already live. */
+  | { kind: 'added'; on: CivilDate }
+  /** The day the person gave (D33). */
+  | { kind: 'typed' }
+  /** A check-in or a reshuffle counted money toward the part that day. */
+  | { kind: 'counted'; on: CivilDate }
+  /** The part was confirmed spent that day and started over. */
+  | { kind: 'spent'; on: CivilDate }
+  /** The cycle opened with money stated that day: an opening at commit, a sheet's "reserved now". */
+  | { kind: 'opened'; on: CivilDate }
+
+export interface SavingSince {
+  /** The day the base component runs from: the fact behind "Saving since". */
+  date: CivilDate
+  reason: SavingSinceReason
+  /**
+   * The day the part's setting names -- its last occurrence, or the day the
+   * person gave -- when that is not the day it runs from: a cycle that a
+   * count, a roll or money began runs from the cycle date whatever the
+   * setting, and a day given on or after the cycle start is read as the
+   * cycle start. Null when the setting names no day, or names this one.
+   */
+  chosenDate: CivilDate | null
+}
+
+/**
+ * The day a part's timeline runs from and why (PRD D33). One definition:
+ * `baseStartDate` reads the date from here, so what the screen says and
+ * what the arithmetic did are the same decision.
+ */
+export function savingSince(args: {
+  timelineStart: TimelineStart
+  timelineStartDate?: CivilDate | null
+  recurrence: Recurrence | null
+  dueDate: CivilDate
+  cycleStartDate: CivilDate
+  cycleOrigin?: CycleOrigin
+  openingCents?: Cents
+}): SavingSince {
+  const cycle = args.cycleStartDate
+  // What the setting names, whether or not this cycle can run from it.
+  const named: CivilDate | null =
+    args.timelineStart === 'last_occurrence'
+      ? previousOccurrence(args.dueDate, args.recurrence)
+      : args.timelineStart === 'typed'
+        ? (args.timelineStartDate ?? null)
+        : null
+  const chosenDate = named && named !== cycle ? named : null
+  const fromCycle = (reason: SavingSinceReason): SavingSince => ({ date: cycle, reason, chosenDate })
+
+  if (args.timelineStart !== 'commit' && (args.openingCents ?? 0) > 0) {
+    return fromCycle({ kind: 'opened', on: cycle })
+  }
+  if (args.cycleOrigin === 'rolled') return fromCycle({ kind: 'spent', on: cycle })
+  if (args.cycleOrigin === 'counted') return fromCycle({ kind: 'counted', on: cycle })
+  if (!named || compareDates(named, cycle) >= 0) {
+    return fromCycle(args.cycleOrigin === 'added' ? { kind: 'added', on: cycle } : { kind: 'commit' })
+  }
+  return { date: named, reason: { kind: args.timelineStart as 'last_occurrence' | 'typed' }, chosenDate: null }
+}
+
+/**
+ * `savingSince` for a line item as the views see it: the cycle it is in, the
+ * edits inside it and the money it opened with, read exactly as
+ * `componentsForLineItem` reads them.
+ */
+export function savingSinceForLineItem(args: {
+  lineItem: LineItem
+  commitDate: CivilDate
+  changes?: readonly LineItemChange[]
+  cycleStartDate?: CivilDate
+  cycleOrigin?: CycleOrigin
+  openingCents?: Cents
+}): SavingSince {
+  const { commitDate, atCommit, openingCents } = cycleFrame(args)
+  return savingSince({
+    timelineStart: args.lineItem.timelineStart,
+    timelineStartDate: args.lineItem.timelineStartDate,
+    recurrence: args.lineItem.recurrence,
+    dueDate: atCommit.dueDate,
+    cycleStartDate: commitDate,
+    cycleOrigin: args.cycleOrigin,
+    openingCents,
+  })
+}
+
+/**
+ * The reason in plain words (PRD §9), to follow "Saving since <date>". The
+ * date inside a reason is formatted by the caller's `formatDate`, so the
+ * domain does not choose a locale.
+ */
+export function savingSinceWords(
+  reason: SavingSinceReason,
+  formatDate: (d: CivilDate) => string = (d) => d,
+): string {
+  switch (reason.kind) {
+    case 'last_occurrence':
+      return 'the last time this came round'
+    case 'commit':
+      return 'the day the plan started'
+    case 'added':
+      return `the day it was added to the plan, ${formatDate(reason.on)}`
+    case 'typed':
+      return 'the day you gave'
+    case 'counted':
+      return `this cycle began when it was counted on ${formatDate(reason.on)}`
+    case 'spent':
+      return `this cycle began when it was confirmed spent on ${formatDate(reason.on)}`
+    case 'opened':
+      return `this cycle opened with money on ${formatDate(reason.on)}`
+  }
 }
 
 export function driftAdjustmentComponent(
@@ -550,7 +702,8 @@ export function evenPaceCents(args: {
  * It is a suggestion, never an assertion: the money is only there if the
  * household says it is, so nothing here writes anything. Returns null when
  * there is nothing to suggest -- a one-off, a cycle that has not started, or
- * a part whose timeline already starts at its last occurrence (D30): its
+ * a part whose timeline already starts at its last occurrence (D30) or at a
+ * day a person gave (D33): its
  * should-hold carries the elapsed share by itself, and an opening on such a
  * part is only money genuinely set aside, which nobody should be told.
  */
@@ -563,7 +716,9 @@ export function openingSinceLastOccurrence(args: {
   timelineStart?: TimelineStart
   transferWeekday?: Weekday
 }): { lastOccurrence: CivilDate; cents: Cents } | null {
-  if (args.timelineStart === 'last_occurrence') return null
+  // Under 'last_occurrence' or 'typed' (D30, D33) should-hold already carries
+  // the elapsed share; only a part starting at the commit is offered one.
+  if (args.timelineStart && args.timelineStart !== 'commit') return null
   const last = previousOccurrence(args.dueDate, args.recurrence)
   if (!last) return null
   // The cycle has not begun: there is no elapsed time to have saved over.

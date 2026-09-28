@@ -16,6 +16,7 @@ import {
   type Recurrence,
   type ThemePark,
   type TimelineStart,
+  type TimelineStartChoice,
   type TripPark,
 } from '@/domain'
 
@@ -63,48 +64,65 @@ export async function createPackageAction(
 }
 
 /**
- * Where each repeating part's timeline starts, as the commit or edit form
- * posted it (PRD D30). A checkbox that is off posts nothing, so the form also
- * names every part it showed the box for; a part it did not show keeps its
- * setting.
+ * "Saving since" for each repeating part, as the commit or edit form posted
+ * it (PRD D30, D33): one question with three answers -- the last time it
+ * came round, the day the plan started, or another day, typed. The form
+ * names every part it asked (`timeline_part`), and for each posts
+ * `timeline_start_<id>` and, under "another day", `timeline_date_<id>`. A
+ * part the form did not ask about keeps its setting. Nothing is checked
+ * here beyond the shape: the engine judges the day against today and the
+ * due date, in plain words.
  */
-function readTimelineStarts(formData: FormData): Record<string, TimelineStart> {
+function readTimelineChoices(formData: FormData): Record<string, TimelineStartChoice> {
   const shown = formData.getAll('timeline_part').map(String)
-  const ticked = new Set(formData.getAll('timeline_from_last').map(String))
-  return Object.fromEntries(shown.map((id) => [id, ticked.has(id) ? 'last_occurrence' : 'commit']))
+  const kinds: readonly TimelineStart[] = ['last_occurrence', 'commit', 'typed']
+  return Object.fromEntries(
+    shown.map((id) => {
+      const posted = String(formData.get(`timeline_start_${id}`) ?? '')
+      const kind = kinds.find((k) => k === posted) ?? 'last_occurrence'
+      const date = String(formData.get(`timeline_date_${id}`) ?? '').trim()
+      return [
+        id,
+        { kind, date: kind === 'typed' && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null },
+      ]
+    }),
+  )
 }
 
 /** Commit, with the one optional number: how much is already set aside (PRD §5). */
 export async function commitPackageAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const { parseAmountOrNull } = await import('@/domain')
+  const { EngineError } = await import('@/server/engine')
   const packageId = String(formData.get('package_id'))
-  const timelineStartByLineItem = readTimelineStarts(formData)
+  const timelineStartByLineItem = readTimelineChoices(formData)
+  const fail = (message: string): never =>
+    redirect(`/packages/${packageId}?error=${encodeURIComponent(message)}`)
 
-  // Taking the offer recomputes it here rather than believing the form: the
-  // figure decides a weekly number, so it comes from the same place the screen
-  // got it, not from whatever was posted back. Only a part starting today is
-  // offered anything; one starting at its last occurrence already counts it.
-  if (formData.get('use_suggested')) {
-    const suggested = await engine.suggestedOpenings(packageId, { timelineStartByLineItem })
-    await engine.commitPackage(packageId, {
-      openingByLineItem: Object.fromEntries(suggested.map((s) => [s.lineItemId, s.cents])),
-      timelineStartByLineItem,
-    })
-    revalidatePath('/')
-    revalidatePath('/packages')
-    revalidatePath(`/packages/${packageId}`)
-    return
+  try {
+    // Taking the offer recomputes it here rather than believing the form: the
+    // figure decides a weekly number, so it comes from the same place the screen
+    // got it, not from whatever was posted back. Only a part starting today is
+    // offered anything; one starting at its last occurrence, or at a day the
+    // person gave, already counts it.
+    if (formData.get('use_suggested')) {
+      const suggested = await engine.suggestedOpenings(packageId, { timelineStartByLineItem })
+      await engine.commitPackage(packageId, {
+        openingByLineItem: Object.fromEntries(suggested.map((s) => [s.lineItemId, s.cents])),
+        timelineStartByLineItem,
+      })
+    } else {
+      const raw = String(formData.get('opening') ?? '').trim()
+      const openingCents = raw === '' ? 0 : parseAmountOrNull(raw)
+      if (openingCents === null || openingCents < 0) {
+        fail('Enter what is already set aside as an amount, like 250, or leave it blank.')
+      }
+      await engine.commitPackage(packageId, { openingCents: openingCents!, timelineStartByLineItem })
+    }
+  } catch (error) {
+    if (error instanceof EngineError) fail(error.message)
+    throw error
   }
-
-  const raw = String(formData.get('opening') ?? '').trim()
-  const openingCents = raw === '' ? 0 : parseAmountOrNull(raw)
-  if (openingCents === null || openingCents < 0) {
-    redirect(
-      `/packages/${packageId}?error=${encodeURIComponent('Enter what is already set aside as an amount, like 250, or leave it blank.')}`,
-    )
-  }
-  await engine.commitPackage(packageId, { openingCents: openingCents!, timelineStartByLineItem })
   revalidatePath('/')
   revalidatePath('/packages')
   revalidatePath(`/packages/${packageId}`)
@@ -140,11 +158,9 @@ export async function updateLineItemAction(formData: FormData): Promise<void> {
   const reserveAccountId = String(formData.get('reserve_account') ?? '')
   if (!reserveAccountId) fail('Pick the account it is saved in.')
 
-  // The box is only on the form for a part that already repeats; a part
-  // that starts repeating with this save gets the default for one.
-  const timelineStart = formData.get('timeline_shown')
-    ? readTimelineStarts(formData)[lineItemId]
-    : undefined
+  // The question is only on the form for a part that already repeats; a
+  // part that starts repeating with this save gets the default for one.
+  const choice = formData.get('timeline_shown') ? readTimelineChoices(formData)[lineItemId] : undefined
 
   try {
     await engine.updateLineItem(lineItemId, {
@@ -154,7 +170,7 @@ export async function updateLineItemAction(formData: FormData): Promise<void> {
       dueDate,
       reserveAccountId,
       recurrence: readRecurrence(formData),
-      ...(timelineStart ? { timelineStart } : {}),
+      ...(choice ? { timelineStart: choice.kind, timelineStartDate: choice.date ?? null } : {}),
     })
   } catch (error) {
     if (error instanceof EngineError) fail(error.message)

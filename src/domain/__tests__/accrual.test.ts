@@ -11,13 +11,18 @@ import {
   type RateComponent,
   openingSinceLastOccurrence,
   evenPaceCents,
+  baseStartDate,
+  savingSince,
+  savingSinceWords,
 } from '../accrual'
 import {
   DEFAULT_TRANSFER_WEEKDAY,
+  accrualWeeksBetween,
   transferWeeksBetween,
   type CivilDate,
   type Weekday,
 } from '../dates'
+import { resolveTimelineStart, timelineStartRecord } from '../types'
 import type { LineItem, LineItemChange, LineItemSnapshot } from '../types'
 import { lineItemTotalCents } from '../types'
 
@@ -37,6 +42,7 @@ function item(over: Partial<LineItem> = {}): LineItem {
     state: 'accruing',
     recurrence: null,
     timelineStart: 'commit',
+    timelineStartDate: null,
     ...over,
   }
 }
@@ -443,6 +449,202 @@ describe('a repeating part starts its timeline at its last occurrence (PRD D30)'
   })
 })
 
+describe('"Saving since" is a day a person can give (PRD D33)', () => {
+  // The same $1,200 a year, next due 15 Nov 2026, committed 26 Sep 2026.
+  const TODAY: CivilDate = '2026-09-26'
+  const NOV: CivilDate = '2026-11-15'
+  const LAST: CivilDate = '2025-11-15'
+  const yearly = (timelineStartDate: CivilDate | null, timelineStart: LineItem['timelineStart'] = 'typed') =>
+    item({
+      unitAmountCents: 120000,
+      dueDate: NOV,
+      recurrence: { every: 1, unit: 'year' },
+      timelineStart,
+      timelineStartDate,
+    })
+  const steady = componentRatePerWeekCents(
+    componentsForLineItem({ lineItem: yearly(null, 'last_occurrence'), commitDate: TODAY })[0]!,
+  )
+
+  it('runs the base from the day given at total ÷ the weeks between, so should-hold is the elapsed share from that day', () => {
+    const GIVEN: CivilDate = '2026-03-15'
+    const [base, ...rest] = componentsForLineItem({ lineItem: yearly(GIVEN), commitDate: TODAY })
+    expect(rest).toHaveLength(0)
+    expect(base!.startDate).toBe(GIVEN)
+    expect(base!.endDate).toBe(NOV)
+    expect(base!.weeks).toBe(accrualWeeksBetween(GIVEN, NOV))
+    expect(shouldHaveSavedForItem([base!], TODAY, 120000)).toBe(
+      evenPaceCents({ totalCents: 120000, fromDate: GIVEN, dueDate: NOV, today: TODAY }),
+    )
+    expect(deliveredByDueDate([base!], NOV)).toBe(120000)
+  })
+
+  it('a day earlier than the last occurrence lowers the weekly figure; a later one raises it', () => {
+    const earlier = componentsForLineItem({ lineItem: yearly('2025-06-15'), commitDate: TODAY })
+    const later = componentsForLineItem({ lineItem: yearly('2026-03-15'), commitDate: TODAY })
+    expect(weeklyBreakdown(earlier, TODAY).totalPerWeekCents).toBeLessThan(steady)
+    expect(weeklyBreakdown(later, TODAY).totalPerWeekCents).toBeGreaterThan(steady)
+    // And the earlier day already accounts for more of the total.
+    expect(shouldHaveSavedForItem(earlier, TODAY, 120000)).toBeGreaterThan(
+      shouldHaveSavedForItem(later, TODAY, 120000),
+    )
+  })
+
+  it('is inert on a cycle a count, a roll or money began: such a cycle runs from the cycle date', () => {
+    const GIVEN: CivilDate = '2026-03-15'
+    for (const cycle of [
+      { cycleStartDate: TODAY, cycleOrigin: 'counted' as const, openingCents: 0 },
+      { cycleStartDate: TODAY, cycleOrigin: 'rolled' as const, openingCents: 0 },
+      { cycleStartDate: TODAY, cycleOrigin: 'commit' as const, openingCents: 50000 },
+    ]) {
+      const components = componentsForLineItem({ lineItem: yearly(GIVEN), commitDate: TODAY, ...cycle })
+      const base = components.find((c) => c.kind === 'base')!
+      expect(base.startDate, JSON.stringify(cycle)).toBe(TODAY)
+      expect(deliveredByDueDate(components, NOV)).toBe(120000)
+    }
+  })
+
+  it('reads a day on or after the cycle start as the cycle start', () => {
+    const [base] = componentsForLineItem({
+      lineItem: yearly('2026-10-03'),
+      commitDate: TODAY,
+      cycleStartDate: '2026-10-01',
+      cycleOrigin: 'added',
+    })
+    expect(base!.startDate).toBe('2026-10-01')
+    expect(
+      baseStartDate({
+        timelineStart: 'typed',
+        timelineStartDate: TODAY,
+        recurrence: { every: 1, unit: 'year' },
+        dueDate: NOV,
+        cycleStartDate: TODAY,
+      }),
+    ).toBe(TODAY)
+  })
+
+  it('offers no opening for a part that starts at a day given, like one at its last occurrence', () => {
+    expect(
+      openingSinceLastOccurrence({
+        totalCents: 120000,
+        dueDate: NOV,
+        recurrence: { every: 1, unit: 'year' },
+        today: TODAY,
+        timelineStart: 'typed',
+      }),
+    ).toBeNull()
+  })
+
+  describe('the date and the reason a screen shows are one decision', () => {
+    const args = { recurrence: { every: 1, unit: 'year' } as const, dueDate: NOV, cycleStartDate: TODAY }
+
+    it('names the last occurrence, the plan start, or the day given', () => {
+      expect(savingSince({ ...args, timelineStart: 'last_occurrence' })).toEqual({
+        date: LAST,
+        reason: { kind: 'last_occurrence' },
+        chosenDate: null,
+      })
+      expect(savingSince({ ...args, timelineStart: 'commit' })).toEqual({
+        date: TODAY,
+        reason: { kind: 'commit' },
+        chosenDate: null,
+      })
+      expect(savingSince({ ...args, timelineStart: 'typed', timelineStartDate: '2026-03-15' })).toEqual({
+        date: '2026-03-15',
+        reason: { kind: 'typed' },
+        chosenDate: null,
+      })
+    })
+
+    it('says why a cycle runs from its own date, and keeps the day the setting named beside it', () => {
+      expect(
+        savingSince({ ...args, timelineStart: 'typed', timelineStartDate: '2026-03-15', cycleOrigin: 'counted' }),
+      ).toEqual({ date: TODAY, reason: { kind: 'counted', on: TODAY }, chosenDate: '2026-03-15' })
+      expect(
+        savingSince({ ...args, timelineStart: 'last_occurrence', cycleOrigin: 'rolled' }),
+      ).toEqual({ date: TODAY, reason: { kind: 'spent', on: TODAY }, chosenDate: LAST })
+      expect(
+        savingSince({ ...args, timelineStart: 'last_occurrence', openingCents: 1 }),
+      ).toEqual({ date: TODAY, reason: { kind: 'opened', on: TODAY }, chosenDate: LAST })
+      // A day given on or after the cycle start: the cycle start, and the reason says which.
+      expect(
+        savingSince({ ...args, timelineStart: 'typed', timelineStartDate: '2026-10-01', cycleStartDate: '2026-09-30', cycleOrigin: 'added' }),
+      ).toEqual({ date: '2026-09-30', reason: { kind: 'added', on: '2026-09-30' }, chosenDate: '2026-10-01' })
+      // A one-off names no day.
+      expect(savingSince({ ...args, recurrence: null, timelineStart: 'commit', openingCents: 5 })).toEqual({
+        date: TODAY,
+        reason: { kind: 'commit' },
+        chosenDate: null,
+      })
+    })
+
+    it('always agrees with baseStartDate', () => {
+      for (const timelineStart of ['last_occurrence', 'commit', 'typed'] as const) {
+        for (const cycleOrigin of ['commit', 'added', 'rolled', 'counted'] as const) {
+          for (const openingCents of [0, 100]) {
+            const full = { ...args, timelineStart, timelineStartDate: '2026-01-10', cycleOrigin, openingCents }
+            expect(savingSince(full).date).toBe(baseStartDate(full))
+          }
+        }
+      }
+    })
+
+    it('puts the reason in plain words', () => {
+      const f = (d: CivilDate) => `<${d}>`
+      expect(savingSinceWords({ kind: 'last_occurrence' })).toBe('the last time this came round')
+      expect(savingSinceWords({ kind: 'commit' })).toBe('the day the plan started')
+      expect(savingSinceWords({ kind: 'typed' })).toBe('the day you gave')
+      expect(savingSinceWords({ kind: 'counted', on: TODAY }, f)).toBe(`this cycle began when it was counted on <${TODAY}>`)
+      expect(savingSinceWords({ kind: 'spent', on: TODAY }, f)).toBe(`this cycle began when it was confirmed spent on <${TODAY}>`)
+      expect(savingSinceWords({ kind: 'opened', on: TODAY }, f)).toBe(`this cycle opened with money on <${TODAY}>`)
+      expect(savingSinceWords({ kind: 'added', on: TODAY }, f)).toBe(`the day it was added to the plan, <${TODAY}>`)
+    })
+  })
+
+  describe('what a choice may be', () => {
+    const recurrence = { every: 1, unit: 'year' } as const
+
+    it('keeps a day on or before today and before the due date, and clears the day under any other kind', () => {
+      expect(
+        resolveTimelineStart({ recurrence, choice: { kind: 'typed', date: '2026-03-15' }, dueDate: NOV, today: TODAY }),
+      ).toEqual({ ok: true, timelineStart: 'typed', timelineStartDate: '2026-03-15' })
+      expect(
+        resolveTimelineStart({ recurrence, choice: { kind: 'typed', date: TODAY }, dueDate: NOV, today: TODAY }),
+      ).toEqual({ ok: true, timelineStart: 'typed', timelineStartDate: TODAY })
+      expect(
+        resolveTimelineStart({ recurrence, choice: { kind: 'last_occurrence', date: '2026-03-15' }, dueDate: NOV, today: TODAY }),
+      ).toEqual({ ok: true, timelineStart: 'last_occurrence', timelineStartDate: null })
+      expect(resolveTimelineStart({ recurrence, choice: 'commit', dueDate: NOV, today: TODAY })).toEqual({
+        ok: true,
+        timelineStart: 'commit',
+        timelineStartDate: null,
+      })
+    })
+
+    it('refuses a missing day, a day after today, or a day not before the due date, in plain words', () => {
+      const refused = (choice: { kind: 'typed'; date: CivilDate | null }) =>
+        resolveTimelineStart({ recurrence, choice, dueDate: NOV, today: TODAY })
+      expect(refused({ kind: 'typed', date: null })).toEqual({ ok: false, problem: 'Pick the day you have been saving for this since.' })
+      expect(refused({ kind: 'typed', date: '2026-09-27' })).toEqual({ ok: false, problem: 'The day you have been saving since cannot be after today.' })
+      expect(
+        resolveTimelineStart({ recurrence, choice: { kind: 'typed', date: '2026-09-20' }, dueDate: '2026-09-20', today: '2026-09-26' }),
+      ).toEqual({ ok: false, problem: 'The day you have been saving since has to be before the day it is needed.' })
+    })
+
+    it('makes a one-off start at the commit whatever was asked', () => {
+      expect(
+        resolveTimelineStart({ recurrence: null, choice: { kind: 'typed', date: '2026-03-15' }, dueDate: NOV, today: TODAY }),
+      ).toEqual({ ok: true, timelineStart: 'commit', timelineStartDate: null })
+    })
+
+    it('records the D30 kinds as before and a day given with its date', () => {
+      expect(timelineStartRecord('last_occurrence', null)).toBe('last_occurrence')
+      expect(timelineStartRecord('commit', null)).toBe('commit')
+      expect(timelineStartRecord('typed', '2026-03-15')).toEqual({ kind: 'typed', date: '2026-03-15' })
+    })
+  })
+})
+
 describe('invariant: components always deliver exactly the total by the due date', () => {
   // A small deterministic PRNG so a failure is reproducible.
   function rng(seed: number) {
@@ -471,13 +673,24 @@ describe('invariant: components always deliver exactly the total by the due date
         reserveAccountId: ACCOUNT,
       }
       // Half the trials repeat, on any interval; those start at the last
-      // occurrence or the commit at random, and half of them sit in a cycle
-      // that a spend, an add or a count began, with or without money.
+      // occurrence, the commit, or a day a person gave (D33) at random --
+      // any day up to two years before the commit, and sometimes after it --
+      // and half of them sit in a cycle that a spend, an add or a count
+      // began, with or without money.
       const recurrence =
         random() < 0.5
           ? null
           : { every: 1 + Math.floor(random() * 12), unit: UNITS[Math.floor(random() * UNITS.length)]! }
-      const timelineStart = !recurrence ? 'commit' : random() < 0.5 ? 'last_occurrence' : 'commit'
+      const startDraw = random()
+      const timelineStart = !recurrence
+        ? 'commit'
+        : startDraw < 1 / 3
+          ? 'last_occurrence'
+          : startDraw < 2 / 3
+            ? 'commit'
+            : 'typed'
+      const timelineStartDate =
+        timelineStart === 'typed' ? addDaysUTC(COMMIT, Math.floor(random() * 760) - 730) : null
       const cycleDraw = [random(), random(), random(), random()] as const
 
       const changes: LineItemChange[] = []
@@ -523,6 +736,7 @@ describe('invariant: components always deliver exactly the total by the due date
         dueDate: current.dueDate,
         recurrence,
         timelineStart,
+        timelineStartDate,
       })
       const components = componentsForLineItem({
         lineItem: finalItem,
@@ -534,7 +748,7 @@ describe('invariant: components always deliver exactly the total by the due date
 
       expect(
         deliveredByDueDate(components, current.dueDate, transferWeekday),
-        `trial ${trial}: ${JSON.stringify({ transferWeekday, changes, final: current, recurrence, timelineStart, cycle })}`,
+        `trial ${trial}: ${JSON.stringify({ transferWeekday, changes, final: current, recurrence, timelineStart, timelineStartDate, cycle })}`,
       ).toBe(lineItemTotalCents(finalItem))
 
       // Every component's week count is the transfer count of its own window

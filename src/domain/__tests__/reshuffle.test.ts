@@ -45,6 +45,7 @@ function li(over: Partial<LineItem> & Pick<LineItem, 'id' | 'label' | 'unitAmoun
     state: 'accruing',
     recurrence: null,
     timelineStart: 'commit',
+    timelineStartDate: null,
     ...over,
   }
 }

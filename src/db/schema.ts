@@ -54,8 +54,8 @@ export const accountScopeEnum = pgEnum('account_scope', ['household', 'individua
  * inspection every 2 years is as ordinary as an annual one.
  */
 export const recurrenceUnitEnum = pgEnum('recurrence_unit', ['day', 'week', 'month', 'year'])
-/** Where a part's money timeline begins (PRD D30). */
-export const timelineStartEnum = pgEnum('timeline_start', ['last_occurrence', 'commit'])
+/** Where a part's money timeline begins (PRD D30; 'typed' names a day, D33). */
+export const timelineStartEnum = pgEnum('timeline_start', ['last_occurrence', 'commit', 'typed'])
 
 export const debtCategoryEnum = pgEnum('debt_category', ['consumer', 'auto', 'mortgage'])
 export const debtStateEnum = pgEnum('debt_state', ['open', 'paid_off'])
@@ -283,6 +283,11 @@ export const lineItems = pgTable(
      * a part that comes round again unless told otherwise.
      */
     timelineStart: timelineStartEnum('timeline_start').notNull().default('commit'),
+    /**
+     * The day a person gave (D33): present exactly when `timeline_start` is
+     * 'typed'. A fact; the timeline that runs from it is derived.
+     */
+    timelineStartDate: date('timeline_start_date'),
   },
   (t) => [
     index('line_items_package_idx').on(t.packageId),
@@ -290,6 +295,14 @@ export const lineItems = pgTable(
     check(
       'line_items_one_off_starts_at_commit',
       sql`${t.recurEvery} is not null or ${t.timelineStart} = 'commit'`,
+    ),
+    // A day is given exactly when the choice is 'typed'. Compared as text so
+    // the migration that adds the enum value can add this in the same
+    // transaction: a value added by ALTER TYPE cannot be used as the enum
+    // until that transaction commits, and the migrator runs in one.
+    check(
+      'line_items_typed_start_has_date',
+      sql`(${t.timelineStartDate} is not null) = (${t.timelineStart}::text = 'typed')`,
     ),
     // An interval is both halves or neither. Half of one -- a number with no
     // unit -- has no meaning, and the roll-forward would silently do nothing.
