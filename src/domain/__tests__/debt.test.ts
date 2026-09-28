@@ -5,7 +5,9 @@ import {
   DebtDataError,
   DEFAULT_PROMO_LEAD_WEEKS,
   effectiveAprBasisPoints,
+  idleDebtsOf,
   interestOverNextYearCents,
+  isOwing,
   minimumPaymentCents,
   projectPayoff,
   promoExpiryWarning,
@@ -261,6 +263,39 @@ describe('scoring', () => {
 
   it('copes with an empty inventory', () => {
     expect(scoreDebts({ debts: [], today: TODAY })).toEqual([])
+  })
+})
+
+describe('idle debts: nothing owed, outside the payoff order, never gone', () => {
+  const debts = [
+    debt({ id: 'owing', name: 'Visa' }),
+    debt({ id: 'new-at-zero', name: 'Store card', balanceCents: 0 }),
+    debt({ id: 'paid-off', name: 'Car loan', category: 'auto', balanceCents: 0, state: 'paid_off' }),
+    debt({ id: 'heloc', name: 'Home equity line', balanceCents: 0, creditLimitCents: 5000000 }),
+  ]
+
+  it('owes only when open with a balance above zero', () => {
+    expect(debts.map((d) => [d.id, isOwing(d)])).toEqual([
+      ['owing', true],
+      ['new-at-zero', false],
+      ['paid-off', false],
+      ['heloc', false],
+    ])
+  })
+
+  it('lists a card added at $0 and a debt paid off, by name', () => {
+    expect(idleDebtsOf(debts).map((d) => d.id)).toEqual(['paid-off', 'heloc', 'new-at-zero'])
+  })
+
+  it('puts every debt in exactly one place: the payoff order or the idle list', () => {
+    const ranked = scoreDebts({ debts, today: TODAY }).map((s) => s.debt.id)
+    const idle = idleDebtsOf(debts).map((d) => d.id)
+    expect(ranked.filter((id) => idle.includes(id))).toEqual([])
+    expect([...ranked, ...idle].sort()).toEqual(debts.map((d) => d.id).sort())
+  })
+
+  it('is empty when everything is owing', () => {
+    expect(idleDebtsOf([debt({ id: 'a', name: 'A' })])).toEqual([])
   })
 })
 

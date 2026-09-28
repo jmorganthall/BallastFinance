@@ -333,6 +333,25 @@ export function promoExpiryWarning(
   }
 }
 
+/**
+ * Whether a debt is in the payoff order: open, with something owed. The one
+ * definition, read by the ranking and the lump-sum optimizer alike, so a debt
+ * is never ranked by one and ignored by the other.
+ */
+export function isOwing(debt: Pick<Debt, 'state' | 'balanceCents'>): boolean {
+  return debt.state === 'open' && debt.balanceCents > 0
+}
+
+/**
+ * Everything outside the payoff order, by name: a card paid down to nothing,
+ * a line of credit added at $0. Idle, not gone -- the screen lists them on
+ * their own, and one is back in the order the day a balance is typed in.
+ * Together with the ladder this is every debt, each exactly once.
+ */
+export function idleDebtsOf(debts: readonly Debt[]): Debt[] {
+  return debts.filter((d) => !isOwing(d)).sort((a, b) => a.name.localeCompare(b.name))
+}
+
 export interface DebtScore {
   debt: Debt
   effectiveAprBasisPoints: number
@@ -362,7 +381,7 @@ export function scoreDebts(args: {
 }): DebtScore[] {
   const weight = args.weight ?? DEFAULT_PRIORITY_WEIGHT
   const leadWeeks = args.promoLeadWeeks ?? DEFAULT_PROMO_LEAD_WEEKS
-  const open = args.debts.filter((d) => d.state === 'open' && d.balanceCents > 0)
+  const open = args.debts.filter(isOwing)
   if (open.length === 0) return []
 
   const rows = open.map((debt) => ({

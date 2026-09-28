@@ -56,6 +56,7 @@ import {
   DEFAULT_BUFFER_CENTS,
   DEFAULT_PRIORITY_WEIGHT,
   DEFAULT_PROMO_LEAD_WEEKS,
+  idleDebtsOf,
   INTAKE_CONTRACT_VERSION,
   optimiseLumpSum,
   planAllocation,
@@ -2357,6 +2358,11 @@ export class Engine {
       this.promoLeadWeeks(),
     ])
     return snowballLadder(scoreDebts({ debts, today: this.today(), weight, promoLeadWeeks }))
+  }
+
+  /** The debts outside the payoff order: nothing owed on them right now. */
+  async idleDebts(): Promise<Debt[]> {
+    return idleDebtsOf(await this.listDebts())
   }
 
   /** Where a specific amount should go (PRD §7). */

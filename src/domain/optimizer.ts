@@ -32,6 +32,7 @@ import {
   DEFAULT_PROMO_LEAD_WEEKS,
   effectiveAprBasisPoints,
   interestOverNextYearCents,
+  isOwing,
   monthlyPaymentCents,
   projectPayoff,
   promoCliff,
@@ -121,7 +122,7 @@ export function optimiseLumpSum(args: {
 }): OptimizerResult {
   const weight = args.weight ?? DEFAULT_PRIORITY_WEIGHT
   const leadWeeks = args.promoLeadWeeks ?? DEFAULT_PROMO_LEAD_WEEKS
-  const open = args.debts.filter((d) => d.state === 'open' && d.balanceCents > 0)
+  const open = args.debts.filter(isOwing)
 
   const empty: OptimizerResult = {
     amountCents: args.amountCents,

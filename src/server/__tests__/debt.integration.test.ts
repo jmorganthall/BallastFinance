@@ -166,6 +166,28 @@ describeDb('debts, the ladder and the optimizer', () => {
     expect(after.state).toBe('paid_off')
   })
 
+  it('keeps a debt with nothing owed on the idle list, and a typed balance puts it back in the order', async () => {
+    // Paid off above: out of the ladder, but not gone.
+    expect((await engine.idleDebts()).map((d) => d.name)).toEqual(['Car loan', 'Store card'])
+
+    const spare = await engine.createDebt({
+      name: 'Spare card',
+      category: 'consumer',
+      balanceCents: 0,
+      aprBasisPoints: 2749,
+      minPaymentRule: { type: 'percent_with_floor', basisPoints: 200, floorCents: 2500 },
+      creditLimitCents: 800000,
+    })
+    expect((await engine.idleDebts()).map((d) => d.id)).toContain(spare.id)
+    expect((await engine.debtLadder()).map((r) => r.debt.id)).not.toContain(spare.id)
+
+    await engine.updateDebtBalance({ debtId: spare.id, balanceCents: 25000 })
+    expect((await engine.idleDebts()).map((d) => d.id)).not.toContain(spare.id)
+    expect((await engine.debtLadder()).map((r) => r.debt.id)).toContain(spare.id)
+
+    await engine.removeDebt(spare.id)
+  })
+
   it('records every payment in the append-only log', async () => {
     const rows = (
       await db.select().from(schema.events).where(eq(schema.events.kind, 'payment_confirmed'))

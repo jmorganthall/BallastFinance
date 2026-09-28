@@ -109,6 +109,13 @@ principles, and they are non-negotiable.
   picture. An `individual` account can only be renamed, funded, or
   balance-confirmed by its owner (`canWriteAccount` in `src/domain/types.ts`).
   There is deliberately no `canReadAccount`.
+- **A debt with nothing owed is idle, not gone.** `isOwing` in
+  `src/domain/debt.ts` is the one test for being in the payoff order (the
+  ranking and the lump-sum optimizer both read it); `idleDebtsOf` is every
+  other debt, and the Debts screen lists those in their own table, "Idle cards
+  or lines of credit", with the same balance, terms and remove controls, so a
+  paid-off card can take a new balance. Never build a list of debts from the
+  ladder alone: a $0 debt would vanish with nowhere to edit it.
 - **Home and car values are typed, never fetched** (PRD §15, D13). Zillow and
   KBB do not license their values to an app like this. The mortgage rate is the
   one outbound data call (`src/server/market-rate.ts`, FRED's public CSV), and
@@ -290,7 +297,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 763 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 768 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
