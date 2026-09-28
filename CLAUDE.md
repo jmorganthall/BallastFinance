@@ -87,6 +87,23 @@ principles, and they are non-negotiable.
   for ranking only; never project with a blended rate.
 - **Nothing is done until a human confirms it.** An issued instruction the user
   ignored must never change a weekly number or a balance.
+- **A move marked done is money the account holds until the next count**
+  (PRD D34, rev 47). "Done" on a one-time move records `instruction_confirmed`
+  as before, and from then until a `balance_confirmed` for that account is
+  recorded *after* it the move is carried as held: `OpenCommitments.doneMoves`
+  (signed, at the confirmed amount) beside `pendingMoves`, and
+  `committedAfter` adds them, so a done move no longer vanishes from
+  "behind" and "ahead" until someone counts again. Which moves came after the
+  last count is the order the events were recorded (`recorded_at`, then id),
+  answered by `Engine.doneMovesSinceCount`; `doneMoveOf` decides whether a
+  confirmation is a move on the ledger (a catch-up move or a move-out, never
+  a share-out, a cover, a transfer change or a bump), and `likelyBalanceCents`
+  is last count plus the moves, an offer shown in the box and never stored.
+  This week asks "Update what these accounts hold" once nothing is left to
+  do, through the ordinary `confirmBalancesAction` (with `back=home`); the
+  check-in screen shows the same hint and fill. The to-do sentence comes from
+  `instructionSentenceParts`, which marks the account the money goes to, and
+  the screen sets it in bold and the accent colour.
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
   picture. An `individual` account can only be renamed, funded, or
@@ -273,7 +290,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 761 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 763 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
