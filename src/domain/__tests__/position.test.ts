@@ -334,6 +334,56 @@ describe('money today', () => {
   })
 })
 
+describe('a repeating part past its due date is still owed in full until it is spent', () => {
+  // Yearly $1,200 due Tuesday 1 Sep, counted at the whole amount the day
+  // before, $25 every Friday. Nobody has answered "Did this get spent?".
+  const bill = li({ id: 'insurance', unitAmountCents: 120000, dueDate: '2026-09-01', recurrence: yearly, timelineStart: 'last_occurrence' })
+  const facts = (over: Partial<PositionInput> = {}) =>
+    input({
+      lineItems: [bill],
+      counts: [{ accountId: gifts.id, amountCents: 120000, on: '2026-08-31' }],
+      transfers: [{ accountId: gifts.id, perWeekCents: 2500, confirmedOn: '2026-08-31' }],
+      ...over,
+    })
+
+  it('four weeks on, it goes out today, saved for and counted in full', () => {
+    const a = position(facts()).accounts[0]!
+    expect(a.parts[0]).toMatchObject({
+      isOverdue: true,
+      outflowDate: TODAY,
+      savedForCents: 120000,
+      countedCents: 120000,
+    })
+    // The count plus four Fridays in (Aug 31, Sep 28] at $25.
+    expect(a.money.totalCents).toBe(130000)
+    expect(a.status).toBe('on_track')
+  })
+
+  it('eight months on, the same: the next cycle never takes its money', () => {
+    const a = position(facts({ today: '2027-05-03' })).accounts[0]!
+    expect(a.parts[0]).toMatchObject({
+      isOverdue: true,
+      outflowDate: '2027-05-03',
+      savedForCents: 120000,
+      countedCents: 120000,
+    })
+    // Thirty-five Fridays in (Aug 31, May 3] at $25 on top of the count.
+    expect(a.money.totalCents).toBe(207500)
+  })
+
+  it('an account holding less than the whole amount is Short today', () => {
+    const a = position(
+      facts({ counts: [{ accountId: gifts.id, amountCents: 100000, on: '2026-08-31' }] }),
+    ).accounts[0]!
+    expect(a.status).toBe('short')
+    // Short today by at least the $100 of the bill that is not there:
+    // 100,000 + 4 × 2,500 against the 120,000 still owed. (Step 3 also asks
+    // for the next round's share so far; that is not what this pins.)
+    expect(a.short!.on).toBe(TODAY)
+    expect(a.short!.byCents).toBeGreaterThanOrEqual(10000)
+  })
+})
+
 describe('the to-dos', () => {
   const base = input({
     lineItems: [li({ id: 'roof' })],
