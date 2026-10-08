@@ -10,8 +10,10 @@
  *
  * Two kinds of short, both figures the app already stands behind:
  *
- *   - A plan is short when the account holds less than its plans say it
- *     should by now (the check-in's "behind").
+ *   - A plan is short when its account needs a one-time move: money the
+ *     weekly transfer cannot put there in time for something due soon
+ *     (the one position's move, D35). A gap the transfer can close is a
+ *     transfer change, not a shortfall, so it never takes spare money.
  *   - A debt is short when a promotional-rate balance cannot be cleared by
  *     the monthly payments (what the household actually pays, else the
  *     minimum) before the rate ends -- the same test the ladder uses to
@@ -25,7 +27,7 @@
 import type { CivilDate } from './dates'
 import { formatCents, type Cents } from './money'
 import type { Id } from './types'
-import { computeDrift, type AccountView } from './rollup'
+import type { AccountPosition } from './position'
 import { promoCliff, type Debt } from './debt'
 
 const percent = (basisPoints: number) => (basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
@@ -49,7 +51,7 @@ export interface TopUp {
 }
 
 export function findShortfalls(args: {
-  accounts: readonly { view: AccountView; confirmedCents: Cents | null }[]
+  accounts: readonly Pick<AccountPosition, 'account' | 'oneTimeMove' | 'money'>[]
   debts: readonly Debt[]
   today: CivilDate
 }): Shortfall[] {
@@ -68,16 +70,14 @@ export function findShortfalls(args: {
   debts.sort((a, b) => b.shortCents - a.shortCents)
 
   const plans: Shortfall[] = []
-  for (const { view, confirmedCents } of args.accounts) {
-    if (confirmedCents === null || view.items.length === 0) continue
-    const drift = computeDrift({ account: view, confirmedCents })
-    if (drift.driftCents >= 0) continue
+  for (const a of args.accounts) {
+    if (!a.oneTimeMove) continue
     plans.push({
       kind: 'plan',
-      targetId: view.account.id,
-      label: view.account.name,
-      shortCents: -drift.driftCents,
-      reason: `Holds ${formatCents(confirmedCents)}, and its plans say it should hold ${formatCents(view.shouldHaveSavedCents)} by now.`,
+      targetId: a.account.id,
+      label: a.account.name,
+      shortCents: a.oneTimeMove.amountCents,
+      reason: `Likely holds ${formatCents(a.money.totalCents)}, and needs ${formatCents(a.oneTimeMove.amountCents)} more by ${a.oneTimeMove.byDate}: too soon for the weekly transfer to cover.`,
     })
   }
   plans.sort((a, b) => b.shortCents - a.shortCents)

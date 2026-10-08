@@ -10,7 +10,7 @@ Claude Docs document that changes as the build teaches us things — see
 here. Read it live before making a design decision; do not trust a summary,
 including this file.
 
-## The three rules that hold the shape
+## The four rules that hold the shape
 
 Everything else is detail. These are from PRD §10 and the abstract's data-model
 principles, and they are non-negotiable.
@@ -27,12 +27,19 @@ principles, and they are non-negotiable.
    bound to one household at construction — cross-household access is not
    something a caller must remember to avoid, it is something they cannot
    express. Packages are created only through the intake contract.
+4. **Every money figure comes from the one position** (PRD D35, §5 "The one
+   position"). `position()` in `src/domain/position.ts`, read through
+   `Engine.position()`, is the only place a weekly amount, a status, what an
+   account likely holds, what a part counts, a to-do or "All caught up" is
+   worked out. A screen, the digest or a to-do that needs a figure reads it
+   from there and never re-derives it; two screens disagreeing about the same
+   account is the bug D35 exists to end.
 
 ## Layout
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35): money today, the run-forward, the level weekly amount and the one-time move, the three status words, parts counted automatically, the derived to-dos, the plan chart. `rollup.ts` only lists plans with their totals. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -61,14 +68,14 @@ principles, and they are non-negotiable.
   weeks takes the day as `transferWeekday` beside `today` (a field on an args
   object, or the last positional parameter), defaulting to Saturday only so
   pure tests can leave it out. The engine always passes the household's:
-  `DerivationInput.transferWeekday` from `derivationInput()`, and
+  `PositionInput.transferWeekday` from `positionInput()`, and
   `engine.transferWeekday()` wherever a screen or the digest calls a domain
   function directly. Nothing derived is stored, so changing the day
   re-derives every figure. The digest is sent on the transfer day:
   `DIGEST_CRON` names a time of day and `buildWeeklyDigestIfDue` skips a
-  household whose day it is not. A catch-up bump or cut ends on the n-th
-  transfer day (`nthTransferDayAfter`). Any place that still assumes Saturday
-  is a bug.
+  household whose day it is not. A bump or cut from before D35 ends on the
+  n-th transfer day (`nthTransferDayAfter`), and a stopped one is counted on
+  the household's day too. Any place that still assumes Saturday is a bug.
 - **Events are append-only**, enforced by a revoked privilege *and* a trigger
   that fires regardless of role. Never add an UPDATE or DELETE against `events`;
   record a correcting event instead.
@@ -87,22 +94,38 @@ principles, and they are non-negotiable.
   for ranking only; never project with a blended rate.
 - **Nothing is done until a human confirms it.** An issued instruction the user
   ignored must never change a weekly number or a balance.
+- **The one position (D35) is how every account is judged.** Money today is
+  the last count plus the transfers since (at the amount in force that day,
+  from the transfer after the day it was confirmed), plus moves marked done
+  since, minus spends since; never counted, it starts from the first commit
+  and its stated openings. Each account runs forward to its furthest due date
+  (and past it when the bank transfer is below the repeating parts'
+  run-rate, until the day it would run dry). The weekly amount is the
+  smallest level transfer that meets every date, never below the run-rate; a
+  date four transfers away or fewer that it cannot meet is a one-time move,
+  so the transfer never spikes. The status is judged on the transfer
+  *confirmed* at the bank (`set_weekly_transfer` confirmed), never on an ask
+  not yet done: `on_track`, `short` (with the first date) or `unconfirmed`.
+  Parts are `on_track` / `catching_up` / `short`, counted automatically
+  soonest due first up to each steady line, then up to totals; nothing is
+  counted by hand and there is no reshuffle. To-dos (`position.todos`) are
+  derived, not issued ahead: marking one done records the instruction and
+  its confirmation together (`confirmTransfer`, `confirmMoveIn`). The
+  invariants in `src/domain/__tests__/position.test.ts` pin the rest: a
+  Short account always has a Short part and a fix; lowering never makes an
+  account Short; extra never exceeds money today. There is no drift, no
+  should-hold, no catch-up bump or ease-off offer and no rate component on
+  screen any more.
 - **A move marked done is money the account holds until the next count**
-  (PRD D34, rev 47). "Done" on a one-time move records `instruction_confirmed`
-  as before, and from then until a `balance_confirmed` for that account is
-  recorded *after* it the move is carried as held: `OpenCommitments.doneMoves`
-  (signed, at the confirmed amount) beside `pendingMoves`, and
-  `committedAfter` adds them, so a done move no longer vanishes from
-  "behind" and "ahead" until someone counts again. Which moves came after the
-  last count is the order the events were recorded (`recorded_at`, then id),
-  answered by `Engine.doneMovesSinceCount`; `doneMoveOf` decides whether a
-  confirmation is a move on the ledger (a catch-up move or a move-out, never
-  a share-out, a cover, a transfer change or a bump), and `likelyBalanceCents`
-  is last count plus the moves, an offer shown in the box and never stored.
-  This week asks "Update what these accounts hold" once nothing is left to
-  do, through the ordinary `confirmBalancesAction` (with `back=home`); the
-  check-in screen shows the same hint and fill. The to-do sentence comes from
-  `instructionSentenceParts`, which marks the account the money goes to, and
+  (PRD D34, rev 47). Which moves and spends came after the last count is the
+  order the events were recorded (`recorded_at`, then id), answered by
+  `Engine.positionInput` (and `doneMovesSinceCount` for the words on This
+  week); `doneMoveOf` decides whether a confirmation is a move on the ledger
+  (any move into a reserve account or out of it since D35; never a "left
+  over" ask, a transfer change or a bump). This week asks "Update what these
+  accounts hold" once nothing is left to do, with the position's likely
+  balance in the box, through the ordinary `confirmBalancesAction` (with
+  `back=home`). The to-do sentence marks the account the money goes to, and
   the screen sets it in bold and the accent colour.
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
@@ -247,48 +270,28 @@ principles, and they are non-negotiable.
   and the date. It never touches money math and never runs on a schedule.
   Do not import it anywhere but the engine, and do not add a second caller.
   Unreachable from the sandbox: tested with a fake fetch only.
-- **A repeating part's timeline starts at its last occurrence, or at a day a
-  person gives: "Saving since"** (PRD D30, rev 42; D33, rev 46).
-  `line_items.timeline_start` (migration 0015) is `'last_occurrence'` for a
-  new part that comes round again and `'commit'` for a one-off (a CHECK
-  enforces the latter); the column default is `'commit'` so rows from
-  before D30 behave exactly as they did. D33 adds the third value `'typed'`
-  with `timeline_start_date` beside it (migration 0016; a CHECK makes the
-  date present exactly when the choice is typed, written as a text
-  comparison because the migrator applies every pending file in one
-  transaction and a value `ALTER TYPE ... ADD VALUE` adds cannot be used as
-  the enum until that commits). Under `last_occurrence` the base component
-  runs from `previousOccurrence(due)`, and under `typed` from the day given,
-  at total ÷ the weeks from there to the due date, so on the commit day
-  should-hold is already the elapsed share -- the same number as
-  `evenPaceCents` for the same window -- and the pace and the money timeline
-  agree; whether the money is there is the check-in's job, and no opening is
-  suggested under either. The rules for where a base starts live in one
-  place, `savingSince` in `src/domain/accrual.ts`, which `baseStartDate`
-  reads and which also names the reason: a cycle a spend began, a cycle a
-  check-in count or a reshuffle began, and a cycle that opens with money (an
-  opening typed at commit, a sheet's "reserved now") run from the cycle date
-  whatever the setting -- a stated balance is where a timeline begins, and
-  that is what keeps "should hold rises to match what is there" true -- and
-  a typed day on or after the cycle start is read as the cycle start, the
-  setting left on the part, inert until a cycle it can apply to.
-  `LineItemView.savingSince` (`{ date, reason, chosenDate }`, words from
-  `savingSinceWords`) and `PackageView.savingSince` (the earliest across the
-  live parts: the plan's heading, and where `packageCurve` starts the chart)
-  are computed, never stored; the screen shows them and works nothing out.
-  A typed day must be on or before today and before the due date
-  (`resolveTimelineStart` in `src/domain/types.ts`, one set of plain words
-  for the intake, the engine and the forms); a one-off is always `'commit'`
-  with no day. Like the recurrence, the setting is a fact on the part and
-  not part of `LineItemSnapshot`: the math reads the current setting over
-  the whole cycle, and `updateLineItem` records a change of kind or day on a
-  `line_item_changed` event with equal money snapshots (a zero delta, no
-  component) and `timeline_start: { before, after }` beside them, each side
-  a `TimelineStartRecord`: the bare string for the two D30 kinds, exactly as
-  D30 wrote it, and `{ kind: 'typed', date }` for a day given. On screen the
-  question is "Saving since" with three answers (`SavingSinceFields`, at
-  commit and on the part's edit form), and the pace of a typed part runs
-  from its day.
+- **A part's steady line starts where the person said: "Saving since"**
+  (PRD D30, rev 42; D33, rev 46; D35). `line_items.timeline_start`
+  (migration 0015) is `'last_occurrence'` for a new part that comes round
+  again and `'commit'` for a one-off (a CHECK enforces the latter); the
+  column default is `'commit'`. D33 adds `'typed'` with `timeline_start_date`
+  beside it (migration 0016; a CHECK makes the date present exactly when the
+  choice is typed, written as a text comparison because the migrator applies
+  every pending file in one transaction and a value `ALTER TYPE ... ADD VALUE`
+  adds cannot be used as the enum until that commits). Where the line starts
+  is `steadyLineStart` in `src/domain/position.ts`: the last occurrence, the
+  day the plan started (or the part was added), or the typed day, and the
+  spend date after a spend; a count never moves it. `PartPosition.savingSince`
+  and `PlanPosition.savingSince` (the earliest of its parts: the plan's
+  heading and where its chart starts) are computed, never stored. A typed day
+  must be on or before today and before the due date (`resolveTimelineStart`
+  in `src/domain/types.ts`, one set of plain words for the intake, the engine
+  and the forms). The setting is a fact on the part and not part of
+  `LineItemSnapshot`; `updateLineItem` records a change of kind or day on a
+  `line_item_changed` event with equal money snapshots and
+  `timeline_start: { before, after }` beside them, each side a
+  `TimelineStartRecord`. On screen the question is "Saving since" with three
+  answers (`SavingSinceFields`, at commit and on the part's edit form).
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software. The trip planner's
   usual figures are a constant in `src/domain/trip.ts`, laid over by a
@@ -297,7 +300,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 768 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 687 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
@@ -312,15 +315,20 @@ Database tests need a live PostgreSQL 16 and run against it for real — the
 acceptance criteria are about what the app produces, not what a pure function
 returns.
 
-Before changing accrual math, read the invariant test in
-`src/domain/__tests__/accrual.test.ts`: *components always deliver exactly the
-line item's total by its due date*. It is a randomised property test over
-generated edit histories, and it has already caught one real bug.
+Before changing any money figure, read the invariants in
+`src/domain/__tests__/position.test.ts` (D35). They are a randomised property
+test over generated households -- accounts, parts, counts, transfers, transfer
+days -- asserting that W is the smallest level transfer that works, that a
+Short account always has a Short part and a fix, that lowering never makes an
+account Short, and that "All caught up" means nothing is Short. They caught
+real bugs while the position was being built; run them with more seeds
+(`SEED`/`RUNS` in a scratch copy) after any change to `position.ts`.
 
 ## Plain language is a product requirement
 
 PRD §9 carries a binding dictionary: UI copy says "weekly set-aside", not
-"accrual"; "behind" and "ahead", not "drift"; "did this get spent?", not
+"accrual"; a part, plan or account is "On track", "Catching up" or "Short"
+(D35) -- never "behind" as a status, and never "drift"; "did this get spent?", not
 "close-out"; "payoff order", not "priority score". The internal vocabulary
 belongs in tooltips. If a non-technical reader needs a translation, the screen
 has failed.

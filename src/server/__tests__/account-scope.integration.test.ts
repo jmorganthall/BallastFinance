@@ -97,9 +97,10 @@ describeDb('individual vs household accounts', () => {
     expect(names).toContain("Josh's fun money")
   })
 
-  it('shows it in her derived views too', async () => {
-    const ids = (await shelby.accountViews()).map((v) => v.account.id)
+  it('shows it in her position too', async () => {
+    const ids = (await shelby.position()).accounts.map((a) => a.account.id)
     expect(ids).toContain(joshsOwnId)
+    expect(ids).toContain(sharedId)
   })
 
   it('marks it unwritable for her and writable for him', async () => {
@@ -159,6 +160,47 @@ describeDb('individual vs household accounts', () => {
     await shelby.confirmBalance({ reserveAccountId: sharedId, amountCents: 1200 })
     const latest = await shelby.latestConfirmedBalances()
     expect(latest.get(sharedId)?.amountCents).toBe(1200)
+  })
+
+  it("refuses Shelby setting the transfer or marking a move done on Josh's account", async () => {
+    await expect(
+      shelby.confirmTransfer({ reserveAccountId: joshsOwnId, perWeekCents: 1000 }),
+    ).rejects.toThrow(/belongs to someone else/)
+    await expect(
+      shelby.confirmMoveIn({ reserveAccountId: joshsOwnId, amountCents: 2500 }),
+    ).rejects.toThrow(/belongs to someone else/)
+
+    // Nothing half-written: no instruction on record, and his account reads as before.
+    expect(await josh.listIssuedInstructions()).toEqual([])
+    const his = (await josh.position()).accounts.find((a) => a.account.id === joshsOwnId)!
+    expect(his.bank).toBeNull()
+    expect(his.money).toMatchObject({ from: 'count', startCents: 5000, movesSinceCents: 0, totalCents: 5000 })
+  })
+
+  it('lets each write where they may, and both read the same position', async () => {
+    // Josh commits his plan against his own account, sets its transfer and moves money in.
+    const plan = (await josh.listPackages()).find((p) => p.name === 'His plan')!
+    await josh.commitPackage(plan.id)
+    await josh.confirmTransfer({ reserveAccountId: joshsOwnId, perWeekCents: 1000 })
+    await josh.confirmMoveIn({ reserveAccountId: joshsOwnId, amountCents: 2500 })
+    // Shelby moves money into the shared account, which is hers to write too.
+    await shelby.confirmMoveIn({ reserveAccountId: sharedId, amountCents: 300 })
+
+    const hers = await shelby.position()
+    const his = await josh.position()
+    // Scope restricts writes, never reads: every figure is the same for both.
+    expect(hers).toEqual(his)
+
+    const joshs = hers.accounts.find((a) => a.account.id === joshsOwnId)!
+    // His count of $50 plus the $25 he moved in since.
+    expect(joshs.money).toMatchObject({ from: 'count', startCents: 5000, movesSinceCents: 2500, totalCents: 7500 })
+    expect(joshs.bank).toMatchObject({ perWeekCents: 1000, confirmedOn: TODAY })
+    expect(joshs.parts.map((p) => p.lineItem.label)).toEqual(['x'])
+    // 7,500 + 17 Saturdays in (Sep 19, Jan 16] x 1,000 = 24,500 >= 10,000.
+    expect(joshs.status).toBe('on_track')
+
+    const shared = hers.accounts.find((a) => a.account.id === sharedId)!
+    expect(shared.money).toMatchObject({ from: 'count', startCents: 1200, movesSinceCents: 300, totalCents: 1500 })
   })
 
   it("refuses Shelby moving a line item into Josh's account", async () => {

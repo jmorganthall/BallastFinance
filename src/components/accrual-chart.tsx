@@ -1,30 +1,23 @@
 /**
- * The should-have-saved curve (PRD §5, capability 6).
+ * How a plan's money builds up (PRD §5, capability 6; D35).
  *
- * Server-rendered inline SVG: no chart library, no client JavaScript, and it
- * renders in the email digest's browser preview as readily as in the PWA.
+ * Server-rendered inline SVG: no chart library, no client JavaScript.
  *
- * Form: change over time for one quantity, so a line -- with the confirmed
- * balances drawn as observations on top of it rather than as a second series.
- * They are the same quantity measured two ways (what the plan says, what the
- * account holds), and drawing them as two coloured series would imply two
- * things being compared rather than one being checked.
+ * Form: one quantity over time, drawn two ways. The steady line is where the
+ * plan would be saving steadily from its Saving since date. When the plan is
+ * catching up, a second line in the caution colour runs from what is counted
+ * today up to the total by the due date: "you should be on the steady path;
+ * you are here; this is how the money gets there". The dot is today's
+ * figure. Both lines are labelled directly, so identity never depends on
+ * colour alone, and the colours are tokens with separate light and dark
+ * values.
  *
- * Colour: one categorical hue for the plan; observations in ink with a surface
- * ring so they stay legible where they sit on the line. Both are direct-labelled,
- * so identity never depends on colour alone. Light and dark are separate token
- * values, not an automatic flip.
- *
- * The curve is stepped, not smoothed: money moves on the transfer day, and a smooth
- * curve would claim the balance rises continuously in between.
+ * Stepped, not smoothed: money moves on the transfer day, and a smooth curve
+ * would claim the balance rises continuously in between. Every point comes
+ * from the domain (`planChart`); this only draws it.
  */
 
-import { formatCents, type Cents, type CurvePoint } from '@/domain'
-
-export interface ConfirmedPoint {
-  date: string
-  cents: Cents
-}
+import { formatCents, type PlanChart, type PlanChartPoint } from '@/domain'
 
 const WIDTH = 320
 const HEIGHT = 168
@@ -35,6 +28,7 @@ function shortDate(iso: string): string {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
+    year: 'numeric',
     timeZone: 'UTC',
   })
 }
@@ -44,47 +38,35 @@ function dayNumber(iso: string): number {
   return Date.UTC(y, m - 1, d) / 86_400_000
 }
 
-export function AccrualChart({
-  points,
-  confirmed = [],
-  today,
-  targetCents,
-  label = 'set aside',
-}: {
-  points: readonly CurvePoint[]
-  confirmed?: readonly ConfirmedPoint[]
-  today: string
-  targetCents: Cents
-  label?: string
-}) {
+export function AccrualChart({ chart, today }: { chart: PlanChart; today: string }) {
+  const points = chart.steady
   if (points.length < 2) return null
 
   const first = points[0]!
   const last = points.at(-1)!
-  const x0 = dayNumber(first.date)
+  const x0 = Math.min(dayNumber(first.date), dayNumber(today))
   const x1 = dayNumber(last.date)
   const span = Math.max(1, x1 - x0)
-
-  const observed = confirmed.filter(
-    (c) => dayNumber(c.date) >= x0 && dayNumber(c.date) <= x1,
-  )
-  const yMax = Math.max(targetCents, ...observed.map((c) => c.cents), 1)
+  const yMax = Math.max(chart.targetCents, 1)
 
   const plotW = WIDTH - PAD.left - PAD.right
   const plotH = HEIGHT - PAD.top - PAD.bottom
   const sx = (iso: string) => PAD.left + ((dayNumber(iso) - x0) / span) * plotW
-  const sy = (cents: number) => PAD.top + plotH - (cents / yMax) * plotH
+  const sy = (cents: number) => PAD.top + plotH - (Math.min(cents, yMax) / yMax) * plotH
 
   // Stepped path: hold the value, then rise on the transfer date.
-  const steps: string[] = [`M ${sx(first.date)} ${sy(first.cents)}`]
-  for (let i = 1; i < points.length; i += 1) {
-    const point = points[i]!
-    steps.push(`L ${sx(point.date)} ${sy(points[i - 1]!.cents)}`)
-    steps.push(`L ${sx(point.date)} ${sy(point.cents)}`)
+  const stepped = (series: readonly PlanChartPoint[]) => {
+    const steps: string[] = [`M ${sx(series[0]!.date)} ${sy(series[0]!.cents)}`]
+    for (let i = 1; i < series.length; i += 1) {
+      const point = series[i]!
+      steps.push(`L ${sx(point.date)} ${sy(series[i - 1]!.cents)}`)
+      steps.push(`L ${sx(point.date)} ${sy(point.cents)}`)
+    }
+    return steps.join(' ')
   }
-  const line = steps.join(' ')
-  const area = `${line} L ${sx(last.date)} ${sy(0)} L ${sx(first.date)} ${sy(0)} Z`
-
+  const steadyLine = stepped(points)
+  const area = `${steadyLine} L ${sx(last.date)} ${sy(0)} L ${sx(first.date)} ${sy(0)} Z`
+  const catchUpLine = chart.catchUp && chart.catchUp.length > 1 ? stepped(chart.catchUp) : null
   const todayX = dayNumber(today) >= x0 && dayNumber(today) <= x1 ? sx(today) : null
 
   return (
@@ -93,29 +75,22 @@ export function AccrualChart({
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         className="h-auto w-full"
         role="img"
-        aria-label={`Money ${label} over time, rising to ${formatCents(targetCents)} by ${shortDate(last.date)}.`}
+        aria-label={`Saving steadily, this plan reaches ${formatCents(chart.targetCents)} by ${shortDate(last.date)}. ${formatCents(chart.countedToday.cents)} is here today${catchUpLine ? ', below the steady line; the catch-up line shows the money reaching the total by the due date' : ''}.`}
       >
         {/* Recessive frame: a baseline and one reference line, nothing more. */}
         <line
           x1={PAD.left}
-          y1={sy(targetCents)}
+          y1={sy(chart.targetCents)}
           x2={WIDTH - PAD.right}
-          y2={sy(targetCents)}
+          y2={sy(chart.targetCents)}
           stroke="var(--color-line)"
           strokeWidth="1"
           strokeDasharray="3 3"
         />
-        <line
-          x1={PAD.left}
-          y1={sy(0)}
-          x2={WIDTH - PAD.right}
-          y2={sy(0)}
-          stroke="var(--color-line)"
-          strokeWidth="1"
-        />
+        <line x1={PAD.left} y1={sy(0)} x2={WIDTH - PAD.right} y2={sy(0)} stroke="var(--color-line)" strokeWidth="1" />
 
-        <text x="2" y={sy(targetCents) + 4} fontSize="9" fill="var(--color-ink-soft)">
-          {formatCents(targetCents)}
+        <text x="2" y={sy(chart.targetCents) + 4} fontSize="9" fill="var(--color-ink-soft)">
+          {formatCents(chart.targetCents)}
         </text>
         <text x="2" y={sy(0) + 4} fontSize="9" fill="var(--color-ink-soft)">
           $0
@@ -123,13 +98,23 @@ export function AccrualChart({
 
         <path d={area} fill="var(--color-accent)" opacity="0.10" />
         <path
-          d={line}
+          d={steadyLine}
           fill="none"
           stroke="var(--color-accent)"
           strokeWidth="2"
           strokeLinejoin="round"
           strokeLinecap="round"
         />
+        {catchUpLine ? (
+          <path
+            d={catchUpLine}
+            fill="none"
+            stroke="var(--color-caution)"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        ) : null}
 
         {todayX !== null ? (
           <>
@@ -142,45 +127,27 @@ export function AccrualChart({
               strokeWidth="1"
               strokeDasharray="2 3"
             />
-            <text
-              x={todayX}
-              y={PAD.top - 8}
-              fontSize="9"
-              textAnchor="middle"
-              fill="var(--color-ink-soft)"
-            >
+            <text x={todayX} y={PAD.top - 8} fontSize="9" textAnchor="middle" fill="var(--color-ink-soft)">
               today
             </text>
+            <circle
+              cx={todayX}
+              cy={sy(chart.countedToday.cents)}
+              r="4"
+              fill="var(--color-ink)"
+              stroke="var(--color-card)"
+              strokeWidth="2"
+            >
+              {/* One string: React renders a <title> with several children empty on the server. */}
+              <title>{`Today: ${formatCents(chart.countedToday.cents)} here`}</title>
+            </circle>
           </>
         ) : null}
-
-        {/* Observations: ink, ringed in the surface colour so they read on the line. */}
-        {observed.map((point) => (
-          <circle
-            key={point.date}
-            cx={sx(point.date)}
-            cy={sy(point.cents)}
-            r="4"
-            fill="var(--color-ink)"
-            stroke="var(--color-card)"
-            strokeWidth="2"
-          >
-            <title>
-              {shortDate(point.date)}: {formatCents(point.cents)} actually there
-            </title>
-          </circle>
-        ))}
 
         <text x={PAD.left} y={HEIGHT - 8} fontSize="9" fill="var(--color-ink-soft)">
           {shortDate(first.date)}
         </text>
-        <text
-          x={WIDTH - PAD.right}
-          y={HEIGHT - 8}
-          fontSize="9"
-          textAnchor="end"
-          fill="var(--color-ink-soft)"
-        >
+        <text x={WIDTH - PAD.right} y={HEIGHT - 8} fontSize="9" textAnchor="end" fill="var(--color-ink-soft)">
           {shortDate(last.date)}
         </text>
       </svg>
@@ -188,21 +155,22 @@ export function AccrualChart({
       {/* Direct labels rather than a legend box, so identity is never colour alone. */}
       <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-ink-soft)]">
         <span className="flex items-center gap-1.5">
-          <span
-            aria-hidden
-            className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-accent)]"
-          />
-          The plan
+          <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-accent)]" />
+          Steady line
         </span>
-        {observed.length > 0 ? (
+        {catchUpLine ? (
           <span className="flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="inline-block h-2 w-2 rounded-full bg-[var(--color-ink)] ring-2 ring-[var(--color-card)]"
-            />
-            What was actually there
+            <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-caution)]" />
+            Catching up from here
           </span>
         ) : null}
+        <span className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className="inline-block h-2 w-2 rounded-full bg-[var(--color-ink)] ring-2 ring-[var(--color-card)]"
+          />
+          Here today
+        </span>
       </figcaption>
     </figure>
   )

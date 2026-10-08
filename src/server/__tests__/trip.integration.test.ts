@@ -11,7 +11,7 @@ import { and, eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
 import { Engine, EngineError } from '@/server/engine'
-import { headlineDueDate, lineItemTotalCents, variantPrice, type Traveler } from '@/domain'
+import { headlineDueDate, lineItemTotalCents, transferWeeksBetween, variantPrice, type Traveler } from '@/domain'
 
 const url = process.env.DATABASE_URL
 const describeDb = url ? describe : describe.skip
@@ -203,8 +203,39 @@ describeDb('the trip planner', () => {
     await expect(engine.sendVariantToPlans(tripId, flyVariantId, { defaultAccountId: vacationAccountId })).rejects.toThrow('a plan already')
     await expect(engine.updateTrip(tripId, { name: 'Renamed' })).rejects.toThrow(EngineError)
 
-    // The weekly number comes from the same what-if as any other draft.
-    expect((await engine.whatIf(pkg.id)).length).toBeGreaterThan(0)
+    // The weekly number comes from the same what-if as any other draft: the
+    // smallest level transfer that has everything due by each date there by
+    // that date. Nothing is held yet and nothing is due within four
+    // transfers, so that is the largest of (all due by d) / (transfers to d)
+    // over the plan's due dates, rounded up to the household's $10 step, and
+    // no one-time move.
+    const dueBy = new Map<string, number>()
+    for (const i of items) dueBy.set(i.dueDate, (dueBy.get(i.dueDate) ?? 0) + lineItemTotalCents(i))
+    let needCents = 0
+    let exactCents = 0
+    for (const date of [...dueBy.keys()].sort()) {
+      needCents += dueBy.get(date)!
+      const transfers = transferWeeksBetween(TODAY, date)
+      expect(transfers).toBeGreaterThan(4)
+      exactCents = Math.max(exactCents, Math.ceil(needCents / transfers))
+    }
+    // Here the whole trip sets it: $8,884 by Sat 12 Jun 2027, 38 transfers
+    // away, is ceil(888400 / 38) = $233.79 a week, which rounds up to $240.
+    // (The tickets, $1,408 by 13 Apr over 29, would need only $48.56.)
+    expect(needCents).toBe(888400)
+    expect(exactCents).toBe(23379)
+    expect(await engine.whatIfCommit(pkg.id)).toEqual([
+      {
+        accountId: vacationAccountId,
+        accountName: 'Vacation',
+        weeklyNowCents: 0,
+        weeklyAfterCents: 24000,
+        moveAfterCents: 0,
+        moveBy: null,
+      },
+    ])
+    // A draft moves nothing until it is committed.
+    expect((await engine.position()).accounts.every((a) => a.weeklyCents === 0)).toBe(true)
   })
 
   it('a send with nothing priced is refused by intake with problems, not a crash', async () => {

@@ -151,7 +151,7 @@ export default async function SettingsPage({
             <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
               So a plan that moves by a few cents does not mean editing Capital One every week.
               $291.26 becomes $300 at the nearest $10. The little extra it leaves behind shows up
-              as ahead at a check-in. Enter 0 for the exact figure.
+              as the account's extra. Enter 0 for the exact figure.
             </span>
           </label>
           <button

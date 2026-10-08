@@ -9,7 +9,13 @@
 import { Engine } from '@/server/engine'
 import type { Db } from '@/db/client'
 import type { NotificationPayload } from '@/server/notifications'
-import { formatCents, instructionSentence, isTransferDay, transferWeeksBetween } from '@/domain'
+import {
+  derivedTodoSentence,
+  formatCents,
+  instructionSentence,
+  isTransferDay,
+  transferWeeksBetween,
+} from '@/domain'
 
 export interface DigestInput {
   householdId: string
@@ -56,40 +62,53 @@ export async function buildWeeklyDigestIfDue(
   return (await weeklyDigestDueToday(input)) ? buildWeeklyDigest(input) : null
 }
 
+/**
+ * The digest (PRD §8, D35). It says what the screens say, read from the same
+ * position: the headline (All caught up, or what needs doing), each account's
+ * transfer and status with the first date it would run short, the to-dos,
+ * and what falls due in the next two weeks.
+ */
 export async function buildWeeklyDigest(input: DigestInput): Promise<NotificationPayload> {
   const engine = engineFor(input)
   const today = engine.today()
 
-  const [accounts, outstanding, closeOuts, transferWeekday] = await Promise.all([
-    engine.accountViews(),
+  const [position, outstanding, closeOuts, transferWeekday] = await Promise.all([
+    engine.position(),
     engine.outstandingInstructions(),
     engine.closeOutPrompts(),
     engine.transferWeekday(),
   ])
 
-  const active = accounts.filter((a) => a.weekly.transferPerWeekCents !== 0)
-  const total = active.reduce((s, a) => s + a.weekly.transferPerWeekCents, 0)
-
+  const shown = position.accounts.filter((a) => a.parts.length > 0 || a.bank !== null)
   const lines: string[] = [`## This week — ${today}`, '']
 
-  if (active.length === 0) {
+  if (shown.length === 0) {
     lines.push('Nothing to move this week.')
   } else {
-    lines.push(`**Move ${formatCents(total)} in total.**`, '')
-    for (const view of active) {
-      const w = view.weekly
-      const parts =
-        w.catchUp.length > 0
-          ? ` (${formatCents(w.ongoingPerWeekCents)} ongoing${w.catchUp
-              .map((g) =>
-                g.perWeekCents < 0
-                  ? ` − ${formatCents(Math.abs(g.perWeekCents))} less until ${g.endDate}`
-                  : ` + ${formatCents(g.perWeekCents)} extra until ${g.endDate}`,
-              )
-              .join('')})`
-          : ''
-      lines.push(`- **${view.account.name}**: ${formatCents(w.transferPerWeekCents)}/week${parts}`)
-      lines.push(`  - should hold ${formatCents(view.shouldHaveSavedCents)} today`)
+    lines.push(
+      position.allCaughtUp
+        ? `**All caught up.** On autopilot, every account covers everything due${position.coveredThrough ? ` through ${position.coveredThrough}` : ''}.`
+        : '**Not caught up yet.** The to-dos below are what it takes.',
+      '',
+    )
+    for (const a of shown) {
+      const transfer = a.bank
+        ? `${formatCents(a.bank.perWeekCents)}/week at the bank`
+        : 'transfer not confirmed yet'
+      const verdict =
+        a.status === 'short' && a.short
+          ? `runs short on ${a.short.on} by ${formatCents(a.short.byCents)}`
+          : a.status === 'unconfirmed'
+            ? `needs ${formatCents(a.weeklyCents)}/week`
+            : a.horizon
+              ? `covers everything through ${a.horizon}`
+              : 'nothing due'
+      lines.push(`- **${a.account.name}**: ${transfer} — ${verdict}`)
+      if (a.transferChange && a.transferChange.reason !== 'confirm') {
+        lines.push(
+          `  - pending transfer change: ${formatCents(a.transferChange.fromCents ?? 0)} → ${formatCents(a.transferChange.toCents)}/week`,
+        )
+      }
     }
   }
 
@@ -104,8 +123,9 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
 
   const dueNow = outstanding.filter((i) => i.dueNow)
   const comingUp = outstanding.filter((i) => !i.dueNow)
-  if (dueNow.length > 0) {
+  if (position.todos.length > 0 || dueNow.length > 0) {
     lines.push('', '## Still to do', '')
+    for (const todo of position.todos) lines.push(`- ${derivedTodoSentence(todo)}`)
     for (const instruction of dueNow) {
       lines.push(
         `- ${instructionSentence(instruction, transferWeekday)}${instruction.note ? ` (${instruction.note})` : ''}`,
@@ -122,26 +142,28 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   }
 
   // Anything landing in the next fortnight, so nothing arrives as a surprise.
-  const upcoming = accounts
-    .flatMap((a) => a.items)
-    .filter((item) => {
-      const weeks = transferWeeksBetween(today, item.lineItem.dueDate, transferWeekday)
+  const upcoming = position.accounts
+    .flatMap((a) => a.parts)
+    .filter((part) => {
+      const weeks = transferWeeksBetween(today, part.lineItem.dueDate, transferWeekday)
       return weeks > 0 && weeks <= 2
     })
   if (upcoming.length > 0) {
     lines.push('', '## Coming up in the next two weeks', '')
-    for (const item of upcoming) {
-      lines.push(
-        `- **${item.lineItem.label}** — ${formatCents(item.totalCents)} on ${item.lineItem.dueDate}`,
-      )
+    for (const part of upcoming) {
+      lines.push(`- **${part.lineItem.label}** — ${formatCents(part.totalCents)} on ${part.lineItem.dueDate}`)
     }
   }
 
+  const blocking = position.todos.filter((t) => t.blocking).length + dueNow.length
   const summary =
-    active.length === 0
+    shown.length === 0
       ? 'Ballast: nothing to move this week.'
-      : `Ballast: move ${formatCents(total)} this week` +
-        (closeOuts.length > 0 ? `, and ${closeOuts.length} thing(s) need confirming.` : '.')
+      : position.allCaughtUp
+        ? 'Ballast: all caught up.' +
+          (closeOuts.length > 0 ? ` ${closeOuts.length} thing(s) need confirming.` : '')
+        : `Ballast: ${blocking} thing(s) to do this week` +
+          (closeOuts.length > 0 ? `, and ${closeOuts.length} to confirm.` : '.')
 
   return {
     kind: 'weekly_digest',
@@ -151,13 +173,18 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
     body: lines.join('\n'),
     link: `${input.baseUrl}/`,
     detail: {
-      total_per_week_cents: total,
-      accounts: active.map((a) => ({
+      all_caught_up: position.allCaughtUp,
+      bank_per_week_cents: position.bankPerWeekCents,
+      accounts: shown.map((a) => ({
         id: a.account.id,
         name: a.account.name,
-        per_week_cents: a.weekly.transferPerWeekCents,
-        should_hold_cents: a.shouldHaveSavedCents,
+        status: a.status,
+        bank_per_week_cents: a.bank?.perWeekCents ?? null,
+        needs_per_week_cents: a.weeklyCents,
+        likely_holds_cents: a.money.totalCents,
+        short_on: a.short?.on ?? null,
       })),
+      todo_count: position.todos.length + dueNow.length,
       outstanding_count: outstanding.length,
       close_out_count: closeOuts.length,
     },
@@ -199,7 +226,7 @@ export async function buildCheckInNudge(
     engine.latestConfirmedBalances(),
     engine.transferWeekday(),
   ])
-  const accounts = (await engine.accountViews()).filter((a) => a.items.length > 0)
+  const accounts = (await engine.position()).accounts.filter((a) => a.parts.length > 0)
   if (accounts.length === 0) return null
 
   const stale = accounts.filter((view) => {
@@ -214,7 +241,7 @@ export async function buildCheckInNudge(
     householdId: input.householdId,
     summary: `Ballast: it has been a while since you checked ${stale.length === 1 ? stale[0]!.account.name : 'your savings accounts'}.`,
     body: `No balance recorded in the last ${afterWeeks} weeks for:\n\n${stale
-      .map((v) => `- ${v.account.name} (should hold ${formatCents(v.shouldHaveSavedCents)})`)
+      .map((v) => `- ${v.account.name} (likely holds ${formatCents(v.money.totalCents)})`)
       .join('\n')}\n\nA check-in takes under a minute.`,
     link: `${input.baseUrl}/check-in`,
     detail: { stale_account_ids: stale.map((v) => v.account.id) },

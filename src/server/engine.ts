@@ -35,8 +35,6 @@ import {
 } from '@/db/schema'
 import { randomUUID } from 'node:crypto'
 import {
-  accountViews,
-  accrualCurve,
   apportion,
   canWriteAccount,
   closeOutPrompts,
@@ -48,8 +46,6 @@ import {
   formatCents,
   lineItemTotalCents,
   openingSinceLastOccurrence,
-  reshuffleAccount as planReshuffle,
-  type Reshuffle,
   recurrenceOf,
   rollToFuture,
   DEFAULT_ALLOCATION_RULES,
@@ -73,10 +69,13 @@ import {
   packageViews,
   todayIn,
   validateIntake,
-  whatIfCommit,
-  type AccountView,
+  position,
+  planChart,
+  type PlanChart,
+  type HouseholdPosition,
+  type PositionInput,
+  type ConfirmedTransfer,
   type CivilDate,
-  type DerivationInput,
   type EndedInstruction,
   type OpenCommitments,
   type Id,
@@ -96,7 +95,6 @@ import {
   type PackageView,
   type AccountScope,
   type ReserveAccount,
-  type WhatIfLine,
   type Cents,
   type CloseOutPrompt,
   type ConfirmedInstruction,
@@ -114,7 +112,6 @@ import {
   type MinPaymentRule,
   type OptimizerResult,
   type PromoRule,
-  type CurvePoint,
   type SheetImport,
   type SheetProblem,
   DEFAULT_HOME_BUYING,
@@ -271,6 +268,17 @@ import {
 import { readerEnabled, readerSourceName, readStructured, type ReaderDeps } from '@/server/reader'
 
 export class EngineError extends Error {}
+
+/** One account's line in "If you commit this today" (D35). */
+export interface CommitPreview {
+  accountId: Id
+  accountName: string
+  weeklyNowCents: Cents
+  weeklyAfterCents: Cents
+  /** A one-time move the account would need, zero when none. */
+  moveAfterCents: Cents
+  moveBy: CivilDate | null
+}
 
 export type CreatePackageResult =
   | { ok: true; packageId: Id; lineItemIds: Id[] }
@@ -1175,61 +1183,6 @@ export class Engine {
     return cycles
   }
 
-  /**
-   * A check-in found more in an account than its plans had accrued, and the
-   * person chose to count the extra toward those plans. Each part's new
-   * opening balance is a fact about today, recorded as such; the accrual math
-   * starts a fresh cycle from it. No money moves, so nothing needs confirming.
-   */
-  async recordOpeningBalances(
-    items: readonly { lineItemId: Id; openingCents: Cents }[],
-  ): Promise<void> {
-    const today = this.today()
-    const lineItems = await this.listLineItems()
-    for (const entry of items) {
-      const item = lineItems.find((li) => li.id === entry.lineItemId)
-      if (!item) throw new EngineError('No such line item in this household')
-      if (entry.openingCents < 0) throw new EngineError('An opening balance cannot be negative')
-      await this.assertCanWriteAccount(item.reserveAccountId)
-    }
-    if (items.length === 0) return
-    await this.db.insert(events).values(
-      items.map((entry) => ({
-        householdId: this.householdId,
-        kind: 'opening_recorded' as const,
-        occurredAt: today,
-        actorUserId: this.actorUserId,
-        source: 'manual' as const,
-        payload: { line_item_id: entry.lineItemId, opening_cents: entry.openingCents },
-      })),
-    )
-  }
-
-  /**
-   * What re-spreading this account's counted money across its parts would
-   * change (PRD §6): every part up to its pace first, the rest onto the
-   * one-offs, and nothing above pace on a part that comes round again. A
-   * preview; nothing is recorded.
-   */
-  async reshufflePreview(accountId: Id): Promise<Reshuffle | null> {
-    return planReshuffle(await this.derivationInput(), accountId)
-  }
-
-  /**
-   * Do it. Each part whose counted money changes gets that figure recorded
-   * as its opening today -- the same fact a check-in count records -- and
-   * the spread is worked out again here as it is recorded, so what lands is
-   * today's answer rather than a stale preview. What the account holds is
-   * untouched, so nothing needs confirming; anything the parts should not
-   * count shows as extra at the next check-in.
-   */
-  async reshuffleAccount(accountId: Id): Promise<Reshuffle | null> {
-    const plan = await this.reshufflePreview(accountId)
-    if (!plan || plan.openings.length === 0) return plan
-    await this.recordOpeningBalances(plan.openings)
-    return plan
-  }
-
   /** Every recorded plan change, in the shape the accrual math consumes. */
   async listLineItemChanges(): Promise<LineItemChange[]> {
     const rows = await this.db
@@ -1255,41 +1208,6 @@ export class Engine {
   }
 
   // ---------------------------------------------------------------- derived views
-
-  /** Load every fact the derivation module needs, in one place. */
-  async derivationInput(): Promise<DerivationInput> {
-    const [
-      accounts,
-      packages,
-      lineItems,
-      changes,
-      adjustments,
-      cycleStarts,
-      transferRoundUpCents,
-      transferWeekday,
-    ] = await Promise.all([
-      this.listReserveAccounts(),
-      this.listPackages(),
-      this.listLineItems(),
-      this.listLineItemChanges(),
-      this.driftAdjustments(),
-      this.listCycleStarts(),
-      this.transferRoundUpCents(),
-      this.transferWeekday(),
-    ])
-    return {
-      today: this.today(),
-      accounts,
-      packages,
-      lineItems,
-      changes,
-      driftAdjustments: adjustments.accepted,
-      pendingDriftAdjustments: adjustments.pending,
-      cycleStarts,
-      transferRoundUpCents,
-      transferWeekday,
-    }
-  }
 
   /**
    * The step the bank figure is rounded up to. A household rule (a setting,
@@ -1320,81 +1238,244 @@ export class Engine {
   }
 
   /** Home / This Week: the per-account numbers to move (PRD §9). */
-  async accountViews(): Promise<AccountView[]> {
-    return accountViews(await this.derivationInput())
-  }
-
+  /** Every plan with its parts and its total; how each stands is the position's (D35). */
   async packageViews(): Promise<PackageView[]> {
-    return packageViews(await this.derivationInput())
-  }
-
-  async whatIf(packageId: Id): Promise<WhatIfLine[]> {
-    return whatIfCommit(await this.derivationInput(), packageId)
+    const [packages, lineItems] = await Promise.all([this.listPackages(), this.listLineItems()])
+    return packageViews({ today: this.today(), packages, lineItems })
   }
 
   /**
-   * The should-have-saved curve for one package, plus the balances actually
-   * confirmed along the way (PRD §5, capability 6).
+   * The plan's chart (D35): its steady line from its Saving since, and,
+   * while it is catching up, where the money goes from here. Read from the
+   * one position, so the chart and the plan's figures are the same numbers.
    */
-  async packageCurve(packageId: Id): Promise<{
-    points: CurvePoint[]
-    confirmed: { date: CivilDate; cents: Cents }[]
-    targetCents: Cents
-    from: CivilDate
-    to: CivilDate
-  } | null> {
-    const view = (await this.packageViews()).find((v) => v.package.id === packageId)
-    if (!view) return null
+  async planChart(packageId: Id): Promise<PlanChart | null> {
+    const [current, transferWeekday] = await Promise.all([this.position(), this.transferWeekday()])
+    const plan = current.plans.find((p) => p.package.id === packageId)
+    return plan ? planChart({ plan, today: current.today, transferWeekday }) : null
+  }
 
-    const live = view.items.filter((i) => i.lineItem.state !== 'retired')
-    if (live.length === 0) return null
+  // ---------------------------------------------------------------- the one position (D35)
 
-    // The curve starts where the plan's money timeline does (D33): the
-    // earliest day any part runs from, the same date the heading shows. A
-    // plan whose parts start at their last occurrence did not begin at the
-    // commit, and a chart that started there would hide the elapsed share.
-    const from = view.savingSince ?? view.package.committedAt ?? view.package.createdAt
-    const to = live.map((i) => i.lineItem.dueDate).sort().at(-1)!
-    const targetCents = view.totalCents
+  /**
+   * Every fact the position reads, in one place (PRD §5, "The one position").
+   * The questions of order are answered here -- which count is the latest,
+   * which moves and spends came after it, which transfer was confirmed when
+   * -- by the order the events were recorded, so a count entered later the
+   * same day supersedes a move marked done that morning (D34). The domain
+   * only sums.
+   */
+  async positionInput(): Promise<PositionInput> {
+    const [
+      accounts,
+      packages,
+      lineItems,
+      cycleStarts,
+      transferRoundUpCents,
+      transferWeekday,
+      adjustments,
+      issued,
+      outstanding,
+      rows,
+    ] = await Promise.all([
+      this.listReserveAccounts(),
+      this.listPackages(),
+      this.listLineItems(),
+      this.listCycleStarts(),
+      this.transferRoundUpCents(),
+      this.transferWeekday(),
+      this.driftAdjustments(),
+      this.listIssuedInstructions(),
+      this.outstandingInstructions(),
+      this.db
+        .select()
+        .from(events)
+        .where(
+          and(
+            eq(events.householdId, this.householdId),
+            inArray(events.kind, ['balance_confirmed', 'instruction_confirmed', 'spend_confirmed']),
+          ),
+        )
+        .orderBy(events.recordedAt, events.id),
+    ])
 
-    const points = accrualCurve({
-      components: live.flatMap((i) => i.components),
-      from,
-      to,
-      capCents: targetCents,
-      transferWeekday: await this.transferWeekday(),
-    })
+    const issuedById = new Map(issued.map((i) => [i.instructionId, i]))
+    const accountOfItem = new Map(lineItems.map((li) => [li.id, li.reserveAccountId]))
+    const counts = new Map<Id, { amountCents: Cents; on: CivilDate }>()
+    const moves = new Map<Id, Cents>()
+    const spends = new Map<Id, Cents>()
+    const transfers: ConfirmedTransfer[] = []
+    const add = (map: Map<Id, Cents>, id: Id, cents: Cents) => map.set(id, (map.get(id) ?? 0) + cents)
 
-    // Confirmed balances are per account, so a package-level comparison only
-    // makes sense where the package owns the whole account. Restricted to that
-    // case rather than showing a number that silently includes other plans.
-    const accountIds = new Set(live.map((i) => i.lineItem.reserveAccountId))
-    const confirmed: { date: CivilDate; cents: Cents }[] = []
-
-    if (accountIds.size === 1) {
-      const accountId = [...accountIds][0]!
-      const views = await this.accountViews()
-      const account = views.find((v) => v.account.id === accountId)
-      const ownsWholeAccount =
-        account !== undefined &&
-        account.items.every((i) => live.some((l) => l.lineItem.id === i.lineItem.id))
-
-      if (ownsWholeAccount) {
-        const rows = await this.db
-          .select()
-          .from(events)
-          .where(
-            and(eq(events.householdId, this.householdId), eq(events.kind, 'balance_confirmed')),
-          )
-        for (const row of rows) {
-          const payload = row.payload as { reserve_account_id: Id; amount_cents: Cents }
-          if (payload.reserve_account_id !== accountId) continue
-          confirmed.push({ date: row.occurredAt as CivilDate, cents: payload.amount_cents })
-        }
+    for (const row of rows) {
+      const on = row.occurredAt as CivilDate
+      if (row.kind === 'balance_confirmed') {
+        const p = row.payload as { reserve_account_id: Id; amount_cents: Cents }
+        counts.set(p.reserve_account_id, { amountCents: p.amount_cents, on })
+        // A count includes everything recorded before it.
+        moves.delete(p.reserve_account_id)
+        spends.delete(p.reserve_account_id)
+        continue
       }
+      if (row.kind === 'spend_confirmed') {
+        const p = row.payload as { line_item_id: Id; actual_amount_cents: Cents }
+        const accountId = accountOfItem.get(p.line_item_id)
+        if (accountId) add(spends, accountId, p.actual_amount_cents)
+        continue
+      }
+      const p = row.payload as { instruction_id: Id; actual_amount_cents: Cents | null }
+      const instruction = issuedById.get(p.instruction_id)
+      if (!instruction) continue
+      const confirmation = {
+        instructionId: p.instruction_id,
+        confirmedOn: on,
+        actualAmountCents: p.actual_amount_cents ?? undefined,
+      }
+      if (instruction.type === 'set_weekly_transfer') {
+        transfers.push({
+          accountId: instruction.targetId,
+          perWeekCents: confirmation.actualAmountCents ?? instruction.amountCents,
+          confirmedOn: on,
+        })
+        continue
+      }
+      const move = doneMoveOf(instruction, confirmation)
+      if (move) add(moves, instruction.targetId, move.amountCents)
     }
 
-    return { points, confirmed, targetCents, from, to }
+    const openMovesIn = outstanding
+      .filter((i) => i.type === 'one_time_move' && (i.purpose ?? 'catch_up') === 'catch_up')
+      .map((i) => ({ accountId: i.targetId, amountCents: i.amountCents }))
+
+    return {
+      today: this.today(),
+      accounts,
+      packages,
+      lineItems,
+      cycleStarts,
+      counts: [...counts].map(([accountId, c]) => ({ accountId, ...c })),
+      transfers,
+      adjustments: adjustments.accepted,
+      movesSinceCount: [...moves].map(([accountId, amountCents]) => ({ accountId, amountCents })),
+      spendsSinceCount: [...spends].map(([accountId, amountCents]) => ({ accountId, amountCents })),
+      openMovesIn,
+      transferRoundUpCents,
+      transferWeekday,
+    }
+  }
+
+  /** The one position: every money figure any screen, the digest or a to-do shows (D35). */
+  async position(): Promise<HouseholdPosition> {
+    return position(await this.positionInput())
+  }
+
+  /**
+   * What committing a draft today would do to each account: the weekly
+   * amount before and after, and any one-time move it would need. The same
+   * function the live screens read, run with the draft as if committed.
+   */
+  async whatIfCommit(packageId: Id): Promise<CommitPreview[]> {
+    const input = await this.positionInput()
+    const target = input.packages.find((p) => p.id === packageId)
+    if (!target) return []
+    const before = position(input)
+    const after = position({
+      ...input,
+      packages: input.packages.map((p) =>
+        p.id === packageId ? { ...p, state: 'active' as const, committedAt: input.today } : p,
+      ),
+    })
+    return after.accounts
+      .map((a) => {
+        const was = before.accounts.find((b) => b.account.id === a.account.id)
+        return {
+          accountId: a.account.id,
+          accountName: a.account.name,
+          weeklyNowCents: was?.weeklyCents ?? 0,
+          weeklyAfterCents: a.weeklyCents,
+          moveAfterCents: a.oneTimeMove?.amountCents ?? 0,
+          moveBy: a.oneTimeMove?.byDate ?? null,
+        }
+      })
+      .filter((line) => line.weeklyAfterCents !== line.weeklyNowCents || line.moveAfterCents > 0)
+  }
+
+  /**
+   * "Yes, the transfer is set to this" (D35). The ask was derived, never
+   * issued ahead, so marking it done records the instruction and its
+   * confirmation together, at the amount the person says the bank moves.
+   * From then on the run-forward uses it.
+   */
+  async confirmTransfer(input: { reserveAccountId: Id; perWeekCents: Cents }): Promise<void> {
+    const account = await this.assertCanWriteAccount(input.reserveAccountId)
+    if (!Number.isInteger(input.perWeekCents) || input.perWeekCents < 0) {
+      throw new EngineError('A weekly transfer is zero or more, in whole cents')
+    }
+    await this.recordDoneInstruction({
+      type: 'set_weekly_transfer',
+      amountCents: input.perWeekCents,
+      targetId: account.id,
+      targetLabel: account.name,
+    })
+  }
+
+  /**
+   * "Yes, I moved it" for the one-time move the position asks for (D35):
+   * recorded as a catch-up move asked and done at once, which the next read
+   * carries as money in the account until the next count (D34).
+   */
+  async confirmMoveIn(input: { reserveAccountId: Id; amountCents: Cents }): Promise<void> {
+    const account = await this.assertCanWriteAccount(input.reserveAccountId)
+    if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
+      throw new EngineError('A move is more than zero, in whole cents')
+    }
+    await this.recordDoneInstruction({
+      type: 'one_time_move',
+      purpose: 'catch_up',
+      amountCents: input.amountCents,
+      targetId: account.id,
+      targetLabel: account.name,
+      note: 'So everything due soon is covered without raising the weekly transfer.',
+    })
+  }
+
+  private async recordDoneInstruction(input: {
+    type: InstructionType
+    amountCents: Cents
+    targetId: Id
+    targetLabel: string
+    purpose?: InstructionPurpose
+    note?: string
+  }): Promise<void> {
+    const instructionId = randomUUID()
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'instruction_issued',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        payload: {
+          instruction_id: instructionId,
+          type: input.type,
+          amount_cents: input.amountCents,
+          target_id: input.targetId,
+          target_label: input.targetLabel,
+          note: input.note ?? null,
+          ends_on: null,
+          purpose: input.purpose ?? null,
+          available_on: null,
+        },
+      })
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'instruction_confirmed',
+        occurredAt: today,
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { instruction_id: instructionId, actual_amount_cents: null },
+      })
+    })
   }
 
   // ---------------------------------------------------------------- settings
@@ -1458,12 +1539,13 @@ export class Engine {
    * once the to-do is done (`AccountView.pendingWeekly`).
    */
   async driftAdjustments(): Promise<{ accepted: DriftAdjustment[]; pending: DriftAdjustment[] }> {
-    const [issued, confirmed, ended] = await Promise.all([
+    const [issued, confirmed, ended, transferWeekday] = await Promise.all([
       this.listIssuedInstructions(),
       this.listConfirmedInstructions(),
       this.listEndedInstructions(),
+      this.transferWeekday(),
     ])
-    return driftAdjustmentsFrom({ issued, confirmed, ended })
+    return driftAdjustmentsFrom({ issued, confirmed, ended, transferWeekday })
   }
 
   /**
@@ -1782,19 +1864,8 @@ export class Engine {
    * first step of a share-out (PRD §6) covers these before the split.
    */
   async shortfalls(): Promise<Shortfall[]> {
-    const [views, balances, debts] = await Promise.all([
-      this.accountViews(),
-      this.latestConfirmedBalances(),
-      this.listDebts(),
-    ])
-    return findShortfalls({
-      accounts: views.map((view) => ({
-        view,
-        confirmedCents: balances.get(view.account.id)?.amountCents ?? null,
-      })),
-      debts,
-      today: this.today(),
-    })
+    const [current, debts] = await Promise.all([this.position(), this.listDebts()])
+    return findShortfalls({ accounts: current.accounts, debts, today: this.today() })
   }
 
   /**

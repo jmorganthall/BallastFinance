@@ -3,6 +3,7 @@ import { requireEngine } from '@/server/session'
 import { nextDue, type DueUrgency } from '@/domain/next-due'
 import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import { ProgressBar } from '@/components/progress-bar'
+import { steadySinceWords } from '@/domain'
 
 export const dynamic = 'force-dynamic'
 
@@ -21,7 +22,15 @@ const URGENCY_WEIGHT: Record<DueUrgency, string> = {
 
 export default async function PackagesPage() {
   const { engine } = await requireEngine()
-  const [views, today] = await Promise.all([engine.packageViews(), Promise.resolve(engine.today())])
+  const [views, position, today] = await Promise.all([
+    engine.packageViews(),
+    engine.position(),
+    Promise.resolve(engine.today()),
+  ])
+  // Every figure on a live plan's card is the one position's (D35): the same
+  // numbers the plan's own page, This week and the check-in read.
+  const plans = new Map(position.plans.map((p) => [p.package.id, p]))
+  const shortOn = new Map(position.accounts.map((a) => [a.account.id, a.short?.on ?? null]))
 
   return (
     <>
@@ -49,6 +58,7 @@ export default async function PackagesPage() {
         <ul className="space-y-3">
           {views.map((view) => {
             const copy = STATE_COPY[view.package.state]
+            const plan = plans.get(view.package.id)
             const next =
               view.package.state === 'retired'
                 ? null
@@ -65,13 +75,13 @@ export default async function PackagesPage() {
                       <Pill tone={copy.tone}>{copy.label}</Pill>
                     </div>
                     <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
-                      <Money cents={view.totalCents} /> total
-                      {view.package.state === 'active' ? (
+                      <Money cents={plan?.totalCents ?? view.totalCents} /> total
+                      {plan ? (
                         <>
                           {' · '}
-                          <Money cents={view.weekly.totalPerWeekCents} />/week
+                          <Money cents={plan.steadyPerWeekCents} />/week steady
                           {' · '}
-                          <Money cents={view.shouldHaveSavedCents} /> set aside so far
+                          <Money cents={plan.countedCents} /> here now
                         </>
                       ) : null}
                     </p>
@@ -84,12 +94,24 @@ export default async function PackagesPage() {
                         ({humanDate(next.dueDate)})
                       </p>
                     ) : null}
-                    {view.package.state === 'active' ? (
+                    {plan && plan.parts.length > 0 ? (
                       <ProgressBar
                         className="mt-3"
-                        totalCents={view.totalCents}
-                        setAsideCents={view.shouldHaveSavedCents}
-                        paceCents={view.paceCents}
+                        totalCents={plan.totalCents}
+                        countedCents={plan.countedCents}
+                        savedForCents={plan.savedForCents}
+                        coveringSoonerCents={plan.coveringSoonerCents}
+                        notYetHereCents={plan.notYetHereCents}
+                        status={plan.status}
+                        savingSince={
+                          plan.savingSince
+                            ? {
+                                date: plan.savingSince,
+                                words: plan.parts.length === 1 ? steadySinceWords(plan.parts[0]!.savingSince.reason) : 'the earliest of its parts',
+                              }
+                            : undefined
+                        }
+                        shortOn={plan.parts.map((p) => shortOn.get(p.accountId) ?? null).find((d) => d !== null)}
                       />
                     ) : null}
                   </Card>
