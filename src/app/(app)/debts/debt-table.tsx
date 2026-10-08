@@ -6,18 +6,21 @@
  * statement balance, change any term, or remove it (with a confirm step that
  * stays inside the table). The last row adds a new one.
  *
- * A debt with nothing owed on it is not in the payoff order, so it has a table
- * of its own below (IdleDebtTable) with the same balance, terms and remove
- * controls: typing a balance into one puts it back in the order.
+ * A card with nothing owed is not in the payoff order, so it has a table of
+ * its own below (IdleDebtTable, "Idle lines of credit", D37) with the same
+ * balance, terms and remove controls: typing a balance into one puts it back in
+ * the order. A car loan or mortgage at $0 is paid off and done and is not
+ * shown, so whatever would clear one asks once first (payoff-question.tsx).
  *
  * Nothing here is computed; every figure arrives from the page, which got it
  * from the ladder (PRD §10). On a phone the less important columns fold away
  * rather than the table scrolling sideways, so the row stays tappable.
  */
 
-import { useState, type ReactNode } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
+import { balanceAfterPaymentCents, paysOffLoan, type DebtCategory } from '@/domain/debt'
 import type { DebtFormValues } from '@/domain/debt-form'
-import { formatCents } from '@/domain/money'
+import { formatCents, parseAmountOrNull } from '@/domain/money'
 import { humanDate } from '@/components/ui'
 import {
   confirmDebtPaymentAction,
@@ -27,6 +30,7 @@ import {
   updateDebtBalanceAction,
 } from '@/server/actions'
 import { DebtForm } from './debt-form'
+import { usePayoffQuestion } from './payoff-question'
 import { DEFAULT_SORT, nextSort, sortDebtRows, type Sort, type SortKey } from './debt-sort'
 
 export interface DebtRow {
@@ -34,6 +38,8 @@ export interface DebtRow {
   rank: number
   name: string
   kind: string
+  /** Decides whether clearing it is a payoff that needs a yes (D37). */
+  category: DebtCategory
   balanceCents: number
   asOf: string
   ageDays: number
@@ -209,25 +215,11 @@ function Row({
                 </p>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <form action={confirmDebtPaymentAction} className="flex items-end gap-2">
-                    <input type="hidden" name="debt_id" value={row.id} />
-                    <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
-                      I paid
-                      <input
-                        name="amount"
-                        inputMode="decimal"
-                        placeholder={formatCents(row.paymentCents).replace('$', '')}
-                        className={smallField}
-                      />
-                    </label>
-                    <button type="submit" className="min-h-11 rounded-lg border border-[var(--color-line)] px-3 text-sm">
-                      Record
-                    </button>
-                  </form>
-                  <StatementForm id={row.id} balanceCents={row.balanceCents} highlight={row.stale} />
+                  <PaymentForm row={row} />
+                  <StatementForm id={row.id} balanceCents={row.balanceCents} highlight={row.stale} payoff={row} />
                 </div>
 
-                <TermsAndRemove id={row.id} initial={row.initial} setOpen={setOpen} />
+                <TermsAndRemove id={row.id} initial={row.initial} setOpen={setOpen} payoff={row} />
               </div>
             )}
           </td>
@@ -245,6 +237,8 @@ export interface IdleDebtRow {
   ageDays: number
   /** "24.99%", already formatted: the listed rate, what a new balance would cost. */
   listedRate: string
+  /** "0.00% until Mar 1, 2027" while a promotional rate runs, else null. */
+  promo: string | null
   creditLimitCents: number | null
   initial: DebtFormValues
 }
@@ -252,9 +246,11 @@ export interface IdleDebtRow {
 const IDLE_COLUMNS = 3
 
 /**
- * The cards and lines of credit with nothing owed on them. No rank, payment
- * or payoff date, because they are not in the payoff order; the same edit
- * panel as the main table, less "I paid", since there is nothing to pay.
+ * Idle lines of credit: cards and lines with nothing owed on them (D37). No
+ * rank, payment or payoff date, because they are not in the payoff order; the
+ * same edit panel as the main table, less "I paid", since there is nothing to
+ * pay. A running promotion shows under the rate, the fact you want when
+ * deciding which card to use; a limit is shown and never totalled.
  */
 export function IdleDebtTable({ rows }: { rows: IdleDebtRow[] }) {
   const [open, setOpen] = useState<Open>(null)
@@ -318,9 +314,13 @@ function IdleRow({
             {' · '}
             {row.ageDays === 0 ? '$0 as of today' : `$0 as of ${humanDate(row.asOf)}`}
           </span>
+          {row.promo ? <span className="block text-xs text-[var(--color-ink-soft)] sm:hidden">{row.promo}</span> : null}
           <span className="-ml-2 mt-1 block sm:hidden">{editButton}</span>
         </td>
-        <td className={`${td} hidden text-right tabular sm:table-cell`}>{row.listedRate}</td>
+        <td className={`${td} hidden text-right tabular sm:table-cell`}>
+          {row.listedRate}
+          {row.promo ? <span className="block text-xs text-[var(--color-ink-soft)]">{row.promo}</span> : null}
+        </td>
         <td className={`${td} whitespace-nowrap text-right tabular`}>
           {row.creditLimitCents !== null ? (
             formatCents(row.creditLimitCents)
@@ -364,38 +364,95 @@ function IdleRow({
   )
 }
 
-/** "The statement says it is": a balance read off a statement, dated today. */
+/** What a payoff question needs to know about the debt on the row. */
+type PayoffSubject = Pick<DebtRow, 'name' | 'balanceCents' | 'category'>
+
+/** The typed amount, or null while it does not read as one; the server says why. */
+function typed(form: HTMLFormElement, field: string): number | null {
+  const box = form.elements.namedItem(field)
+  return box instanceof HTMLInputElement ? parseAmountOrNull(box.value) : null
+}
+
+/** "I paid": a payment made, which asks once first if it pays off a loan (D37). */
+function PaymentForm({ row }: { row: DebtRow }) {
+  const payoff = usePayoffQuestion(row.name)
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    const amount = typed(event.currentTarget, 'amount')
+    payoff.check(
+      event,
+      amount !== null && amount > 0 && paysOffLoan({ ...row, state: 'open' }, balanceAfterPaymentCents(row, amount)),
+    )
+  }
+  return (
+    <div className="space-y-2">
+      <form action={confirmDebtPaymentAction} onSubmit={onSubmit} className="flex items-end gap-2">
+        <input type="hidden" name="debt_id" value={row.id} />
+        {payoff.hidden}
+        <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+          I paid
+          <input
+            name="amount"
+            inputMode="decimal"
+            placeholder={formatCents(row.paymentCents).replace('$', '')}
+            className={smallField}
+          />
+        </label>
+        <button type="submit" className="min-h-11 rounded-lg border border-[var(--color-line)] px-3 text-sm">
+          Record
+        </button>
+      </form>
+      {payoff.question}
+    </div>
+  )
+}
+
+/**
+ * "The statement says it is": a balance read off a statement, dated today. On
+ * a debt in the payoff order it asks once first if the balance pays off a loan.
+ */
 function StatementForm({
   id,
   balanceCents,
   highlight,
   onSubmit,
+  payoff: subject,
 }: {
   id: string
   balanceCents: number
   highlight: boolean
   onSubmit?: () => void
+  payoff?: PayoffSubject
 }) {
+  const payoff = usePayoffQuestion(subject?.name ?? '')
+  function submit(event: FormEvent<HTMLFormElement>) {
+    const balance = typed(event.currentTarget, 'balance')
+    const asks = subject !== undefined && balance !== null && balance >= 0 && paysOffLoan({ ...subject, state: 'open' }, balance)
+    if (payoff.check(event, asks)) onSubmit?.()
+  }
   return (
-    <form
-      action={updateDebtBalanceAction}
-      onSubmit={onSubmit}
-      className={`flex items-end gap-2 ${highlight ? 'rounded-lg bg-[var(--color-accent-soft)] p-2 sm:-m-2' : ''}`}
-    >
-      <input type="hidden" name="debt_id" value={id} />
-      <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
-        The statement says it is
-        <input
-          name="balance"
-          inputMode="decimal"
-          placeholder={formatCents(balanceCents).replace('$', '')}
-          className={smallField}
-        />
-      </label>
-      <button type="submit" className="min-h-11 rounded-lg border border-[var(--color-line)] px-3 text-sm">
-        Update
-      </button>
-    </form>
+    <div className="space-y-2">
+      <form
+        action={updateDebtBalanceAction}
+        onSubmit={submit}
+        className={`flex items-end gap-2 ${highlight ? 'rounded-lg bg-[var(--color-accent-soft)] p-2 sm:-m-2' : ''}`}
+      >
+        <input type="hidden" name="debt_id" value={id} />
+        {payoff.hidden}
+        <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+          The statement says it is
+          <input
+            name="balance"
+            inputMode="decimal"
+            placeholder={formatCents(balanceCents).replace('$', '')}
+            className={smallField}
+          />
+        </label>
+        <button type="submit" className="min-h-11 rounded-lg border border-[var(--color-line)] px-3 text-sm">
+          Update
+        </button>
+      </form>
+      {payoff.question}
+    </div>
   )
 }
 
@@ -404,10 +461,13 @@ function TermsAndRemove({
   id,
   initial,
   setOpen,
+  payoff,
 }: {
   id: string
   initial: DebtFormValues
   setOpen: (open: Open) => void
+  /** A debt in the payoff order: a $0 balance typed here may pay off a loan. */
+  payoff?: PayoffSubject
 }) {
   return (
     <>
@@ -420,6 +480,7 @@ function TermsAndRemove({
             action={updateDebtAction}
             initial={initial}
             debtId={id}
+            payoff={payoff}
             submitLabel="Save changes"
             onSaved={() => setOpen(null)}
           />

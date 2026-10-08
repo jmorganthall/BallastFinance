@@ -5,9 +5,14 @@ import {
   DebtDataError,
   DEFAULT_PROMO_LEAD_WEEKS,
   effectiveAprBasisPoints,
+  balanceAfterPaymentCents,
   idleDebtsOf,
   interestOverNextYearCents,
+  isLineOfCredit,
   isOwing,
+  nextLivePromo,
+  paidOffLoansOf,
+  paysOffLoan,
   minimumPaymentCents,
   projectPayoff,
   promoExpiryWarning,
@@ -266,11 +271,12 @@ describe('scoring', () => {
   })
 })
 
-describe('idle debts: nothing owed, outside the payoff order, never gone', () => {
+describe('a card with nothing owed is idle; a loan paid off is done (D37)', () => {
   const debts = [
     debt({ id: 'owing', name: 'Visa' }),
     debt({ id: 'new-at-zero', name: 'Store card', balanceCents: 0 }),
     debt({ id: 'paid-off', name: 'Car loan', category: 'auto', balanceCents: 0, state: 'paid_off' }),
+    debt({ id: 'mortgage-done', name: 'Old mortgage', category: 'mortgage', balanceCents: 0, state: 'paid_off' }),
     debt({ id: 'heloc', name: 'Home equity line', balanceCents: 0, creditLimitCents: 5000000 }),
   ]
 
@@ -279,23 +285,80 @@ describe('idle debts: nothing owed, outside the payoff order, never gone', () =>
       ['owing', true],
       ['new-at-zero', false],
       ['paid-off', false],
+      ['mortgage-done', false],
       ['heloc', false],
     ])
   })
 
-  it('lists a card added at $0 and a debt paid off, by name', () => {
-    expect(idleDebtsOf(debts).map((d) => d.id)).toEqual(['paid-off', 'heloc', 'new-at-zero'])
+  it('reads "Credit card or loan" as a line of credit, and a car loan or mortgage as an installment loan', () => {
+    expect(isLineOfCredit({ category: 'consumer' })).toBe(true)
+    expect(isLineOfCredit({ category: 'auto' })).toBe(false)
+    expect(isLineOfCredit({ category: 'mortgage' })).toBe(false)
   })
 
-  it('puts every debt in exactly one place: the payoff order or the idle list', () => {
-    const ranked = scoreDebts({ debts, today: TODAY }).map((s) => s.debt.id)
-    const idle = idleDebtsOf(debts).map((d) => d.id)
-    expect(ranked.filter((id) => idle.includes(id))).toEqual([])
-    expect([...ranked, ...idle].sort()).toEqual(debts.map((d) => d.id).sort())
+  it('lists cards and lines with nothing owed as idle, by name, and never a paid-off loan', () => {
+    expect(idleDebtsOf(debts).map((d) => d.id)).toEqual(['heloc', 'new-at-zero'])
+  })
+
+  it('keeps paid-off car loans and mortgages apart: done, off the screen', () => {
+    expect(paidOffLoansOf(debts).map((d) => d.id)).toEqual(['paid-off', 'mortgage-done'])
+  })
+
+  it('puts every debt in exactly one place: the payoff order, idle, or paid off', () => {
+    const lists = [
+      scoreDebts({ debts, today: TODAY }).map((s) => s.debt.id),
+      idleDebtsOf(debts).map((d) => d.id),
+      paidOffLoansOf(debts).map((d) => d.id),
+    ]
+    expect(lists.flat().sort()).toEqual(debts.map((d) => d.id).sort())
+    expect(new Set(lists.flat()).size).toBe(debts.length)
   })
 
   it('is empty when everything is owing', () => {
     expect(idleDebtsOf([debt({ id: 'a', name: 'A' })])).toEqual([])
+    expect(paidOffLoansOf([debt({ id: 'a', name: 'A', category: 'auto' })])).toEqual([])
+  })
+})
+
+describe('paying off a loan asks first (D37)', () => {
+  const car = debt({ id: 'car', name: 'Car loan', category: 'auto', balanceCents: 150000 })
+  const card = debt({ id: 'card', name: 'Visa', balanceCents: 150000 })
+
+  it('a payment never leaves less than nothing owed', () => {
+    expect(balanceAfterPaymentCents(car, 50000)).toBe(100000)
+    expect(balanceAfterPaymentCents(car, 150000)).toBe(0)
+    expect(balanceAfterPaymentCents(car, 99_999_999)).toBe(0)
+  })
+
+  it('asks when a car loan or mortgage would reach $0', () => {
+    expect(paysOffLoan(car, 0)).toBe(true)
+    expect(paysOffLoan({ ...car, category: 'mortgage' }, 0)).toBe(true)
+    expect(paysOffLoan(car, 1)).toBe(false)
+  })
+
+  it('never asks for a card, which only goes idle, or a loan already paid off', () => {
+    expect(paysOffLoan(card, 0)).toBe(false)
+    expect(paysOffLoan({ ...car, balanceCents: 0, state: 'paid_off' }, 0)).toBe(false)
+  })
+})
+
+describe('the promotional rate an idle card shows', () => {
+  it('is the soonest one still running', () => {
+    const d = debt({
+      id: 'p',
+      name: 'Card',
+      promoRules: [
+        { rateBasisPoints: 499, appliesTo: 'full', untilDate: '2027-06-01' },
+        { rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-03-01' },
+        { rateBasisPoints: 0, appliesTo: 'full', untilDate: '2026-09-01' }, // already over
+      ],
+    })
+    expect(nextLivePromo(d, TODAY)).toMatchObject({ rateBasisPoints: 0, untilDate: '2027-03-01' })
+  })
+
+  it('is nothing once every deal has ended, or when there never was one', () => {
+    expect(nextLivePromo(debt({ id: 'p', name: 'Card', promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: TODAY }] }), TODAY)).toBeNull()
+    expect(nextLivePromo(debt({ id: 'q', name: 'Card' }), TODAY)).toBeNull()
   })
 })
 

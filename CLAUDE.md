@@ -132,13 +132,26 @@ principles, and they are non-negotiable.
   picture. An `individual` account can only be renamed, funded, or
   balance-confirmed by its owner (`canWriteAccount` in `src/domain/types.ts`).
   There is deliberately no `canReadAccount`.
-- **A debt with nothing owed is idle, not gone.** `isOwing` in
-  `src/domain/debt.ts` is the one test for being in the payoff order (the
-  ranking and the lump-sum optimizer both read it); `idleDebtsOf` is every
-  other debt, and the Debts screen lists those in their own table, "Idle cards
-  or lines of credit", with the same balance, terms and remove controls, so a
-  paid-off card can take a new balance. Never build a list of debts from the
-  ladder alone: a $0 debt would vanish with nowhere to edit it.
+- **A card with nothing owed is idle but never gone; a loan paid off is
+  done** (PRD D37, rev 63). `isOwing` in `src/domain/debt.ts` is the one test
+  for being in the payoff order (the ranking and the lump-sum optimizer both
+  read it). `isLineOfCredit` reads the "Credit card or loan" kind as a line of
+  credit and a car loan or mortgage as an installment loan. `idleDebtsOf` (a
+  line of credit at $0) is listed under "Idle lines of credit" with the same
+  balance, terms and remove controls, so a paid-off card can take a new
+  balance; `paidOffLoansOf` (a loan at $0) is not shown at all and stays in
+  the log. Every debt is in exactly one of the three; never build a list of
+  debts from the ladder alone. Because a paid-off loan cannot come back on
+  screen, `paysOffLoan` decides when a payment (`balanceAfterPaymentCents`) or
+  a statement balance would clear one: the screen asks once
+  (`payoff-question.tsx`), the action sends `confirm_payoff=yes`, and
+  `confirmDebtPayment` / `updateDebtBalance` refuse without it; adding a loan
+  at $0 is refused. When any debt reaches $0 the event that takes it there
+  carries `paid_off` (balance before, minimum rule, planned payment, rate,
+  type): facts for a future snowball module, never a worked-out figure. A
+  card paid in full every month stays at $0 (its bill is spending, not debt),
+  and unused credit is never money: a limit is shown, never totalled or
+  counted.
 - **Home and car values are typed, never fetched** (PRD §15, D13). Zillow and
   KBB do not license their values to an app like this. The mortgage rate is the
   one outbound data call (`src/server/market-rate.ts`, FRED's public CSV), and
@@ -300,7 +313,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 687 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 704 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

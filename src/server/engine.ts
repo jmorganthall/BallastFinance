@@ -52,8 +52,14 @@ import {
   DEFAULT_BUFFER_CENTS,
   DEFAULT_PRIORITY_WEIGHT,
   DEFAULT_PROMO_LEAD_WEEKS,
+  balanceAfterPaymentCents,
+  DebtDataError,
   idleDebtsOf,
   INTAKE_CONTRACT_VERSION,
+  isLineOfCredit,
+  isOwing,
+  paidOffLoansOf,
+  paysOffLoan,
   optimiseLumpSum,
   planAllocation,
   promoExpiryWarning,
@@ -2204,6 +2210,11 @@ export class Engine {
       aprBasisPoints: input.aprBasisPoints,
       promoRules: input.promoRules ?? [],
     })
+    // A loan with nothing owed is paid off and done (D37): added, it would sit
+    // in the database with nowhere on screen to see it.
+    if (!isLineOfCredit(input) && input.balanceCents === 0) {
+      throw new DebtDataError('A car loan or mortgage with nothing owed is already paid off, so there is nothing to add.')
+    }
 
     const [row] = await this.db
       .insert(debtsTable)
@@ -2259,6 +2270,11 @@ export class Engine {
           patch.plannedPaymentCents === undefined ? before.plannedPaymentCents : patch.plannedPaymentCents,
       }
       if (!after.name) throw new EngineError('A debt needs a name')
+      // An idle card turned into a car loan or mortgage at $0 would be a
+      // paid-off loan, gone from the screen without anyone saying so (D37).
+      if (isLineOfCredit(before) && !isLineOfCredit(after) && !isOwing(after)) {
+        throw new DebtDataError('A car loan or mortgage with nothing owed is already paid off, so it cannot be changed into one.')
+      }
 
       validateDebtInputs({
         balanceCents: after.balanceCents,
@@ -2349,7 +2365,12 @@ export class Engine {
    * A confirmed payment (PRD §7). Balances move only through confirmations, so a
    * recommendation the user did not act on never changes a score.
    */
-  async confirmDebtPayment(input: { debtId: Id; amountCents: Cents }): Promise<void> {
+  async confirmDebtPayment(input: {
+    debtId: Id
+    amountCents: Cents
+    /** The person said yes to "That pays off <loan>" (D37). */
+    confirmPayoff?: boolean
+  }): Promise<void> {
     const today = this.today()
     await this.db.transaction(async (tx) => {
       const [row] = await tx
@@ -2358,7 +2379,8 @@ export class Engine {
         .where(and(eq(debtsTable.id, input.debtId), eq(debtsTable.householdId, this.householdId)))
       if (!row) throw new EngineError('No such debt in this household')
 
-      const balanceCents = Math.max(0, row.balanceCents - input.amountCents)
+      const balanceCents = balanceAfterPaymentCents(row, input.amountCents)
+      refuseUnconfirmedPayoff(row, balanceCents, input.confirmPayoff)
       await tx
         .update(debtsTable)
         .set({
@@ -2378,13 +2400,19 @@ export class Engine {
           debt_id: input.debtId,
           amount_cents: input.amountCents,
           balance_after_cents: balanceCents,
+          ...paidOffNote(row, balanceCents),
         },
       })
     })
   }
 
   /** A statement balance the user read off, rather than a payment they made. */
-  async updateDebtBalance(input: { debtId: Id; balanceCents: Cents }): Promise<void> {
+  async updateDebtBalance(input: {
+    debtId: Id
+    balanceCents: Cents
+    /** The person said yes to "That pays off <loan>" (D37). */
+    confirmPayoff?: boolean
+  }): Promise<void> {
     const today = this.today()
     await this.db.transaction(async (tx) => {
       const [row] = await tx
@@ -2392,6 +2420,7 @@ export class Engine {
         .from(debtsTable)
         .where(and(eq(debtsTable.id, input.debtId), eq(debtsTable.householdId, this.householdId)))
       if (!row) throw new EngineError('No such debt in this household')
+      refuseUnconfirmedPayoff(row, input.balanceCents, input.confirmPayoff)
 
       await tx
         .update(debtsTable)
@@ -2408,7 +2437,12 @@ export class Engine {
         occurredAt: today,
         actorUserId: this.actorUserId,
         source: 'manual',
-        payload: { debt_id: input.debtId, balance_cents: input.balanceCents, as_of: today },
+        payload: {
+          debt_id: input.debtId,
+          balance_cents: input.balanceCents,
+          as_of: today,
+          ...paidOffNote(row, input.balanceCents),
+        },
       })
     })
   }
@@ -2431,9 +2465,14 @@ export class Engine {
     return snowballLadder(scoreDebts({ debts, today: this.today(), weight, promoLeadWeeks }))
   }
 
-  /** The debts outside the payoff order: nothing owed on them right now. */
+  /** Idle lines of credit: cards and lines with nothing owed right now (D37). */
   async idleDebts(): Promise<Debt[]> {
     return idleDebtsOf(await this.listDebts())
+  }
+
+  /** Car loans and mortgages paid off: done, off the Debts screen, kept in the log (D37). */
+  async paidOffLoans(): Promise<Debt[]> {
+    return paidOffLoansOf(await this.listDebts())
   }
 
   /** Where a specific amount should go (PRD §7). */
@@ -4838,6 +4877,43 @@ function assetEventShape(a: Asset) {
 }
 
 /** The share-out's first step, as the debt step must see it: what is already going at each debt. */
+/**
+ * A payment or statement balance that would pay off a car loan or mortgage is
+ * recorded only once the person has said yes (D37): paid off, it leaves the
+ * Debts screen with no way back on screen. The screen asks first; this is the
+ * guard for a request that skipped the question.
+ */
+function refuseUnconfirmedPayoff(
+  row: typeof debtsTable.$inferSelect,
+  newBalanceCents: Cents,
+  confirmed: boolean | undefined,
+): void {
+  if (!confirmed && paysOffLoan(row, newBalanceCents)) {
+    throw new EngineError(
+      `That would pay off ${row.name}, and it would leave the Debts screen. Nothing was recorded; try again and say yes when asked.`,
+    )
+  }
+}
+
+/**
+ * The facts as they stood when a debt reached $0, noted on the event that took
+ * it there (D37), card or loan. A future snowball module works out what the
+ * payoff freed each month from these, with the same functions the payoff order
+ * uses, so no figure is stored.
+ */
+function paidOffNote(row: typeof debtsTable.$inferSelect, newBalanceCents: Cents) {
+  if (!isOwing(row) || newBalanceCents > 0) return {}
+  return {
+    paid_off: {
+      balance_before_cents: row.balanceCents,
+      min_payment_rule: row.minPaymentRule,
+      planned_payment_cents: row.plannedPaymentCents,
+      apr_basis_points: row.aprBasisPoints,
+      category: row.category,
+    },
+  }
+}
+
 export function debtTopUps(plan: AllocationPlan): Record<Id, Cents> {
   const paid: Record<Id, Cents> = {}
   for (const t of plan.topUps) {

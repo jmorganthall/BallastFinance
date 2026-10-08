@@ -158,17 +158,88 @@ describeDb('debts, the ladder and the optimizer', () => {
     expect(ladder.map((r) => r.debt.name)).not.toContain('Store card')
   })
 
+  it('notes the facts as they stood on the payment that paid it off, for a future snowball (D37)', async () => {
+    const store = (await engine.listDebts()).find((d) => d.name === 'Store card')!
+    const payments = (await db.select().from(schema.events).where(eq(schema.events.kind, 'payment_confirmed')))
+      .filter((r) => r.householdId === householdId)
+      .map((r) => r.payload as { debt_id: string; amount_cents: number; paid_off?: Record<string, unknown> })
+      .filter((p) => p.debt_id === store.id)
+    expect(payments.map((p) => p.amount_cents)).toEqual([10000, 30000])
+    // The $100 payment left $300 owing: nothing to note.
+    expect(payments[0]!.paid_off).toBeUndefined()
+    expect(payments[1]!.paid_off).toEqual({
+      balance_before_cents: 30000,
+      min_payment_rule: { type: 'fixed', amountCents: 4000 },
+      planned_payment_cents: null,
+      apr_basis_points: 2999,
+      category: 'consumer',
+    })
+  })
+
+  it('asks before a payment pays off a loan, and records nothing until it is answered (D37)', async () => {
+    const car = (await engine.listDebts()).find((d) => d.name === 'Car loan')!
+    await expect(engine.confirmDebtPayment({ debtId: car.id, amountCents: 99_999_999 })).rejects.toThrow(
+      /would pay off Car loan/,
+    )
+    expect((await engine.listDebts()).find((d) => d.name === 'Car loan')).toMatchObject({
+      balanceCents: 1200000,
+      state: 'open',
+    })
+  })
+
   it('never lets an overpayment drive a balance negative', async () => {
     const car = (await engine.listDebts()).find((d) => d.name === 'Car loan')!
-    await engine.confirmDebtPayment({ debtId: car.id, amountCents: 99_999_999 })
+    await engine.confirmDebtPayment({ debtId: car.id, amountCents: 99_999_999, confirmPayoff: true })
     const after = (await engine.listDebts()).find((d) => d.name === 'Car loan')!
     expect(after.balanceCents).toBe(0)
     expect(after.state).toBe('paid_off')
   })
 
-  it('keeps a debt with nothing owed on the idle list, and a typed balance puts it back in the order', async () => {
-    // Paid off above: out of the ladder, but not gone.
-    expect((await engine.idleDebts()).map((d) => d.name)).toEqual(['Car loan', 'Store card'])
+  it('a statement balance of $0 on a loan asks first too, and notes the payoff', async () => {
+    const boat = await engine.createDebt({
+      name: 'Boat loan',
+      category: 'auto',
+      balanceCents: 50000,
+      aprBasisPoints: 799,
+      minPaymentRule: { type: 'fixed', amountCents: 10000 },
+    })
+    await expect(engine.updateDebtBalance({ debtId: boat.id, balanceCents: 0 })).rejects.toThrow(
+      /would pay off Boat loan/,
+    )
+    expect((await engine.listDebts()).find((d) => d.id === boat.id)!.balanceCents).toBe(50000)
+
+    await engine.updateDebtBalance({ debtId: boat.id, balanceCents: 0, confirmPayoff: true })
+    expect((await engine.listDebts()).find((d) => d.id === boat.id)!.state).toBe('paid_off')
+    const updates = (await db.select().from(schema.events).where(eq(schema.events.kind, 'debt_balance_updated')))
+      .map((r) => r.payload as { debt_id: string; paid_off?: Record<string, unknown> })
+      .filter((p) => p.debt_id === boat.id)
+    expect(updates).toHaveLength(1)
+    expect(updates[0]!.paid_off).toMatchObject({ balance_before_cents: 50000, category: 'auto', apr_basis_points: 799 })
+  })
+
+  it('refuses to add a car loan or mortgage that is already paid off', async () => {
+    await expect(
+      engine.createDebt({
+        name: 'Old car',
+        category: 'auto',
+        balanceCents: 0,
+        aprBasisPoints: 499,
+        minPaymentRule: { type: 'fixed', amountCents: 30000 },
+      }),
+    ).rejects.toThrow(/already paid off/)
+    expect((await engine.listDebts()).map((d) => d.name)).not.toContain('Old car')
+  })
+
+  it('refuses to turn an idle card into a car loan or mortgage, which would vanish as paid off', async () => {
+    const store = (await engine.listDebts()).find((d) => d.name === 'Store card')!
+    await expect(engine.updateDebt(store.id, { category: 'auto' })).rejects.toThrow(/already paid off/)
+    expect((await engine.idleDebts()).map((d) => d.name)).toContain('Store card')
+  })
+
+  it('keeps a card with nothing owed on the idle list, and a typed balance puts it back in the order', async () => {
+    // Paid off above: the card is idle, and the two loans are done and off the screen.
+    expect((await engine.idleDebts()).map((d) => d.name)).toEqual(['Store card'])
+    expect((await engine.paidOffLoans()).map((d) => d.name)).toEqual(['Boat loan', 'Car loan'])
 
     const spare = await engine.createDebt({
       name: 'Spare card',
