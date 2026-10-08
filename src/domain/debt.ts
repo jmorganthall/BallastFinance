@@ -224,9 +224,7 @@ export interface PromoCliff {
 
 export function promoCliff(debt: Debt, today: CivilDate): PromoCliff | null {
   if (debt.state !== 'open' || debt.balanceCents <= 0) return null
-  const next = debt.promoRules
-    .filter((rule) => compareDates(rule.untilDate, today) > 0)
-    .sort((a, b) => compareDates(a.untilDate, b.untilDate))[0]
+  const next = nextLivePromo(debt, today)
   if (!next) return null
   const amountCents =
     next.appliesTo === 'full' ? debt.balanceCents : Math.min(next.amountCents ?? 0, debt.balanceCents)
@@ -315,10 +313,7 @@ export function promoExpiryWarning(
   today: CivilDate,
   leadWeeks: number = DEFAULT_PROMO_LEAD_WEEKS,
 ): { untilDate: CivilDate; monthlyToClearCents: Cents } | null {
-  const live = debt.promoRules
-    .filter((rule) => compareDates(rule.untilDate, today) > 0)
-    .sort((a, b) => compareDates(a.untilDate, b.untilDate))
-  const next = live[0]
+  const next = nextLivePromo(debt, today)
   if (!next) return null
 
   const monthsLeft = monthsBetween(today, next.untilDate)
@@ -331,6 +326,68 @@ export function promoExpiryWarning(
     untilDate: next.untilDate,
     monthlyToClearCents: monthsLeft <= 0 ? amountCents : Math.ceil(amountCents / monthsLeft),
   }
+}
+
+/**
+ * Whether a debt is in the payoff order: open, with something owed. The one
+ * definition, read by the ranking and the lump-sum optimizer alike, so a debt
+ * is never ranked by one and ignored by the other.
+ */
+export function isOwing(debt: Pick<Debt, 'state' | 'balanceCents'>): boolean {
+  return debt.state === 'open' && debt.balanceCents > 0
+}
+
+/**
+ * A credit card or line of credit: the "Credit card or loan" kind (D37). At $0
+ * it is idle, not finished -- the account is still open and can take a balance
+ * again. A car loan or a mortgage is an installment loan: at $0 it is paid off
+ * and done. A personal loan typed in as "Credit card or loan" reads as a line
+ * of credit; that is the price of no second kind, and it can be removed.
+ */
+export function isLineOfCredit(debt: Pick<Debt, 'category'>): boolean {
+  return debt.category === 'consumer'
+}
+
+/**
+ * Idle lines of credit, by name: a card paid down to nothing, a line added at
+ * $0 (D37). Idle, not gone -- the screen lists them on their own, and one is
+ * back in the payoff order the day a balance is typed in. With the ladder and
+ * the paid-off loans this is every debt, each exactly once.
+ */
+export function idleDebtsOf(debts: readonly Debt[]): Debt[] {
+  return debts.filter((d) => !isOwing(d) && isLineOfCredit(d)).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** Installment loans with nothing owed: paid off and done, kept in the log, off the Debts screen (D37). */
+export function paidOffLoansOf(debts: readonly Debt[]): Debt[] {
+  return debts.filter((d) => !isOwing(d) && !isLineOfCredit(d)).sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** What a payment leaves owing. An overpayment clears the debt; it never drives the balance below zero. */
+export function balanceAfterPaymentCents(debt: Pick<Debt, 'balanceCents'>, amountCents: Cents): Cents {
+  return Math.max(0, debt.balanceCents - amountCents)
+}
+
+/**
+ * Whether a new balance pays off an installment loan for good (D37). That takes
+ * it off the Debts screen with no way back on screen, so the screen asks once
+ * first and the engine refuses to record it without that answer: a typo in "I
+ * paid" is caught at the only moment it can be.
+ */
+export function paysOffLoan(
+  debt: Pick<Debt, 'state' | 'balanceCents' | 'category'>,
+  newBalanceCents: Cents,
+): boolean {
+  return isOwing(debt) && !isLineOfCredit(debt) && newBalanceCents <= 0
+}
+
+/** The soonest promotional rate still running on a debt, if any. */
+export function nextLivePromo(debt: Pick<Debt, 'promoRules'>, today: CivilDate): PromoRule | null {
+  return (
+    debt.promoRules
+      .filter((rule) => compareDates(rule.untilDate, today) > 0)
+      .sort((a, b) => compareDates(a.untilDate, b.untilDate))[0] ?? null
+  )
 }
 
 export interface DebtScore {
@@ -362,7 +419,7 @@ export function scoreDebts(args: {
 }): DebtScore[] {
   const weight = args.weight ?? DEFAULT_PRIORITY_WEIGHT
   const leadWeeks = args.promoLeadWeeks ?? DEFAULT_PROMO_LEAD_WEEKS
-  const open = args.debts.filter((d) => d.state === 'open' && d.balanceCents > 0)
+  const open = args.debts.filter(isOwing)
   if (open.length === 0) return []
 
   const rows = open.map((debt) => ({

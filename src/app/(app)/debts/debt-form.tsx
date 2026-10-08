@@ -20,7 +20,9 @@ import {
   type DebtFormField,
   type DebtFormValues,
 } from '@/domain/debt-form'
+import { isOwing, paysOffLoan, type DebtCategory } from '@/domain/debt'
 import type { DebtFormState } from '@/server/actions'
+import { usePayoffQuestion } from './payoff-question'
 
 type Problem = { field: string; message: string }
 
@@ -37,6 +39,7 @@ export function DebtForm({
   debtId,
   submitLabel = 'Add this debt',
   onSaved,
+  payoff: subject,
 }: {
   action: (previous: DebtFormState, formData: FormData) => Promise<DebtFormState>
   /** Editing an existing debt: the boxes start from what is stored. */
@@ -44,11 +47,16 @@ export function DebtForm({
   debtId?: string
   submitLabel?: string
   onSaved?: () => void
+  /** Editing a debt in the payoff order: a $0 balance may pay off a loan, and asks once first (D37). */
+  payoff?: { name: string; balanceCents: number; category: DebtCategory }
 }) {
   const [state, formAction, pending] = useActionState(action, INITIAL)
   const [values, setValues] = useState<DebtFormValues>(initial ?? EMPTY_DEBT_FORM)
   const [problems, setProblems] = useState<Problem[]>([])
   const [justSaved, setJustSaved] = useState(false)
+  // Added with nothing owed, a card lands under Idle lines of credit, not the payoff order.
+  const [addedIdle, setAddedIdle] = useState(false)
+  const payoff = usePayoffQuestion(subject?.name ?? '')
   const editing = debtId !== undefined
 
   // Whatever the server found goes next to the box it belongs to.
@@ -89,7 +97,11 @@ export function DebtForm({
         : null
       box?.focus()
       box?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      return
     }
+    const { balanceCents, category } = result.input
+    if (subject && !payoff.check(event, paysOffLoan({ ...subject, state: 'open', category }, balanceCents))) return
+    if (!editing) setAddedIdle(!isOwing({ state: 'open', balanceCents }))
   }
 
   const problemFor = (field: DebtFormField) => problems.find((p) => p.field === field)?.message
@@ -112,10 +124,15 @@ export function DebtForm({
       ) : null}
       {justSaved ? (
         <p role="status" className="rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">
-          {editing ? 'Saved.' : 'Added. It is in the payoff order above.'}
+          {editing
+            ? 'Saved.'
+            : addedIdle
+              ? 'Added. With nothing owed, it is under Idle lines of credit below.'
+              : 'Added. It is in the payoff order above.'}
         </p>
       ) : null}
       {editing ? <input type="hidden" name="debt_id" value={debtId} /> : null}
+      {payoff.hidden}
 
       <Field label="Name" problem={problemFor('name')}>
         {(a) => (
@@ -312,6 +329,7 @@ export function DebtForm({
         </>
       ) : null}
 
+      {payoff.question}
       <button
         type="submit"
         disabled={pending}

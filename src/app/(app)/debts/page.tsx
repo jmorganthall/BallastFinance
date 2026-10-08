@@ -2,7 +2,10 @@
  * Debts (PRD §9, screen 6).
  *
  * The payoff order, the slider that reorders it, and the optimizer that answers
- * "given this much, where does it go?".
+ * "given this much, where does it go?". Below them, the idle lines of credit
+ * (D37): cards with nothing owed, which are not in the order but must not
+ * vanish, or there would be nowhere to type a new balance into one. A car loan
+ * or mortgage at $0 is paid off and done, and is not shown at all.
  *
  * The slider is a GET form, so moving it needs no client JavaScript and the
  * result is a shareable URL. Changing the standing default is a separate,
@@ -13,9 +16,16 @@ import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import { setPriorityWeightAction } from '@/server/actions'
-import { balanceFreshness, debtFormValuesOf, parseAmountToCents, projectPayoff } from '@/domain'
+import {
+  balanceAgeDays,
+  balanceFreshness,
+  debtFormValuesOf,
+  nextLivePromo,
+  parseAmountToCents,
+  projectPayoff,
+} from '@/domain'
 import { PayoffImpact } from '@/components/payoff-impact'
-import { DebtTable, type DebtRow } from './debt-table'
+import { DebtTable, IdleDebtTable, type DebtRow, type IdleDebtRow } from './debt-table'
 
 const KIND: Record<string, string> = {
   consumer: 'Credit card or loan',
@@ -37,8 +47,10 @@ export default async function DebtsPage({
   const weight = w !== undefined && Number.isFinite(Number(w)) ? Number(w) : standingWeight
   const isPreview = Math.abs(weight - standingWeight) > 0.001
 
-  const [ladder, warnings, today] = await Promise.all([
+  const [ladder, idle, paidOffLoans, warnings, today] = await Promise.all([
     engine.debtLadder(weight),
+    engine.idleDebts(),
+    engine.paidOffLoans(),
     engine.promoWarnings(),
     Promise.resolve(engine.today()),
   ])
@@ -71,6 +83,7 @@ export default async function DebtsPage({
       rank: rung.rank,
       name: rung.debt.name,
       kind: KIND[rung.debt.category] ?? rung.debt.category,
+      category: rung.debt.category,
       balanceCents: rung.debt.balanceCents,
       asOf: rung.debt.balanceAsOf,
       ageDays: freshness.ageDays,
@@ -88,6 +101,23 @@ export default async function DebtsPage({
       initial: debtFormValuesOf(rung.debt),
     }
   })
+
+  const idleRows: IdleDebtRow[] = idle.map((debt) => {
+    const promo = nextLivePromo(debt, today)
+    return {
+      id: debt.id,
+      name: debt.name,
+      kind: KIND[debt.category] ?? debt.category,
+      asOf: debt.balanceAsOf,
+      ageDays: balanceAgeDays(debt, today),
+      listedRate: rate(debt.aprBasisPoints),
+      promo: promo ? `${rate(promo.rateBasisPoints)} until ${humanDate(promo.untilDate)}` : null,
+      creditLimitCents: debt.creditLimitCents ?? null,
+      initial: debtFormValuesOf(debt),
+    }
+  })
+  // Nothing is owed, but there are debts: idle cards, or loans already paid off.
+  const nothingOwed = idle.length > 0 || paidOffLoans.length > 0
 
   return (
     <>
@@ -147,11 +177,23 @@ export default async function DebtsPage({
 
       {ladder.length === 0 ? (
         <>
-          <Empty title="No debts recorded.">
-            <p>Add one below and Ballast will work out the payoff order.</p>
-          </Empty>
+          {nothingOwed ? (
+            <Empty title="Nothing owed right now.">
+              <p>
+                There is no payoff order to work out. Add a debt below
+                {idle.length > 0 ? ', or type a balance into an idle card' : ''}.
+              </p>
+            </Empty>
+          ) : (
+            <Empty title="No debts recorded.">
+              <p>Add one below and Ballast will work out the payoff order.</p>
+            </Empty>
+          )}
           <div className="mt-4">
-            <DebtTable rows={rows} />
+            <DebtTable
+              rows={rows}
+              emptyMessage={nothingOwed ? 'Nothing owed on any debt right now.' : undefined}
+            />
           </div>
         </>
       ) : (
@@ -254,6 +296,19 @@ export default async function DebtsPage({
         </>
       )}
 
+      {idleRows.length > 0 ? (
+        <>
+          <h2 className="mb-1 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            Idle lines of credit
+          </h2>
+          <p className="mb-3 text-sm text-[var(--color-ink-soft)]">
+            Nothing owed on these right now, so they sit outside the payoff order. A card you pay off
+            in full every month belongs here too: leave it at $0. Type in a balance you&rsquo;re
+            carrying and it joins the payoff order.
+          </p>
+          <IdleDebtTable rows={idleRows} />
+        </>
+      ) : null}
     </>
   )
 }

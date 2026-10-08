@@ -494,9 +494,10 @@ export async function updateDebtAction(
   formData: FormData,
 ): Promise<DebtFormState> {
   const { engine } = await requireEngine()
-  const { debtFormValuesFrom, parseDebtForm, DebtDataError } = await import('@/domain')
+  const { debtFormValuesFrom, parseDebtForm, paysOffLoan, DebtDataError } = await import('@/domain')
   const { EngineError } = await import('@/server/engine')
   const debtId = String(formData.get('debt_id') ?? '')
+  const confirmPayoff = formData.get('confirm_payoff') === 'yes'
 
   const parsed = parseDebtForm(debtFormValuesFrom((name) => formData.get(name)))
   if (!parsed.ok) return { problems: parsed.problems, saved: previous.saved }
@@ -505,9 +506,23 @@ export async function updateDebtAction(
     const current = (await engine.listDebts()).find((d) => d.id === debtId)
     if (!current) return { problems: [{ field: 'form', message: 'That debt is no longer here.' }], saved: previous.saved }
     const { balanceCents, ...terms } = parsed.input
+    const balanceChanged = balanceCents !== current.balanceCents
+    // Asked before anything is saved, so a payoff nobody said yes to (D37)
+    // leaves the terms untouched too. The engine refuses it on its own as well.
+    if (balanceChanged && !confirmPayoff && paysOffLoan({ ...current, category: terms.category }, balanceCents)) {
+      return {
+        problems: [
+          {
+            field: 'form',
+            message: `That would pay off ${current.name}, and it would leave the Debts screen. Nothing was saved; save again and say yes when asked.`,
+          },
+        ],
+        saved: previous.saved,
+      }
+    }
     await engine.updateDebt(debtId, terms)
-    if (balanceCents !== current.balanceCents) {
-      await engine.updateDebtBalance({ debtId, balanceCents })
+    if (balanceChanged) {
+      await engine.updateDebtBalance({ debtId, balanceCents, confirmPayoff })
     }
   } catch (error) {
     if (error instanceof DebtDataError || error instanceof EngineError) {
@@ -540,9 +555,25 @@ export async function confirmDebtPaymentAction(formData: FormData): Promise<void
     redirect(`/debts?error=${encodeURIComponent('Enter the amount you paid, like 150.')}`)
   }
 
-  await engine.confirmDebtPayment({ debtId, amountCents: amountCents! })
+  await recordOrSayWhy(() =>
+    engine.confirmDebtPayment({ debtId, amountCents: amountCents!, confirmPayoff: formData.get('confirm_payoff') === 'yes' }),
+  )
   revalidatePath('/debts')
   revalidatePath('/')
+}
+
+/**
+ * A refusal from the engine -- a payoff nobody said yes to (D37) -- comes back
+ * to the Debts screen as words, not an error page. Nothing was recorded.
+ */
+async function recordOrSayWhy(record: () => Promise<void>): Promise<void> {
+  const { EngineError } = await import('@/server/engine')
+  try {
+    await record()
+  } catch (error) {
+    if (error instanceof EngineError) redirect(`/debts?error=${encodeURIComponent(error.message)}`)
+    throw error
+  }
 }
 
 /**
@@ -560,7 +591,9 @@ export async function updateDebtBalanceAction(formData: FormData): Promise<void>
     redirect(`/debts?error=${encodeURIComponent('Enter the balance from the statement, like 4,321.00.')}`)
   }
 
-  await engine.updateDebtBalance({ debtId, balanceCents: balanceCents! })
+  await recordOrSayWhy(() =>
+    engine.updateDebtBalance({ debtId, balanceCents: balanceCents!, confirmPayoff: formData.get('confirm_payoff') === 'yes' }),
+  )
   revalidatePath('/debts')
   revalidatePath('/')
 }
