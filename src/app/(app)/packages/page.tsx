@@ -3,7 +3,7 @@ import { requireEngine } from '@/server/session'
 import { nextDue, type DueUrgency } from '@/domain/next-due'
 import { Card, Empty, Hint, humanDate, Money, PageHeader, Pill, When, Zzz } from '@/components/ui'
 import { ProgressBar } from '@/components/progress-bar'
-import { steadySinceWords } from '@/domain'
+import { shortReasons } from '@/domain'
 
 export const dynamic = 'force-dynamic'
 
@@ -31,7 +31,7 @@ export default async function PackagesPage() {
   // Every figure on a live plan's card is the one position's (D35): the same
   // numbers the plan's own page, This week and the check-in read.
   const plans = new Map(position.plans.map((p) => [p.package.id, p]))
-  const shortOn = new Map(position.accounts.map((a) => [a.account.id, a.short?.on ?? null]))
+  const reasons = shortReasons(position)
   // A plan with a snoozed "did this get spent?" carries the Zzz (D38), with
   // the soonest day one wakes in its tooltip.
   const snoozedParts = new Map(
@@ -117,21 +117,11 @@ export default async function PackagesPage() {
                         className="mt-3"
                         totalCents={plan.totalCents}
                         countedCents={plan.countedCents}
-                        savedForCents={plan.savedForCents}
-                        coveringSoonerCents={plan.coveringSoonerCents}
-                        notYetHereCents={plan.notYetHereCents}
+                        tickCents={plan.tickCents}
                         status={plan.status}
                         today={today}
                         dueDate={liveParts === 1 ? next?.dueDate : undefined}
-                        savingSince={
-                          plan.savingSince
-                            ? {
-                                date: plan.savingSince,
-                                words: plan.parts.length === 1 ? steadySinceWords(plan.parts[0]!.savingSince.reason) : 'the earliest of its parts',
-                              }
-                            : undefined
-                        }
-                        shortOn={plan.parts.map((p) => shortOn.get(p.accountId) ?? null).find((d) => d !== null)}
+                        shortReasons={[...new Set(plan.parts.map((p) => p.accountId))].flatMap((id) => reasons.get(id) ?? [])}
                       />
                     ) : null}
                   </Card>

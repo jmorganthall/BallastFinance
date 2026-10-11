@@ -270,6 +270,16 @@ import {
 } from '@/server/park-fetch'
 import { readerEnabled, readerSourceName, readStructured, type ReaderDeps } from '@/server/reader'
 
+/** One instruction recorded as asked and done at once (D35). */
+interface DoneInstructionInput {
+  type: InstructionType
+  amountCents: Cents
+  targetId: Id
+  targetLabel: string
+  purpose?: InstructionPurpose
+  note?: string
+}
+
 export class EngineError extends Error {}
 
 /** One account's line in "If you commit this today" (D35). */
@@ -1248,14 +1258,14 @@ export class Engine {
   }
 
   /**
-   * The plan's chart (D35): its steady line from its Saving since, and,
-   * while it is catching up, where the money goes from here. Read from the
-   * one position, so the chart and the plan's figures are the same numbers.
+   * The plan's chart (D40): what will happen on the transfer set up now and,
+   * while the plan is Short, after the fix. Read from the one position, so
+   * the chart and the plan's figures are the same numbers.
    */
   async planChart(packageId: Id): Promise<PlanChart | null> {
     const [current, transferWeekday] = await Promise.all([this.position(), this.transferWeekday()])
     const plan = current.plans.find((p) => p.package.id === packageId)
-    return plan ? planChart({ plan, today: current.today, transferWeekday }) : null
+    return plan ? planChart({ plan, household: current, today: current.today, transferWeekday }) : null
   }
 
   // ---------------------------------------------------------------- the one position (D35)
@@ -1442,44 +1452,84 @@ export class Engine {
     })
   }
 
-  private async recordDoneInstruction(input: {
-    type: InstructionType
+  /**
+   * "Yes, I moved it" for spare money from one account into one that is
+   * Short (D40): the move out and the move in recorded together, in one
+   * transaction, so the same dollars are never counted in both accounts or
+   * in neither. Each side is an account the person may write to: an
+   * individual account's side is its owner's.
+   */
+  async confirmMoveBetween(input: {
+    fromAccountId: Id
+    toAccountId: Id
     amountCents: Cents
-    targetId: Id
-    targetLabel: string
-    purpose?: InstructionPurpose
-    note?: string
   }): Promise<void> {
-    const instructionId = randomUUID()
+    if (input.fromAccountId === input.toAccountId) {
+      throw new EngineError('A move between accounts needs two different accounts')
+    }
+    const from = await this.assertCanWriteAccount(input.fromAccountId)
+    const to = await this.assertCanWriteAccount(input.toAccountId)
+    if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
+      throw new EngineError('A move is more than zero, in whole cents')
+    }
+    await this.recordDoneInstructions([
+      {
+        type: 'one_time_move_out',
+        amountCents: input.amountCents,
+        targetId: from.id,
+        targetLabel: from.name,
+        note: `Spare money moved into ${to.name}, which needed it.`,
+      },
+      {
+        type: 'one_time_move',
+        purpose: 'catch_up',
+        amountCents: input.amountCents,
+        targetId: to.id,
+        targetLabel: to.name,
+        note: `Spare money from ${from.name}, so every date is covered.`,
+      },
+    ])
+  }
+
+  private async recordDoneInstruction(input: DoneInstructionInput): Promise<void> {
+    await this.recordDoneInstructions([input])
+  }
+
+  /** Each instruction asked and done at once; several are recorded in one transaction. */
+  private async recordDoneInstructions(inputs: readonly DoneInstructionInput[]): Promise<void> {
     const today = this.today()
     await this.db.transaction(async (tx) => {
-      await tx.insert(events).values({
-        householdId: this.householdId,
-        kind: 'instruction_issued',
-        occurredAt: today,
-        actorUserId: this.actorUserId,
-        payload: {
-          instruction_id: instructionId,
-          type: input.type,
-          amount_cents: input.amountCents,
-          target_id: input.targetId,
-          target_label: input.targetLabel,
-          note: input.note ?? null,
-          ends_on: null,
-          purpose: input.purpose ?? null,
-          available_on: null,
-        },
-      })
-      await tx.insert(events).values({
-        householdId: this.householdId,
-        kind: 'instruction_confirmed',
-        occurredAt: today,
-        actorUserId: this.actorUserId,
-        source: 'manual',
-        payload: { instruction_id: instructionId, actual_amount_cents: null },
-      })
+      for (const input of inputs) {
+        const instructionId = randomUUID()
+        await tx.insert(events).values({
+          householdId: this.householdId,
+          kind: 'instruction_issued',
+          occurredAt: today,
+          actorUserId: this.actorUserId,
+          payload: {
+            instruction_id: instructionId,
+            type: input.type,
+            amount_cents: input.amountCents,
+            target_id: input.targetId,
+            target_label: input.targetLabel,
+            note: input.note ?? null,
+            ends_on: null,
+            purpose: input.purpose ?? null,
+            available_on: null,
+          },
+        })
+        await tx.insert(events).values({
+          householdId: this.householdId,
+          kind: 'instruction_confirmed',
+          occurredAt: today,
+          actorUserId: this.actorUserId,
+          source: 'manual',
+          payload: { instruction_id: instructionId, actual_amount_cents: null },
+        })
+      }
     })
   }
+
 
   // ---------------------------------------------------------------- settings
 

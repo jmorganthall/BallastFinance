@@ -183,7 +183,7 @@ describeDb('check-ins and close-out (D35)', () => {
     expect(p.allCaughtUp).toBe(false)
   })
 
-  it('confirming the raised transfer puts the account back on track; the part is catching up, not short', async () => {
+  it('confirming the raised transfer puts the account back on track, and the part with it', async () => {
     await engine.confirmTransfer({ reserveAccountId: accountId, perWeekCents: 18000 })
 
     const p = await engine.position()
@@ -199,25 +199,28 @@ describeDb('check-ins and close-out (D35)', () => {
 
     // The steady line: 170,000 / 13 = 13,076.9 -> 13,077 a week from the commit,
     // and 6 of 13 transfers in by Oct 31: ceil(170,000 x 6 / 13) = ceil(78,461.5) = 78,462.
-    // The $500 counted toward it is below that: catching up, which the account
-    // covers. Nothing is due sooner, so the gap is money not in the account yet.
+    // The $500 counted is below that even save, but the tick is what the
+    // account must hold today on the $180 now set up (D40): 170,000 less the
+    // 7 transfers before Dec 19, 7 x 18,000 = 126,000, is 44,000. $500 is past
+    // it, so the part is On track.
     const [gifts] = a.parts
     expect(gifts).toMatchObject({
       savingSince: { date: '2026-09-19', reason: 'plan_started' },
       steadyPerWeekCents: 13077,
       savedForCents: 78462,
       countedCents: 50000,
-      coveringSoonerCents: 0,
-      notYetHereCents: 28462,
-      status: 'catching_up',
+      tickCents: 44000,
+      status: 'on_track',
     })
-    expect(p.plans.find((x) => x.package.id === packageId)!.status).toBe('catching_up')
+    expect(p.plans.find((x) => x.package.id === packageId)!.status).toBe('on_track')
 
-    // The chart reads the same position.
+    // The chart reads the same position: on the $180 it reaches the total, so
+    // there is no fix line.
     const chart = await engine.planChart(packageId)
     expect(chart?.countedToday).toEqual({ date: '2026-10-31', cents: 50000 })
     expect(chart?.targetCents).toBe(170000)
-    expect(chart?.catchUp).not.toBeNull()
+    expect(chart?.actual.at(-1)?.cents).toBe(170000)
+    expect(chart?.afterFix).toBeNull()
   })
 
   it('carries the transfers since the count until the next one', async () => {
@@ -440,7 +443,10 @@ describeDb('one-time moves (D34, D35)', () => {
         blocking: true,
       },
     ])
-    expect(a.parts.every((x) => x.status === 'short')).toBe(true)
+    // Only the part due Oct 24 is Short (D40): the later one is covered by the
+    // transfers that land between the two dates.
+    expect(a.parts.map((x) => x.status)).toEqual(['short', 'on_track'])
+    for (const x of a.parts) expect(x.status === 'short').toBe(x.countedCents < x.tickCents)
     expect(p.allCaughtUp).toBe(false)
   })
 

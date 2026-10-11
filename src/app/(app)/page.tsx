@@ -33,6 +33,7 @@ import {
 import {
   confirmBalancesAction,
   confirmInstructionAction,
+  confirmMoveBetweenAction,
   confirmMoveInAction,
   confirmTransferAction,
   endInstructionAction,
@@ -86,17 +87,26 @@ const plain = (cents: number) => formatCents(cents).replace('$', '').replace(/,/
  * it from then on.
  */
 function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate }) {
-  const amount = todo.kind === 'move_in' ? todo.amountCents : todo.toCents
+  const amount = todo.kind === 'set_transfer' ? todo.toCents : todo.amountCents
   return (
     <Card className={todo.blocking ? '' : 'border-dashed'}>
       <Parts parts={derivedTodoSentenceParts(todo, humanDate)} today={today} />
       <form
-        action={todo.kind === 'move_in' ? confirmMoveInAction : confirmTransferAction}
+        action={
+          todo.kind === 'move_between'
+            ? confirmMoveBetweenAction
+            : todo.kind === 'move_in'
+              ? confirmMoveInAction
+              : confirmTransferAction
+        }
         className="mt-3 flex items-end gap-2"
       >
         <input type="hidden" name="reserve_account_id" value={todo.accountId} />
+        {todo.kind === 'move_between' ? (
+          <input type="hidden" name="from_account_id" value={todo.fromAccountId} />
+        ) : null}
         <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
-          {todo.kind === 'move_in' ? 'How much you moved' : 'What the transfer is now, per week'}
+          {todo.kind === 'set_transfer' ? 'What the transfer is now, per week' : 'How much you moved'}
           <input
             name="amount"
             inputMode="decimal"

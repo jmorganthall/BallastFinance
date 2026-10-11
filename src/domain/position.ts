@@ -60,14 +60,22 @@
  * the saving is a whole step), and a one-time move when one is needed. They
  * are derived here, not issued ahead of time.
  *
- * STEP 7, the parts. Each has a steady line from its Saving since date to its
- * due date at total ÷ the transfers between; its slope is the part's steady
- * share per week and its height today is "saved for this". The account's
- * money is counted to its parts on every read -- first every part up to its
- * steady line, soonest due first, then every part up to its total, soonest
- * due first -- and never recorded. A part is On track at or above its steady
- * line, Catching up below it, and Short when its account is Short on or
- * before the part is due.
+ * STEP 7, the parts (D40). An account is one pile: money held for a plan due
+ * later pays a bill due sooner, and the weekly amount rebuilds it by the
+ * later date. Each part's tick is what the account must hold for it today
+ * so every date is met on the transfer set up at the bank: each due amount
+ * (every round within the horizon counted to its part) less the transfers
+ * that land on or before it and are not already spoken for, soonest first.
+ * The ticks add up to the least the account must hold today. The money is
+ * counted on every read -- first every slot up to its tick, soonest first,
+ * then every part up to its total, soonest first -- and never recorded. A
+ * part is On track at or above its tick and Short below it while its
+ * account is Short; Catching up is retired. The steady line (an even save
+ * since Saving since) is still worked out but measures nothing.
+ *
+ * Between accounts there is no lending, ever. An account On track with
+ * money to spare is asked to move it into one that is Short, before any new
+ * money is asked for; only what that cannot cover is a raise or a move.
  *
  * STEP 8, plans and the household. A plan adds up its parts and takes its
  * worst part's status. The household is All caught up when every account with
@@ -171,11 +179,11 @@ export interface PositionInput {
 // ---------------------------------------------------------------- outputs
 
 /**
- * The status words, everywhere (D35): On track, Catching up, Short, and --
- * for a part past its date with all its money there, waiting to be spent --
- * Ready to spend (D38).
+ * The status words, everywhere (D35, D40): On track, Short, and -- for a
+ * part past its date with all its money there, waiting to be spent -- Ready
+ * to spend (D38). Catching up is retired (D40).
  */
-export type PartStatus = 'ready_to_spend' | 'on_track' | 'catching_up' | 'short'
+export type PartStatus = 'ready_to_spend' | 'on_track' | 'short'
 /**
  * An account is fine or it is not; "unconfirmed" until its transfer is known.
  * Running down (D39): every bill this time round is covered, but the
@@ -200,17 +208,16 @@ export interface PartPosition {
   savingSince: { date: CivilDate; reason: SteadySinceReason }
   /** The slope of the steady line: its share of the transfer, rounded up. */
   steadyPerWeekCents: Cents
-  /** The height of the steady line today: "saved for this". */
+  /** The height of the steady line today: an even save since Saving since. Measures nothing (D40). */
   savedForCents: Cents
   /** What the account's money counts toward it today. */
   countedCents: Cents
   /**
-   * Below its steady line, the gap in two: what the account's money is
-   * holding for plans due sooner (at most what those plans count), and what
-   * is simply not in the account yet. Both zero unless catching up.
+   * The tick (D40): what the account must hold for this round of it today
+   * so every date is met on the transfer set up at the bank. Below it on a
+   * Short account, it is Short.
    */
-  coveringSoonerCents: Cents
-  notYetHereCents: Cents
+  tickCents: Cents
   status: PartStatus
 }
 
@@ -264,8 +271,12 @@ export interface AccountPosition {
    * some of the steady shares. The decomposition a screen shows (D2).
    */
   catchUpPerWeekCents: Cents
-  /** How many parts are catching up. */
-  catchingUpParts: number
+  /** The least it must hold today for every date to pass on its transfer: its parts' ticks added up (D40). */
+  mustHoldCents: Cents
+  /** What it is missing today on its transfer: must hold − holds, while Short. */
+  missingTodayCents: Cents
+  /** What a plan's chart runs forward on (D40): every slot and what it holds, and what lands on each transfer day. */
+  projection: AccountProjection
   /** The smallest level weekly amount that keeps the account afloat, exact. */
   weeklyExactCents: Cents
   /** That, rounded up to the household's step: the transfer Ballast asks for. */
@@ -293,6 +304,24 @@ export interface AccountPosition {
   transferChange: { fromCents: Cents | null; toCents: Cents; reason: TransferChangeReason } | null
 }
 
+export interface AccountProjection {
+  slots: (Slot & { tickCents: Cents; heldCents: Cents })[]
+  /** Money that lands today: the move Ballast asks for while the transfer is unconfirmed. */
+  startCents: Cents
+  /** What lands on each transfer day from the next to the horizon. */
+  transferDays: { on: CivilDate; cents: Cents }[]
+}
+
+/**
+ * What fixes a Short account (D40), for the chart's second line: money in
+ * today (a surplus move from another account and any one-time move) and
+ * the weekly transfer Ballast asks for, if it asks for one.
+ */
+export interface AccountFix {
+  nowCents: Cents
+  perWeekCents: Cents | null
+}
+
 export interface PlanPosition {
   package: Package
   /** Its live parts, soonest due first. */
@@ -301,8 +330,8 @@ export interface PlanPosition {
   steadyPerWeekCents: Cents
   savedForCents: Cents
   countedCents: Cents
-  coveringSoonerCents: Cents
-  notYetHereCents: Cents
+  /** Its parts' ticks added up: where the plan's tick sits (D40). */
+  tickCents: Cents
   /** The earliest day any live part's steady line starts: the plan's "Saving since". */
   savingSince: CivilDate | null
   /** Its worst part's status; on track with no live part. */
@@ -329,12 +358,31 @@ export type DerivedTodo =
       byDate: CivilDate
       blocking: true
     }
+  | {
+      /**
+       * Money one account has to spare, into one that is Short (D40): never
+       * a loan -- the source keeps every one of its own dates on its own
+       * transfer. Asked before any new money; marked done in one step that
+       * records the move out and the move in together.
+       */
+      kind: 'move_between'
+      fromAccountId: Id
+      fromAccountName: string
+      accountId: Id
+      accountName: string
+      amountCents: Cents
+      /** The day the destination runs short without it. */
+      byDate: CivilDate
+      blocking: true
+    }
 
 export interface HouseholdPosition {
   today: CivilDate
   accounts: AccountPosition[]
   plans: PlanPosition[]
   todos: DerivedTodo[]
+  /** What fixes each Short account, by account id, for the plan chart's second line (D40). */
+  fixes: Map<Id, AccountFix>
   /** Every account with a plan is On track on its confirmed transfer. */
   allCaughtUp: boolean
   /** The furthest horizon: "every account covers everything due through <date>". */
@@ -455,34 +503,38 @@ function frameOf(args: {
 }
 
 /**
- * Count an account's money toward its parts (D35): every part up to its
- * steady line, soonest due first, then every part up to its total, soonest
- * due first. Never recorded and never chosen; it only decides what each part
- * card shows, because the weekly amount comes from the run-forward.
+ * Count an account's money toward its parts (D35, D40): every slot up to its
+ * tick, soonest first -- what the account must hold for it today -- then
+ * every part's current round up to its total, soonest first. Never recorded
+ * and never chosen; it only decides what each part card shows, because the
+ * weekly amount comes from the run-forward. A slot left below its tick is
+ * where the money runs out; money held for a later round is in no part's
+ * count.
  */
 export function countTowardParts(
-  parts: readonly Pick<PartFrame, 'lineItem' | 'outflowDate' | 'totalCents' | 'savedForCents'>[],
+  slots: readonly (Pick<Slot, 'lineItemId' | 'cents' | 'current'> & { tickCents: Cents })[],
   moneyCents: Cents,
-): Map<Id, Cents> {
-  const ordered = [...parts].sort(
-    (a, b) =>
-      compareDates(a.outflowDate, b.outflowDate) || a.lineItem.label.localeCompare(b.lineItem.label),
-  )
-  const counted = new Map<Id, Cents>(ordered.map((p) => [p.lineItem.id, 0]))
+): { counted: Map<Id, Cents>; held: Cents[]; belowTick: Set<Id> } {
+  const held = slots.map(() => 0)
   let left = Math.max(0, moneyCents)
-  for (const ceiling of [
-    (p: (typeof ordered)[number]) => Math.min(p.savedForCents, p.totalCents),
-    (p: (typeof ordered)[number]) => p.totalCents,
-  ]) {
-    for (const p of ordered) {
-      if (left <= 0) break
-      const has = counted.get(p.lineItem.id) ?? 0
-      const take = Math.max(0, Math.min(ceiling(p) - has, left))
-      counted.set(p.lineItem.id, has + take)
-      left -= take
-    }
-  }
-  return counted
+  slots.forEach((slot, i) => {
+    const take = Math.max(0, Math.min(slot.tickCents, left))
+    held[i] = take
+    left -= take
+  })
+  slots.forEach((slot, i) => {
+    if (!slot.current) return
+    const take = Math.max(0, Math.min(slot.cents - held[i]!, left))
+    held[i] = held[i]! + take
+    left -= take
+  })
+  const counted = new Map<Id, Cents>()
+  const belowTick = new Set<Id>()
+  slots.forEach((slot, i) => {
+    if (slot.current) counted.set(slot.lineItemId, held[i]!)
+    if (held[i]! < slot.tickCents) belowTick.add(slot.lineItemId)
+  })
+  return { counted, held, belowTick }
 }
 
 // ---------------------------------------------------------------- the run-forward
@@ -493,6 +545,20 @@ interface Requirement {
   /** Transfer days after today up to and including this date. */
   transfers: number
   needCents: Cents
+}
+
+/**
+ * One amount a part needs by one date (D40): its current time round, or a
+ * later round that comes within the horizon, or the share of the round
+ * running at the horizon. The requirements are these added up by date.
+ */
+export interface Slot {
+  lineItemId: Id
+  on: CivilDate
+  cents: Cents
+  /** The round the part is saving for now; false for a later round. */
+  current: boolean
+  label: string
 }
 
 /**
@@ -510,20 +576,24 @@ export function requirementsFor(args: {
    * below the run-rate would run the account dry (Step 5).
    */
   until?: CivilDate
-}): { horizon: CivilDate | null; requirements: Requirement[]; runRatePerWeekCents: Cents } {
+}): { horizon: CivilDate | null; requirements: Requirement[]; runRatePerWeekCents: Cents; slots: Slot[] } {
   const { parts, today, transferWeekday } = args
-  if (parts.length === 0) return { horizon: null, requirements: [], runRatePerWeekCents: 0 }
+  if (parts.length === 0) return { horizon: null, requirements: [], runRatePerWeekCents: 0, slots: [] }
 
   const horizon = parts.reduce<CivilDate>((h, p) => maxDate(h, p.outflowDate), parts[0]!.outflowDate)
   const runTo = args.until ?? horizon
 
   const outflows = new Map<CivilDate, Cents>()
-  const add = (on: CivilDate, cents: Cents) => outflows.set(on, (outflows.get(on) ?? 0) + cents)
+  const slots: Slot[] = []
+  const add = (p: (typeof parts)[number], on: CivilDate, cents: Cents, current: boolean) => {
+    outflows.set(on, (outflows.get(on) ?? 0) + cents)
+    slots.push({ lineItemId: p.lineItem.id, on, cents, current, label: p.lineItem.label })
+  }
   let terminalCents = 0
   let runRatePerWeekCents = 0
 
   for (const p of parts) {
-    add(p.outflowDate, p.totalCents)
+    add(p, p.outflowDate, p.totalCents, true)
     const recurrence = p.lineItem.recurrence
     if (!isRecurring(recurrence)) continue
 
@@ -535,7 +605,7 @@ export function requirementsFor(args: {
       if (compareDates(next, occurrence) <= 0) break
       if (compareDates(next, runTo) > 0) break
       occurrence = next
-      add(compareDates(occurrence, today) < 0 ? today : occurrence, p.totalCents)
+      add(p, compareDates(occurrence, today) < 0 ? today : occurrence, p.totalCents, false)
       next = nextOccurrence(occurrence, recurrence)
     }
     if (!next) continue
@@ -545,13 +615,15 @@ export function requirementsFor(args: {
     // be there too, or the level transfer would run the next cycle short.
     const cycleStart = previousOccurrence(next, recurrence) ?? occurrence
     if (!args.until) {
-      terminalCents += evenPaceCents({
+      const share = evenPaceCents({
         totalCents: p.totalCents,
         fromDate: cycleStart,
         dueDate: next,
         today: horizon,
         transferWeekday,
       })
+      terminalCents += share
+      if (share > 0) slots.push({ lineItemId: p.lineItem.id, on: horizon, cents: share, current: false, label: p.lineItem.label })
     }
     runRatePerWeekCents += ceilDiv(
       Math.max(0, p.totalCents),
@@ -567,7 +639,39 @@ export function requirementsFor(args: {
   }
   const last = requirements.at(-1)
   if (last) last.needCents += terminalCents
-  return { horizon, requirements, runRatePerWeekCents }
+  return { horizon, requirements, runRatePerWeekCents, slots: sortSlots(slots) }
+}
+
+/** Soonest first; on one day, the round being saved for now before a later one, then by name. */
+function sortSlots(slots: Slot[]): Slot[] {
+  return slots.sort(
+    (a, b) =>
+      compareDates(a.on, b.on) ||
+      Number(b.current) - Number(a.current) ||
+      a.label.localeCompare(b.label) ||
+      a.lineItemId.localeCompare(b.lineItemId),
+  )
+}
+
+/**
+ * What the account must hold today for each slot (D40): its amount less the
+ * transfers that land on or before its date and are not already spoken for,
+ * soonest first, a surplus of transfers carried on to the next slot. The
+ * ticks add up to the least the account must hold today for every date to
+ * pass on those transfers: the largest of (need by a date − arrived by it),
+ * or nothing.
+ */
+export function slotTicks(slots: readonly Slot[], arrivedBy: (on: CivilDate) => Cents): Cents[] {
+  let carried = 0
+  let arrivedSoFar = 0
+  return slots.map((slot) => {
+    const arrived = arrivedBy(slot.on)
+    carried += Math.max(0, arrived - arrivedSoFar)
+    arrivedSoFar = Math.max(arrivedSoFar, arrived)
+    const covered = Math.min(carried, slot.cents)
+    carried -= covered
+    return slot.cents - covered
+  })
 }
 
 /**
@@ -832,7 +936,7 @@ export function moneyToday(args: {
  * plan reads it only when every part does, so one part waiting to be spent
  * never hides another that is Short. No part at all is on track.
  */
-const STATUS_ORDER: readonly PartStatus[] = ['short', 'catching_up', 'on_track', 'ready_to_spend']
+const STATUS_ORDER: readonly PartStatus[] = ['short', 'on_track', 'ready_to_spend']
 const worst = (statuses: readonly PartStatus[]): PartStatus =>
   statuses.length === 0 ? 'on_track' : STATUS_ORDER.find((s) => statuses.includes(s))!
 
@@ -842,6 +946,8 @@ function accountPosition(args: {
   input: PositionInput
   packagesById: ReadonlyMap<Id, Package>
   transferWeekday: Weekday
+  /** Money a surplus move into (+) or out of (−) the account would make; for its to-dos only. */
+  pendingCents?: Cents
 }): AccountPosition {
   const { account, frames, input, transferWeekday } = args
   const today = input.today
@@ -865,7 +971,14 @@ function accountPosition(args: {
     today,
   })
 
-  const { horizon, requirements, runRatePerWeekCents } = requirementsFor({
+  // A surplus move between accounts this read is asking for (D40): its to-dos
+  // are worked out as if it were done, and nothing else is.
+  if (args.pendingCents) {
+    money.movesSinceCents += args.pendingCents
+    money.totalCents += args.pendingCents
+  }
+
+  const { horizon, requirements, runRatePerWeekCents, slots } = requirementsFor({
     parts: frames,
     today,
     transferWeekday,
@@ -909,12 +1022,28 @@ function accountPosition(args: {
         requirements,
         arrivedBy: (r) => weeklyCents * r.transfers,
       })
-  // Money that runs out only after the last current date -- on a later time
-  // round, because the transfer is below what the bills cost a year -- is an
-  // account Running down, not Short (D39): every bill now is paid, and the
-  // ballast is what is being spent.
-  const runsOutLater =
-    judged.short !== null && horizon !== null && compareDates(judged.short.on, horizon) > 0
+  // The ticks (D40): what the account must hold today for each slot so that
+  // every date is met on the transfer set up at the bank -- or, until one
+  // is confirmed, on the transfer Ballast asks for with its move made, which
+  // is how the figures read then.
+  const arrivedBy = (on: CivilDate): Cents =>
+    bank
+      ? bankTransfersBetween(schedule, today, on)
+      : level.moveCents + weeklyCents * transferWeeksBetween(today, on, transferWeekday)
+  const ticks = slotTicks(slots, arrivedBy)
+  const ticked = slots.map((slot, i) => ({ ...slot, tickCents: ticks[i]! }))
+  const { counted, held } = countTowardParts(ticked, money.totalCents)
+  const currentShort = ticked.some((x, i) => x.current && held[i]! < x.tickCents)
+  const mustHoldCents = ticks.reduce((s, t) => s + t, 0)
+  const tickOf = new Map(ticked.filter((x) => x.current).map((x) => [x.lineItemId, x.tickCents]))
+
+  // Money that runs out only on a later time round -- after the last current
+  // date, or on a round within it that comes after every current bill is
+  // paid -- is an account Running down, not Short (D39, D40): every bill now
+  // is paid, the transfer is not keeping up, and the ballast is what is
+  // being spent. Short is a bill the account is saving for now that cannot
+  // be paid: a current round below its tick, the money run out before it.
+  const runsOutLater = judged.short !== null && !currentShort
   const status: AccountStatus =
     frames.length === 0 && !bank
       ? 'on_track'
@@ -1002,8 +1131,6 @@ function accountPosition(args: {
       ? { amountCents: moveNeeded.amountCents - openIn, byDate: moveNeeded.byDate }
       : null
 
-  const counted = countTowardParts(frames, money.totalCents)
-  let countedSooner = 0
   const parts: PartPosition[] = [...frames]
     .sort(
       (a, b) =>
@@ -1011,38 +1138,38 @@ function accountPosition(args: {
     )
     .map((f) => {
       const countedCents = counted.get(f.lineItem.id) ?? 0
-      const steady = Math.min(f.savedForCents, f.totalCents)
-      // A part is Short when its own current date -- the one it is saving
-      // for now -- is on or after the day the account runs dry (D38 (6)).
-      // A later time round of a repeating part does not make it Short today:
-      // the account card says the account runs short, and when, and This
-      // week asks for the fix; a plan card judges the plan in front of it. On or
+      // Short exactly where the money runs out before this round of it has
+      // what it needs today, on an account that is Short (D40): the bar
+      // below its tick. A later round never makes it Short (D38 (6)). On or
       // past its date -- the day "did this get spent?" starts asking -- with
-      // every cent of it counted, it is Ready to spend (D38):
-      // whether or not "did this get spent?" is snoozed, which changes no
-      // figure. Past its date and not all there, it goes out today and the
-      // account is Short, so it reads Short.
+      // every cent of it counted, it is Ready to spend (D38), snoozed or
+      // not; past its date and not all there, it goes out today with a tick
+      // of its whole total, so it reads Short.
       const partStatus: PartStatus =
-        status === 'short' &&
-        judged.short &&
-        compareDates(f.outflowDate, judged.short.on) >= 0
+        status === 'short' && countedCents < (tickOf.get(f.lineItem.id) ?? 0)
           ? 'short'
           : compareDates(f.lineItem.dueDate, today) <= 0 && countedCents >= f.totalCents
             ? 'ready_to_spend'
-            : countedCents >= steady
-              ? 'on_track'
-              : 'catching_up'
-      const gap = Math.max(0, steady - countedCents)
-      const coveringSoonerCents = Math.min(gap, countedSooner)
-      countedSooner += countedCents
+            : 'on_track'
       return {
         ...f,
         countedCents,
-        coveringSoonerCents,
-        notYetHereCents: gap - coveringSoonerCents,
+        tickCents: Math.min(tickOf.get(f.lineItem.id) ?? 0, f.totalCents),
         status: partStatus,
       }
     })
+
+  // What a plan's chart runs forward on: every slot with what it holds
+  // today, and what lands in the account on each transfer day to come.
+  const transferDays: { on: CivilDate; cents: Cents }[] = []
+  if (horizon) {
+    let before = arrivedBy(today)
+    for (let d = nextTransferDay(today, transferWeekday); compareDates(d, horizon) <= 0; d = addDays(d, 7)) {
+      const now = arrivedBy(d)
+      transferDays.push({ on: d, cents: Math.max(0, now - before) })
+      before = Math.max(before, now)
+    }
+  }
 
   const steadyPerWeekCents = parts.reduce((s, p) => s + p.steadyPerWeekCents, 0)
   return {
@@ -1059,7 +1186,13 @@ function accountPosition(args: {
       Math.max(parts.length, Math.ceil(steadyPerWeekCents * 0.02))
         ? 0
         : needed.exactCents - steadyPerWeekCents,
-    catchingUpParts: parts.filter((p) => p.status === 'catching_up').length,
+    mustHoldCents,
+    missingTodayCents: status === 'short' ? Math.max(0, mustHoldCents - money.totalCents) : 0,
+    projection: {
+      slots: ticked.map((x, i) => ({ ...x, heldCents: held[i]! })),
+      startCents: bank ? 0 : level.moveCents,
+      transferDays,
+    },
     weeklyExactCents: level.weeklyExactCents,
     neededPerWeekCents: needed.cents,
     neededExactPerWeekCents: needed.exactCents,
@@ -1091,14 +1224,9 @@ export function position(input: PositionInput): HouseholdPosition {
     frames.push(frameOf({ lineItem, pkg, cycles, today, transferWeekday }))
   }
 
+  const framesOf = (id: Id) => frames.filter((f) => f.accountId === id)
   const accounts = input.accounts.map((account) =>
-    accountPosition({
-      account,
-      frames: frames.filter((f) => f.accountId === account.id),
-      input,
-      packagesById,
-      transferWeekday,
-    }),
+    accountPosition({ account, frames: framesOf(account.id), input, packagesById, transferWeekday }),
   )
 
   const partsById = new Map(accounts.flatMap((a) => a.parts.map((p) => [p.lineItem.id, p] as const)))
@@ -1120,8 +1248,7 @@ export function position(input: PositionInput): HouseholdPosition {
         steadyPerWeekCents: parts.reduce((s, p) => s + p.steadyPerWeekCents, 0),
         savedForCents: parts.reduce((s, p) => s + p.savedForCents, 0),
         countedCents: parts.reduce((s, p) => s + p.countedCents, 0),
-        coveringSoonerCents: parts.reduce((s, p) => s + p.coveringSoonerCents, 0),
-        notYetHereCents: parts.reduce((s, p) => s + p.notYetHereCents, 0),
+        tickCents: parts.reduce((s, p) => s + p.tickCents, 0),
         savingSince: parts.reduce<CivilDate | null>(
           (d, p) => (d === null || compareDates(p.savingSince.date, d) < 0 ? p.savingSince.date : d),
           null,
@@ -1130,8 +1257,56 @@ export function position(input: PositionInput): HouseholdPosition {
       }
     })
 
+  // Money one account has to spare goes to one that is Short before any new
+  // money is asked for (D40). Never a loan: only an account On track on its
+  // own confirmed transfer, at or above what its bills cost a year, lends,
+  // and only its extra -- what could leave with every one of its own dates
+  // still passing. Each Short account, the soonest to run short first, takes
+  // the smaller of what is spare and what it is missing today.
+  const moves = surplusMoves(accounts)
+  const pending = new Map<Id, Cents>()
+  for (const m of moves) {
+    pending.set(m.from.account.id, (pending.get(m.from.account.id) ?? 0) - m.amountCents)
+    pending.set(m.to.account.id, (pending.get(m.to.account.id) ?? 0) + m.amountCents)
+  }
+  // Each account's own asks, worked out as if the moves were made: what is
+  // left to fix after the spare money is a raise or a one-time move, and a
+  // lender's own offer to lower its transfer is sized on what it keeps.
+  const asks = new Map(
+    accounts.map((a) => {
+      const by = pending.get(a.account.id)
+      if (!by) return [a.account.id, a] as const
+      const as = accountPosition({
+        account: a.account,
+        frames: framesOf(a.account.id),
+        input,
+        packagesById,
+        transferWeekday,
+        pendingCents: by,
+      })
+      // An account still Short with the money moved keeps its own fix; one
+      // the move puts right is asked for nothing more until it is done
+      // (not even to lower a transfer it may yet need).
+      return [a.account.id, by > 0 && as.status === 'on_track' ? { ...as, transferChange: null, oneTimeMove: null } : as] as const
+    }),
+  )
+
   const todos: DerivedTodo[] = []
-  for (const a of accounts) {
+  for (const m of moves) {
+    todos.push({
+      kind: 'move_between',
+      fromAccountId: m.from.account.id,
+      fromAccountName: m.from.account.name,
+      accountId: m.to.account.id,
+      accountName: m.to.account.name,
+      amountCents: m.amountCents,
+      byDate: m.to.short!.on,
+      blocking: true,
+    })
+  }
+  const fixes = new Map<Id, AccountFix>()
+  for (const actual of accounts) {
+    const a = asks.get(actual.account.id) ?? actual
     if (a.transferChange) {
       todos.push({
         kind: 'set_transfer',
@@ -1153,9 +1328,24 @@ export function position(input: PositionInput): HouseholdPosition {
         blocking: true,
       })
     }
+    if (actual.status === 'short') {
+      const incoming = Math.max(0, pending.get(actual.account.id) ?? 0)
+      const raise = a.transferChange && a.transferChange.reason !== 'lower' ? a.transferChange.toCents : null
+      fixes.set(actual.account.id, {
+        nowCents: incoming + (a.oneTimeMove?.amountCents ?? 0),
+        perWeekCents: raise,
+      })
+    }
   }
+  // The accounts carry their own asks: what This week and the card say.
+  const shown = accounts.map((actual) => {
+    const a = asks.get(actual.account.id)
+    return a && a !== actual
+      ? { ...actual, transferChange: a.transferChange, oneTimeMove: a.oneTimeMove }
+      : actual
+  })
 
-  const withPlans = accounts.filter((a) => a.parts.length > 0)
+  const withPlans = shown.filter((a) => a.parts.length > 0)
   const coveredThrough = withPlans.reduce<CivilDate | null>(
     (d, a) => (a.horizon && (d === null || compareDates(a.horizon, d) > 0) ? a.horizon : d),
     null,
@@ -1163,9 +1353,10 @@ export function position(input: PositionInput): HouseholdPosition {
 
   return {
     today,
-    accounts,
+    accounts: shown,
     plans,
     todos,
+    fixes,
     allCaughtUp:
       withPlans.every((a) => a.status === 'on_track') && !todos.some((t) => t.blocking),
     coveredThrough,
@@ -1174,38 +1365,104 @@ export function position(input: PositionInput): HouseholdPosition {
   }
 }
 
+/**
+ * The surplus moves between accounts (D40): each Short account, soonest to
+ * run short first, takes from the accounts with the most to spare first,
+ * the smaller of what is spare and what it is missing today. A lender is On
+ * track on its own confirmed transfer and that transfer keeps up with what
+ * its bills cost a year, so moving its extra never leaves it short later.
+ */
+function surplusMoves(
+  accounts: readonly AccountPosition[],
+): { from: AccountPosition; to: AccountPosition; amountCents: Cents }[] {
+  const spare = new Map(
+    accounts
+      .filter(
+        (a) =>
+          a.status === 'on_track' &&
+          a.bank !== null &&
+          a.bank.perWeekCents >= a.runRatePerWeekCents &&
+          a.extraCents > 0,
+      )
+      .map((a) => [a.account.id, a.extraCents]),
+  )
+  const lenders = accounts
+    .filter((a) => spare.has(a.account.id))
+    .sort((a, b) => b.extraCents - a.extraCents || a.account.name.localeCompare(b.account.name))
+  const short = accounts
+    .filter((a) => a.status === 'short' && a.missingTodayCents > 0)
+    .sort((a, b) => compareDates(a.short!.on, b.short!.on) || a.account.name.localeCompare(b.account.name))
+  const moves: { from: AccountPosition; to: AccountPosition; amountCents: Cents }[] = []
+  for (const to of short) {
+    let missing = to.missingTodayCents
+    for (const from of lenders) {
+      if (missing <= 0) break
+      const has = spare.get(from.account.id) ?? 0
+      const amountCents = Math.min(has, missing)
+      if (amountCents <= 0) continue
+      moves.push({ from, to, amountCents })
+      spare.set(from.account.id, has - amountCents)
+      missing -= amountCents
+    }
+  }
+  return moves
+}
+
 // ---------------------------------------------------------------- what a screen draws
 
 /**
  * The progress bar's reading, so a screen draws and works nothing out: how
  * full the bar is (what is counted, as a whole-number share of the total)
- * and where the tick sits (the steady line today). Both capped at 100.
+ * and where the tick sits (what the account must hold for it today, D40).
+ * Both capped at 100.
  */
-export function barOf(v: { totalCents: Cents; countedCents: Cents; savedForCents: Cents }): {
+export function barOf(v: { totalCents: Cents; countedCents: Cents; tickCents: Cents }): {
   fillPercent: number
   tickPercent: number
-  /** The stretch from the fill up to the tick: what is being caught up, drawn striped. */
-  catchUpPercent: number
   fullyFunded: boolean
 } {
   const total = Math.max(0, v.totalCents)
   const percent = (cents: Cents) =>
     total === 0 ? 100 : Math.round((Math.max(0, Math.min(cents, total)) / total) * 100)
-  const fillPercent = percent(v.countedCents)
-  const tickPercent = percent(v.savedForCents)
   return {
-    fillPercent,
-    tickPercent,
-    catchUpPercent: Math.max(0, tickPercent - fillPercent),
+    fillPercent: percent(v.countedCents),
+    tickPercent: percent(v.tickCents),
     fullyFunded: v.countedCents >= total,
   }
+}
+
+/**
+ * Why an account is Short and what fixes it (D40), for the line a Short plan
+ * or part card shows without a tap: the account, the day it runs short, and
+ * the to-dos This week asks for it, in short plain words.
+ */
+export interface ShortReason {
+  accountId: Id
+  accountName: string
+  on: CivilDate
+  fixes: string[]
+}
+
+export function shortReasons(p: Pick<HouseholdPosition, 'accounts' | 'todos'>): Map<Id, ShortReason> {
+  const reasons = new Map<Id, ShortReason>()
+  for (const a of p.accounts) {
+    if (a.status !== 'short' || !a.short) continue
+    const fixes = p.todos.flatMap((t): string[] => {
+      if (t.accountId !== a.account.id) return []
+      if (t.kind === 'move_between') return [`move ${formatCents(t.amountCents)} from ${t.fromAccountName}`]
+      if (t.kind === 'move_in') return [`move ${formatCents(t.amountCents)} in once`]
+      if (t.reason === 'raise' || t.reason === 'keep_up') return [`set its transfer to ${formatCents(t.toCents)} a week`]
+      return []
+    })
+    reasons.set(a.account.id, { accountId: a.account.id, accountName: a.account.name, on: a.short.on, fixes })
+  }
+  return reasons
 }
 
 /** The words for a part's or plan's status (D35, D38), everywhere. */
 export const PART_STATUS_WORDS: Record<PartStatus, string> = {
   ready_to_spend: 'Ready to spend',
   on_track: 'On track',
-  catching_up: 'Catching up',
   short: 'Short',
 }
 
@@ -1244,6 +1501,17 @@ export function derivedTodoSentenceParts(
 ): SentencePart[] {
   const t = (text: string): SentencePart => ({ text })
   const target: SentencePart = { text: todo.accountName, target: true }
+  if (todo.kind === 'move_between') {
+    return [
+      t(`Move ${formatCents(todo.amountCents)} from ${todo.fromAccountName} into `),
+      target,
+      t(', '),
+      { text: `by ${humanDate(todo.byDate)}`, date: { on: todo.byDate, as: 'due' } },
+      t(`. ${todo.fromAccountName} has it to spare, and `),
+      { text: todo.accountName },
+      t(' needs it so every date is covered.'),
+    ]
+  }
   if (todo.kind === 'move_in') {
     return [
       t(`Move ${formatCents(todo.amountCents)} into `),
@@ -1302,80 +1570,106 @@ export interface PlanChartPoint {
 
 export interface PlanChart {
   /**
-   * The steady line: every part saved steadily from its Saving since date to
-   * its due date, added up, from the plan's Saving since to its last due date.
+   * What will happen on the transfer set up now (D40): from what is counted
+   * today, each transfer paying the account's dates soonest first, to the
+   * plan's last due date. Below the total at the end when the plan is Short.
    */
-  steady: PlanChartPoint[]
-  /**
-   * Where the money goes from here while the plan is catching up: from what
-   * is counted today up to each part's total by its due date. Null when the
-   * plan is on its steady line, where the two would be the same line.
-   */
-  catchUp: PlanChartPoint[] | null
+  actual: PlanChartPoint[]
+  /** The same with the fix This week asks for made, while the plan is Short; otherwise null. */
+  afterFix: PlanChartPoint[] | null
   /** What is counted today, for the dot on the chart. */
   countedToday: PlanChartPoint
   targetCents: Cents
 }
 
 /**
- * The plan's chart (D35), sampled on transfer days: nothing changes between
- * them, and a daily curve would claim the money rises continuously.
+ * Run one account forward for a chart (D40): what each slot holds after each
+ * transfer day, every transfer poured into the slots still to come, soonest
+ * first, up to what each needs. A slot whose date has passed keeps what it
+ * had: the money went out that day, or what was missing was missing.
+ */
+function runSlots(args: {
+  projection: AccountProjection
+  nowCents: Cents
+  perWeekCents: Cents | null
+  days: readonly CivilDate[]
+}): Cents[][] {
+  const { projection } = args
+  const held = projection.slots.map((x) => x.heldCents)
+  const arriving = new Map(projection.transferDays.map((d) => [d.on, d.cents]))
+  const pour = (cents: Cents, from: CivilDate) => {
+    let left = cents
+    projection.slots.forEach((slot, i) => {
+      if (left <= 0 || compareDates(slot.on, from) < 0) return
+      const take = Math.min(slot.cents - held[i]!, left)
+      if (take > 0) {
+        held[i] = held[i]! + take
+        left -= take
+      }
+    })
+  }
+  return args.days.map((day, i) => {
+    const landing =
+      (args.perWeekCents ?? arriving.get(day) ?? 0) + (i === 0 ? projection.startCents + args.nowCents : 0)
+    pour(landing, day)
+    return [...held]
+  })
+}
+
+/**
+ * The plan's chart (D40), sampled on transfer days: nothing changes between
+ * them, and a daily curve would claim the money rises continuously. It runs
+ * from today: the even-pace steady line is no longer something a plan is
+ * measured against, so it is not drawn.
  */
 export function planChart(args: {
   plan: PlanPosition
+  household: Pick<HouseholdPosition, 'accounts' | 'fixes'>
   today: CivilDate
   transferWeekday?: Weekday
   maxPoints?: number
 }): PlanChart | null {
   const { plan, today } = args
   const transferWeekday = args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
-  if (plan.parts.length === 0 || !plan.savingSince) return null
-  const from = plan.savingSince
+  if (plan.parts.length === 0) return null
   const to = plan.parts.reduce<CivilDate>((d, p) => maxDate(d, p.lineItem.dueDate), plan.parts[0]!.lineItem.dueDate)
+  if (compareDates(today, to) >= 0) return null
 
-  const steadyAt = (date: CivilDate) =>
-    plan.parts.reduce(
-      (s, p) =>
-        s +
-        evenPaceCents({
-          totalCents: p.totalCents,
-          fromDate: p.savingSince.date,
-          dueDate: p.lineItem.dueDate,
-          today: date,
-          transferWeekday,
-        }),
-      0,
-    )
-  const catchUpAt = (date: CivilDate) =>
-    plan.parts.reduce(
-      (s, p) =>
-        s +
-        p.countedCents +
-        evenPaceCents({
-          totalCents: Math.max(0, p.totalCents - p.countedCents),
-          fromDate: today,
-          dueDate: p.lineItem.dueDate,
-          today: date,
-          transferWeekday,
-        }),
-      0,
-    )
+  const days: CivilDate[] = []
+  for (let d = nextTransferDay(today, transferWeekday); compareDates(d, to) <= 0; d = addDays(d, 7)) days.push(d)
+  const accountIds = [...new Set(plan.parts.map((p) => p.accountId))]
+  const partIds = new Set(plan.parts.map((p) => p.lineItem.id))
+  const accounts = args.household.accounts.filter((a) => accountIds.includes(a.account.id))
 
-  const sample = (start: CivilDate, value: (d: CivilDate) => Cents): PlanChartPoint[] => {
-    const weeks = transferWeeksBetween(start, to, transferWeekday)
-    const stride = Math.max(1, Math.ceil(weeks / (args.maxPoints ?? 60)))
-    const points: PlanChartPoint[] = [{ date: start, cents: value(start) }]
-    for (let week = stride; week <= weeks; week += stride) {
-      const date = addDays(nextTransferDay(start, transferWeekday), (week - 1) * 7)
-      points.push({ date, cents: value(date) })
+  const line = (fixed: boolean): PlanChartPoint[] => {
+    const totals = days.map(() => 0)
+    for (const a of accounts) {
+      const fix = fixed ? args.household.fixes.get(a.account.id) : undefined
+      const run = runSlots({
+        projection: a.projection,
+        nowCents: fix?.nowCents ?? 0,
+        perWeekCents: fix?.perWeekCents ?? null,
+        days,
+      })
+      run.forEach((held, i) => {
+        a.projection.slots.forEach((slot, j) => {
+          if (slot.current && partIds.has(slot.lineItemId)) totals[i] = totals[i]! + held[j]!
+        })
+      })
     }
-    if (points.at(-1)!.date !== to) points.push({ date: to, cents: value(to) })
+    const points: PlanChartPoint[] = [{ date: today, cents: plan.countedCents }]
+    const stride = Math.max(1, Math.ceil(days.length / (args.maxPoints ?? 60)))
+    days.forEach((date, i) => {
+      if (i % stride === stride - 1 || i === days.length - 1) points.push({ date, cents: totals[i]! })
+    })
+    if (points.at(-1)!.date !== to) points.push({ date: to, cents: points.at(-1)!.cents })
     return points
   }
 
+  const fixable = plan.status === 'short' && accounts.some((a) => args.household.fixes.has(a.account.id))
   return {
-    steady: sample(compareDates(from, to) < 0 ? from : today, steadyAt),
-    catchUp: plan.status === 'on_track' || compareDates(today, to) >= 0 ? null : sample(today, catchUpAt),
+    actual: line(false),
+    afterFix: fixable ? line(true) : null,
     countedToday: { date: today, cents: plan.countedCents },
     targetCents: plan.totalCents,
   }
