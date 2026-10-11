@@ -10,6 +10,7 @@ import { Engine } from '@/server/engine'
 import type { Db } from '@/db/client'
 import type { NotificationPayload } from '@/server/notifications'
 import {
+  awakeCloseOuts,
   derivedTodoSentence,
   formatCents,
   instructionSentence,
@@ -72,10 +73,11 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   const engine = engineFor(input)
   const today = engine.today()
 
+  // A snoozed "did this get spent?" stays out of the digest until it wakes (D38).
   const [position, outstanding, closeOuts, transferWeekday] = await Promise.all([
     engine.position(),
     engine.outstandingInstructions(),
-    engine.closeOutPrompts(),
+    engine.closeOutPrompts().then(awakeCloseOuts),
     engine.transferWeekday(),
   ])
 
@@ -98,11 +100,13 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
       const verdict =
         a.status === 'short' && a.short
           ? `runs short on ${a.short.on} by ${formatCents(a.short.byCents)}`
-          : a.status === 'unconfirmed'
-            ? `needs ${formatCents(a.weeklyCents)}/week`
-            : a.horizon
-              ? `covers everything through ${a.horizon}`
-              : 'nothing due'
+          : a.status === 'running_down' && a.short
+            ? `covers this time round, but the transfer is below what its bills cost a year; the money runs out on ${a.short.on}`
+            : a.status === 'unconfirmed'
+              ? `needs ${formatCents(a.weeklyCents)}/week`
+              : a.horizon
+                ? `covers everything through ${a.horizon}`
+                : 'nothing due'
       lines.push(`- **${a.account.name}**: ${transfer} — ${verdict}`)
       if (a.transferChange && a.transferChange.reason !== 'confirm') {
         lines.push(
@@ -195,7 +199,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
 export async function buildDueDatePrompts(input: DigestInput): Promise<NotificationPayload[]> {
   const engine = engineFor(input)
   const [prompts, accounts] = await Promise.all([
-    engine.closeOutPrompts(),
+    engine.closeOutPrompts().then(awakeCloseOuts),
     engine.listReserveAccounts(),
   ])
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? 'your savings'

@@ -111,6 +111,13 @@ export const eventKindEnum = pgEnum('event_kind', [
    * payload says what was added and removed and where it came from.
    */
   'school_calendar_changed',
+  /**
+   * "Did this get spent?" snoozed until a day (migration 0017, PRD D38).
+   * The payload names the part, the due date asked about and the day it
+   * wakes; the latest for a part's due date decides, and "Wake it up" is one
+   * that wakes today. No figure reads it: the money stays held.
+   */
+  'close_out_snoozed',
 ])
 
 export const tripLineCategoryEnum = pgEnum('trip_line_category', [

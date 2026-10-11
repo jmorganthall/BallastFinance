@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { nextDue, type DueUrgency } from '@/domain/next-due'
-import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Empty, Hint, humanDate, Money, PageHeader, Pill, When, Zzz } from '@/components/ui'
 import { ProgressBar } from '@/components/progress-bar'
 import { steadySinceWords } from '@/domain'
 
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 
 const STATE_COPY = {
   simulated: { tone: 'neutral' as const, label: 'Draft — costs nothing yet' },
-  active: { tone: 'accent' as const, label: 'Saving now' },
+  active: null,
   retired: { tone: 'neutral' as const, label: 'Done' },
 }
 
@@ -22,15 +22,21 @@ const URGENCY_WEIGHT: Record<DueUrgency, string> = {
 
 export default async function PackagesPage() {
   const { engine } = await requireEngine()
-  const [views, position, today] = await Promise.all([
+  const [views, position, today, closeOuts] = await Promise.all([
     engine.packageViews(),
     engine.position(),
     Promise.resolve(engine.today()),
+    engine.closeOutPrompts(),
   ])
   // Every figure on a live plan's card is the one position's (D35): the same
   // numbers the plan's own page, This week and the check-in read.
   const plans = new Map(position.plans.map((p) => [p.package.id, p]))
   const shortOn = new Map(position.accounts.map((a) => [a.account.id, a.short?.on ?? null]))
+  // A plan with a snoozed "did this get spent?" carries the Zzz (D38), with
+  // the soonest day one wakes in its tooltip.
+  const snoozedParts = new Map(
+    closeOuts.filter((c) => c.snoozedUntil).map((c) => [c.lineItemId, c] as const),
+  )
 
   return (
     <>
@@ -58,7 +64,12 @@ export default async function PackagesPage() {
         <ul className="space-y-3">
           {views.map((view) => {
             const copy = STATE_COPY[view.package.state]
+            const liveParts = view.items.filter((item) => item.lineItem.state !== 'retired').length
             const plan = plans.get(view.package.id)
+            const snoozed = view.items
+              .map((item) => snoozedParts.get(item.lineItem.id))
+              .filter((c) => c !== undefined)
+              .sort((a, b) => a.snoozedUntil!.localeCompare(b.snoozedUntil!))
             const next =
               view.package.state === 'retired'
                 ? null
@@ -72,26 +83,33 @@ export default async function PackagesPage() {
                   <Card>
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="font-semibold">{view.package.name}</h2>
-                      <Pill tone={copy.tone}>{copy.label}</Pill>
+                      <span className="flex shrink-0 items-center gap-2">
+                        {snoozed.length > 0 ? (
+                          <Hint
+                            detail={`${snoozed.map((c) => c.label).join(', ')}: "did this get spent?" is snoozed until ${humanDate(snoozed[0]!.snoozedUntil!)}. The money stays held.`}
+                          >
+                            <span className="text-[var(--color-accent)]">
+                              <Zzz />
+                              <span className="sr-only">Snoozed</span>
+                            </span>
+                          </Hint>
+                        ) : null}
+                        {/* A live plan says nothing here: the bar is its state (D38). */}
+                        {copy ? <Pill tone={copy.tone}>{copy.label}</Pill> : null}
+                      </span>
                     </div>
-                    <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
-                      <Money cents={plan?.totalCents ?? view.totalCents} /> total
-                      {plan ? (
-                        <>
-                          {' · '}
-                          <Money cents={plan.steadyPerWeekCents} />/week steady
-                          {' · '}
-                          <Money cents={plan.countedCents} /> here now
-                        </>
-                      ) : null}
-                    </p>
-                    {next ? (
+                    {!plan || plan.parts.length === 0 ? (
+                      <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+                        <Money cents={view.totalCents} /> total
+                      </p>
+                    ) : null}
+                    {/* With one part the bar names its date; with more, which is next. */}
+                    {next && liveParts > 1 ? (
                       <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                         Next out: {next.label},{' '}
                         <span className={URGENCY_WEIGHT[next.urgency]}>
-                          {next.daysAway < 0 ? 'was due' : 'due'} {next.distance}
-                        </span>{' '}
-                        ({humanDate(next.dueDate)})
+                          <When date={next.dueDate} today={today} as="due" />
+                        </span>
                       </p>
                     ) : null}
                     {plan && plan.parts.length > 0 ? (
@@ -103,6 +121,8 @@ export default async function PackagesPage() {
                         coveringSoonerCents={plan.coveringSoonerCents}
                         notYetHereCents={plan.notYetHereCents}
                         status={plan.status}
+                        today={today}
+                        dueDate={liveParts === 1 ? next?.dueDate : undefined}
                         savingSince={
                           plan.savingSince
                             ? {

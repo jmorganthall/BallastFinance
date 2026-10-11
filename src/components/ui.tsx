@@ -8,7 +8,9 @@
  */
 
 import type { ReactNode } from 'react'
-import { formatCents, type Cents } from '@/domain'
+import { Tip } from '@/components/tip'
+import { compareDates, formatCents, type Cents, type CivilDate } from '@/domain'
+import { humanDistance } from '@/domain/next-due'
 
 /** "Sep 1, 2026" from a civil date, with no timezone involved. */
 export function humanDate(iso: string): string {
@@ -52,12 +54,49 @@ export function Money({
  * native title attribute so it works on a phone without any JS.
  */
 export function Hint({ children, detail }: { children: ReactNode; detail: string }) {
+  return <Tip detail={detail}>{children}</Tip>
+}
+
+/**
+ * A money or to-do date said as a distance from today (PRD D38): "in 5
+ * days", "tomorrow", "3 weeks ago", with the date itself on hover or tap.
+ * `lead` opens a sentence ("In 5 days"); `due` says "due in 5 days" or "was
+ * due 3 days ago"; `until` says how long something lasts ("for the next 5
+ * weeks", "until tomorrow").
+ */
+export function When({
+  date,
+  today,
+  as = 'plain',
+}: {
+  date: CivilDate
+  today: CivilDate
+  as?: 'plain' | 'lead' | 'due' | 'until'
+}) {
+  const daysAway = compareDates(date, today)
+  const distance = humanDistance(daysAway)
+  // A sentence that opens on a day already here is something to do now.
+  const words =
+    as === 'lead'
+      ? daysAway < 0
+        ? 'Now'
+        : distance.charAt(0).toUpperCase() + distance.slice(1)
+      : as === 'due'
+        ? `${daysAway < 0 ? 'was due' : 'due'} ${distance}`
+        : as === 'until'
+          ? daysAway > 1
+            ? `for the next ${distance.replace(/^in /, '')}`
+            : `until ${distance}`
+          : distance
+  return <Hint detail={humanDate(date)}>{words}</Hint>
+}
+
+/** The snooze mark (D38): a sleeping "Zzz", never the only sign -- a word is always beside it. */
+export function Zzz({ className = '' }: { className?: string }) {
   return (
-    <span
-      title={detail}
-      className="cursor-help underline decoration-dotted decoration-[var(--color-ink-soft)] underline-offset-4"
-    >
-      {children}
+    <span aria-hidden="true" className={`font-semibold italic tracking-tight ${className}`}>
+      Z<sup className="text-[0.75em]">z</sup>
+      <sup className="text-[0.6em]">z</sup>
     </span>
   )
 }
@@ -78,7 +117,7 @@ export function Pill({
   }
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium ${tones[tone]}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-medium ${tones[tone]}`}
     >
       {children}
     </span>

@@ -90,6 +90,7 @@ import {
   type CivilDate,
   type Weekday,
 } from './dates'
+import type { SentencePart } from './instructions'
 import { ceilDiv, formatCents, roundUpToStep, type Cents } from './money'
 import { isRecurring, nextOccurrence, previousOccurrence } from './recurrence'
 import {
@@ -169,10 +170,20 @@ export interface PositionInput {
 
 // ---------------------------------------------------------------- outputs
 
-/** The three words, everywhere (D35). */
-export type PartStatus = 'on_track' | 'catching_up' | 'short'
-/** An account is fine or it is not; "unconfirmed" until its transfer is known. */
-export type AccountStatus = 'on_track' | 'short' | 'unconfirmed'
+/**
+ * The status words, everywhere (D35): On track, Catching up, Short, and --
+ * for a part past its date with all its money there, waiting to be spent --
+ * Ready to spend (D38).
+ */
+export type PartStatus = 'ready_to_spend' | 'on_track' | 'catching_up' | 'short'
+/**
+ * An account is fine or it is not; "unconfirmed" until its transfer is known.
+ * Running down (D39): every bill this time round is covered, but the
+ * transfer is less than the bills cost a year, so the money already there --
+ * the household's ballast -- is being spent down and runs out on a later
+ * time round. Short: a bill among the current dates cannot be paid.
+ */
+export type AccountStatus = 'on_track' | 'running_down' | 'short' | 'unconfirmed'
 
 /** Why a part's steady line starts where it does, for the words on screen. */
 export type SteadySinceReason = 'last_occurrence' | 'plan_started' | 'added' | 'typed' | 'spent'
@@ -231,7 +242,12 @@ export interface AccountShort {
   byCents: Cents
 }
 
-export type TransferChangeReason = 'confirm' | 'raise' | 'lower'
+/**
+ * Why the transfer should change: confirm what it is, raise it so a current
+ * date is met, keep it up with what the bills cost a year so the money
+ * already there stops being spent down (D39), or lower it.
+ */
+export type TransferChangeReason = 'confirm' | 'raise' | 'keep_up' | 'lower'
 
 export interface AccountPosition {
   account: ReserveAccount
@@ -267,7 +283,10 @@ export interface AccountPosition {
   /** What is set up at the bank, or null when nobody has confirmed it yet. */
   bank: BankTransfer | null
   status: AccountStatus
+  /** The day the money runs out on the transfer set up now: Short, or Running down (on a later time round). */
   short: AccountShort | null
+  /** What the repeating bills cost a week, steadily: the least a transfer must be not to run down (D39). */
+  runRatePerWeekCents: Cents
   /** What could leave the account today with every date still passing. */
   extraCents: Cents
   /** A change to the transfer this account asks for, or null. */
@@ -808,8 +827,14 @@ export function moneyToday(args: {
 
 // ---------------------------------------------------------------- the position
 
+/**
+ * A plan's status is its worst part's. Ready to spend is the best (D38): a
+ * plan reads it only when every part does, so one part waiting to be spent
+ * never hides another that is Short. No part at all is on track.
+ */
+const STATUS_ORDER: readonly PartStatus[] = ['short', 'catching_up', 'on_track', 'ready_to_spend']
 const worst = (statuses: readonly PartStatus[]): PartStatus =>
-  statuses.includes('short') ? 'short' : statuses.includes('catching_up') ? 'catching_up' : 'on_track'
+  statuses.length === 0 ? 'on_track' : STATUS_ORDER.find((s) => statuses.includes(s))!
 
 function accountPosition(args: {
   account: ReserveAccount
@@ -884,8 +909,22 @@ function accountPosition(args: {
         requirements,
         arrivedBy: (r) => weeklyCents * r.transfers,
       })
+  // Money that runs out only after the last current date -- on a later time
+  // round, because the transfer is below what the bills cost a year -- is an
+  // account Running down, not Short (D39): every bill now is paid, and the
+  // ballast is what is being spent.
+  const runsOutLater =
+    judged.short !== null && horizon !== null && compareDates(judged.short.on, horizon) > 0
   const status: AccountStatus =
-    frames.length === 0 && !bank ? 'on_track' : !bank ? 'unconfirmed' : judged.short ? 'short' : 'on_track'
+    frames.length === 0 && !bank
+      ? 'on_track'
+      : !bank
+        ? 'unconfirmed'
+        : judged.short
+          ? runsOutLater
+            ? 'running_down'
+            : 'short'
+          : 'on_track'
 
   // A Short account always says what fixes it, and an account that is fine
   // is asked for nothing it depends on. When a one-time move alone puts it
@@ -931,7 +970,11 @@ function accountPosition(args: {
       }
       moveNeeded = { amountCents: high, byDate: firstShort.on }
     } else {
-      transferChange = { fromCents: bank.perWeekCents, toCents: weeklyCents, reason: 'raise' }
+      transferChange = {
+        fromCents: bank.perWeekCents,
+        toCents: weeklyCents,
+        reason: runsOutLater ? 'keep_up' : 'raise',
+      }
       if (level.moveCents > 0 && level.moveBy) {
         moveNeeded = { amountCents: level.moveCents, byDate: level.moveBy }
       }
@@ -969,17 +1012,26 @@ function accountPosition(args: {
     .map((f) => {
       const countedCents = counted.get(f.lineItem.id) ?? 0
       const steady = Math.min(f.savedForCents, f.totalCents)
-      // A part is Short when the day the account runs dry is one it still
-      // needs money on: a one-off due on or after it, or a part that comes
-      // round again, which goes on needing money every cycle after.
+      // A part is Short when its own current date -- the one it is saving
+      // for now -- is on or after the day the account runs dry (D38 (6)).
+      // A later time round of a repeating part does not make it Short today:
+      // the account card says the account runs short, and when, and This
+      // week asks for the fix; a plan card judges the plan in front of it. On or
+      // past its date -- the day "did this get spent?" starts asking -- with
+      // every cent of it counted, it is Ready to spend (D38):
+      // whether or not "did this get spent?" is snoozed, which changes no
+      // figure. Past its date and not all there, it goes out today and the
+      // account is Short, so it reads Short.
       const partStatus: PartStatus =
         status === 'short' &&
         judged.short &&
-        (isRecurring(f.lineItem.recurrence) || compareDates(f.outflowDate, judged.short.on) >= 0)
+        compareDates(f.outflowDate, judged.short.on) >= 0
           ? 'short'
-          : countedCents >= steady
-            ? 'on_track'
-            : 'catching_up'
+          : compareDates(f.lineItem.dueDate, today) <= 0 && countedCents >= f.totalCents
+            ? 'ready_to_spend'
+            : countedCents >= steady
+              ? 'on_track'
+              : 'catching_up'
       const gap = Math.max(0, steady - countedCents)
       const coveringSoonerCents = Math.min(gap, countedSooner)
       countedSooner += countedCents
@@ -1015,7 +1067,8 @@ function accountPosition(args: {
     oneTimeMove,
     bank,
     status,
-    short: status === 'short' ? judged.short : null,
+    short: status === 'short' || status === 'running_down' ? judged.short : null,
+    runRatePerWeekCents,
     // What could leave today: never more than is there today, and never
     // what a later date still needs once the transfers up to it are in.
     extraCents: judged.short ? 0 : Math.max(0, Math.min(money.totalCents, judged.slackCents)),
@@ -1131,20 +1184,26 @@ export function position(input: PositionInput): HouseholdPosition {
 export function barOf(v: { totalCents: Cents; countedCents: Cents; savedForCents: Cents }): {
   fillPercent: number
   tickPercent: number
+  /** The stretch from the fill up to the tick: what is being caught up, drawn striped. */
+  catchUpPercent: number
   fullyFunded: boolean
 } {
   const total = Math.max(0, v.totalCents)
   const percent = (cents: Cents) =>
     total === 0 ? 100 : Math.round((Math.max(0, Math.min(cents, total)) / total) * 100)
+  const fillPercent = percent(v.countedCents)
+  const tickPercent = percent(v.savedForCents)
   return {
-    fillPercent: percent(v.countedCents),
-    tickPercent: percent(v.savedForCents),
+    fillPercent,
+    tickPercent,
+    catchUpPercent: Math.max(0, tickPercent - fillPercent),
     fullyFunded: v.countedCents >= total,
   }
 }
 
-/** The words for a part's or plan's status (D35): three, everywhere. */
+/** The words for a part's or plan's status (D35, D38), everywhere. */
 export const PART_STATUS_WORDS: Record<PartStatus, string> = {
+  ready_to_spend: 'Ready to spend',
   on_track: 'On track',
   catching_up: 'Catching up',
   short: 'Short',
@@ -1153,6 +1212,7 @@ export const PART_STATUS_WORDS: Record<PartStatus, string> = {
 /** The words for an account's status. */
 export const ACCOUNT_STATUS_WORDS: Record<AccountStatus, string> = {
   on_track: 'On track',
+  running_down: 'Running down',
   short: 'Short',
   unconfirmed: 'Confirm the transfer',
 }
@@ -1181,14 +1241,16 @@ export function steadySinceWords(reason: SteadySinceReason): string {
 export function derivedTodoSentenceParts(
   todo: DerivedTodo,
   humanDate: (d: CivilDate) => string = (d) => d,
-): { text: string; target?: true }[] {
-  const t = (text: string) => ({ text })
-  const target = { text: todo.accountName, target: true as const }
+): SentencePart[] {
+  const t = (text: string): SentencePart => ({ text })
+  const target: SentencePart = { text: todo.accountName, target: true }
   if (todo.kind === 'move_in') {
     return [
       t(`Move ${formatCents(todo.amountCents)} into `),
       target,
-      t(` once, by ${humanDate(todo.byDate)}. It is too soon for the weekly transfer to cover.`),
+      t(' once, '),
+      { text: `by ${humanDate(todo.byDate)}`, date: { on: todo.byDate, as: 'due' } },
+      t('. It is too soon for the weekly transfer to cover.'),
     ]
   }
   const to = formatCents(todo.toCents)
@@ -1204,6 +1266,14 @@ export function derivedTodoSentenceParts(
         t('In Capital One 360, set the recurring transfer into '),
         target,
         t(` to ${to} per week (it is ${formatCents(todo.fromCents ?? 0)} now), so every date is covered.`),
+      ]
+    case 'keep_up':
+      return [
+        t('In Capital One 360, set the recurring transfer into '),
+        target,
+        t(
+          ` to ${to} per week (it is ${formatCents(todo.fromCents ?? 0)} now), so it keeps up with what its bills cost and stops using up what is already set aside.`,
+        ),
       ]
     case 'lower':
       return [

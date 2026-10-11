@@ -34,8 +34,9 @@ export function dueUrgency(daysAway: number): DueUrgency {
 
 /**
  * A rough distance in the largest unit that reads naturally, rounded to the
- * nearest whole one. Days up to a week, weeks up to a month, months up to a
- * year, then years.
+ * nearest whole one (PRD D38): days under two weeks, so "in 10 days" never
+ * reads as a week; weeks under 60 days; months under two years; then years.
+ * Every money and to-do date on screen says this, with the date on hover.
  */
 export function humanDistance(daysAway: number): string {
   if (daysAway === 0) return 'today'
@@ -46,11 +47,14 @@ export function humanDistance(daysAway: number): string {
   return daysAway > 0 ? `in ${phrase}` : `${phrase} ago`
 }
 
+/** The average month, so 60 days reads as two months and a year as twelve. */
+const DAYS_PER_MONTH = 365.25 / 12
+
 function unitPhrase(days: number): string {
-  if (days < 7) return plural(days, 'day')
-  if (days < 30) return plural(Math.max(1, Math.round(days / 7)), 'week')
-  if (days < 365) return plural(Math.max(1, Math.round(days / 30)), 'month')
-  return plural(Math.max(1, Math.round(days / 365)), 'year')
+  if (days < 14) return plural(days, 'day')
+  if (days < 60) return plural(Math.round(days / 7), 'week')
+  if (days < 730) return plural(Math.round(days / DAYS_PER_MONTH), 'month')
+  return plural(Math.round(days / 365), 'year')
 }
 
 function plural(n: number, unit: string): string {

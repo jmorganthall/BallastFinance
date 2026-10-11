@@ -4,8 +4,10 @@
  * Server-rendered inline SVG: no chart library, no client JavaScript.
  *
  * Form: one quantity over time, drawn two ways. The steady line is where the
- * plan would be saving steadily from its Saving since date. When the plan is
- * catching up, a second line in the caution colour runs from what is counted
+ * plan would be saving steadily from its Saving since date, in the soft ink
+ * of the pace tick (blue is Ready to spend, D38). When the plan is catching
+ * up, a second line, dashed in the calm green of the bar's stripes (catching
+ * up is not a problem, D38 (5)), runs from what is counted
  * today up to the total by the due date: "you should be on the steady path;
  * you are here; this is how the money gets there". The dot is today's
  * figure. Both lines are labelled directly, so identity never depends on
@@ -96,11 +98,11 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
           $0
         </text>
 
-        <path d={area} fill="var(--color-accent)" opacity="0.10" />
+        <path d={area} fill="var(--color-ink-soft)" opacity="0.10" />
         <path
           d={steadyLine}
           fill="none"
-          stroke="var(--color-accent)"
+          stroke="var(--color-ink-soft)"
           strokeWidth="2"
           strokeLinejoin="round"
           strokeLinecap="round"
@@ -109,7 +111,8 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
           <path
             d={catchUpLine}
             fill="none"
-            stroke="var(--color-caution)"
+            stroke="var(--color-ahead)"
+            strokeDasharray="5 4"
             strokeWidth="2"
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -155,12 +158,12 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
       {/* Direct labels rather than a legend box, so identity is never colour alone. */}
       <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-ink-soft)]">
         <span className="flex items-center gap-1.5">
-          <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-accent)]" />
+          <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-ink-soft)]" />
           Steady line
         </span>
         {catchUpLine ? (
           <span className="flex items-center gap-1.5">
-            <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-caution)]" />
+            <span aria-hidden className="inline-block w-4 border-t-2 border-dashed border-[var(--color-ahead)]" />
             Catching up from here
           </span>
         ) : null}

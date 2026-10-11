@@ -105,17 +105,54 @@ principles, and they are non-negotiable.
   date four transfers away or fewer that it cannot meet is a one-time move,
   so the transfer never spikes. The status is judged on the transfer
   *confirmed* at the bank (`set_weekly_transfer` confirmed), never on an ask
-  not yet done: `on_track`, `short` (with the first date) or `unconfirmed`.
+  not yet done: `on_track`, `short` (a current bill cannot be paid, with the
+  first date), `running_down` (PRD D39, rev 70: every current bill is paid
+  but the transfer is below what the repeating bills cost a year,
+  `runRatePerWeekCents`, so the money runs out on a later round; calm amber,
+  its to-do is a `keep_up` transfer change, and it blocks "All caught up")
+  or `unconfirmed`.
   Parts are `on_track` / `catching_up` / `short`, counted automatically
   soonest due first up to each steady line, then up to totals; nothing is
   counted by hand and there is no reshuffle. To-dos (`position.todos`) are
   derived, not issued ahead: marking one done records the instruction and
   its confirmation together (`confirmTransfer`, `confirmMoveIn`). The
   invariants in `src/domain/__tests__/position.test.ts` pin the rest: a
-  Short account always has a Short part and a fix; lowering never makes an
-  account Short; extra never exceeds money today. There is no drift, no
+  part is Short exactly when its account is Short and its own current date
+  is on or after the day the account runs short (D38 (6), rev 69: a later
+  time round of a repeating part does not make it Short today); a Short
+  account always has a Short part and a fix, a Running down one none;
+  lowering never makes an account Short; extra
+  never exceeds money today. There is no drift, no
   should-hold, no catch-up bump or ease-off offer and no rate component on
   screen any more.
+- **"Did this get spent?" can be snoozed, and a part waiting to be spent is
+  Ready to spend** (PRD D38, rev 64). A snooze is a `close_out_snoozed` event
+  (migration 0017) with the part, the due date asked about and the day it
+  wakes; the latest for the part's current due date decides, and "Wake it up"
+  / undo is one that wakes today (`Engine.snoozeCloseOut`). The rules and
+  words are in `src/domain/closeout.ts` (`resolveSnoozeUntil`,
+  `snoozeDays`, at most `SNOOZE_MAX_MONTHS` 6). Nothing about a snooze reaches
+  the position: the part still goes out today, so its money stays held.
+  `CloseOutPrompt.snoozedUntil` says it is asleep; This week and the digest
+  show only `awakeCloseOuts`, the plan's page shows both. Either spouse may
+  snooze: it moves no money. `ready_to_spend` is a fourth `PartStatus`: on or
+  past its due date with every cent counted. It is the best status, so a plan
+  reads it only when every part does; a past-due part not all there is
+  Short, snoozed or not (invariant 6 in `position.test.ts`). It is drawn in
+  `--color-accent`, and the plans list carries a `Zzz` mark while a part is
+  snoozed. **Money and to-do dates are said as a distance from today**
+  (`humanDistance` in `src/domain/next-due.ts`: days under 14, weeks under
+  60 days, months under two years) through `When` in `src/components/ui.tsx`,
+  with the date on hover or tap (`Hint` now opens on a tap too, via
+  `src/components/tip.tsx`). A date inside a to-do sentence is a
+  `SentencePart` with `date`, whose `text` keeps the date for the digest.
+  Trip and park-calendar dates stay dates. **A plan card is read at a glance**
+  (D38 (5), rev 66): `ProgressBar` draws the fill, the white pace tick with a
+  chequered flag above it, and -- while Catching up -- a green fill with the
+  stretch to the tick striped in two soft greens and a green word, because
+  catching up is fine by definition (`barOf().catchUpPercent`); one line
+  "$X of $Y, due in N"; the reasons only on a tap of the word or the flag. No
+  "$/week steady" on any card: the weekly figure is the account's.
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
   order the events were recorded (`recorded_at`, then id), answered by
@@ -293,7 +330,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 687 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 689 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
@@ -312,7 +349,8 @@ Before changing any money figure, read the invariants in
 `src/domain/__tests__/position.test.ts` (D35). They are a randomised property
 test over generated households -- accounts, parts, counts, transfers, transfer
 days -- asserting that W is the smallest level transfer that works, that a
-Short account always has a Short part and a fix, that lowering never makes an
+part is Short exactly when its own date is on or after its account's short
+day and a Short account always has a fix, that lowering never makes an
 account Short, and that "All caught up" means nothing is Short. They caught
 real bugs while the position was being built; run them with more seeds
 (`SEED`/`RUNS` in a scratch copy) after any change to `position.ts`.

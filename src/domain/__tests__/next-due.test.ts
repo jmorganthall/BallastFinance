@@ -15,33 +15,32 @@ describe('humanDistance', () => {
     expect(humanDistance(-1)).toBe('yesterday')
   })
 
-  it('counts days under a week', () => {
+  it('counts days under two weeks, so ten days never reads as one week', () => {
     expect(humanDistance(2)).toBe('in 2 days')
-    expect(humanDistance(6)).toBe('in 6 days')
+    expect(humanDistance(10)).toBe('in 10 days')
+    expect(humanDistance(13)).toBe('in 13 days')
   })
 
-  it('rounds to weeks under a month', () => {
-    expect(humanDistance(7)).toBe('in 1 week')
-    expect(humanDistance(10)).toBe('in 1 week')
-    expect(humanDistance(11)).toBe('in 2 weeks')
-    expect(humanDistance(29)).toBe('in 4 weeks')
+  it('rounds to weeks from 14 to 59 days', () => {
+    expect(humanDistance(14)).toBe('in 2 weeks')
+    expect(humanDistance(45)).toBe('in 6 weeks')
+    expect(humanDistance(59)).toBe('in 8 weeks')
   })
 
-  it('rounds to months under a year', () => {
-    expect(humanDistance(30)).toBe('in 1 month')
-    expect(humanDistance(44)).toBe('in 1 month')
-    expect(humanDistance(45)).toBe('in 2 months')
+  it('rounds to months from 60 days to two years', () => {
+    expect(humanDistance(60)).toBe('in 2 months')
     expect(humanDistance(364)).toBe('in 12 months')
+    expect(humanDistance(729)).toBe('in 24 months')
   })
 
-  it('rounds to years from a year out', () => {
-    expect(humanDistance(365)).toBe('in 1 year')
+  it('rounds to years from two years out', () => {
     expect(humanDistance(730)).toBe('in 2 years')
   })
 
   it('says how long ago when it has passed', () => {
     expect(humanDistance(-3)).toBe('3 days ago')
     expect(humanDistance(-21)).toBe('3 weeks ago')
+    expect(humanDistance(-10)).toBe('10 days ago')
   })
 })
 

@@ -7,11 +7,18 @@
  * domain's; this only lays them out.
  */
 
-import { Card, Hint, humanDate, Money } from '@/components/ui'
+import { Card, Hint, humanDate, Money, When } from '@/components/ui'
 import { AccountStatusPill } from '@/components/status'
-import { formatCents, type AccountPosition } from '@/domain'
+import { formatCents, type AccountPosition, type CivilDate } from '@/domain'
 
-export function AccountPositionCard({ account: a }: { account: AccountPosition }) {
+export function AccountPositionCard({
+  account: a,
+  today,
+}: {
+  account: AccountPosition
+  /** Dates are said as a distance from today (D38). */
+  today: CivilDate
+}) {
   const money = a.money
   const moneyDetail =
     money.from === 'count'
@@ -43,12 +50,22 @@ export function AccountPositionCard({ account: a }: { account: AccountPosition }
 
       {a.status === 'short' && a.short ? (
         <p className="mt-2 text-sm font-medium text-[var(--color-behind)]">
-          On the transfer set up now it runs short on {humanDate(a.short.on)}, by{' '}
+          On the transfer set up now it runs short <When date={a.short.on} today={today} />, by{' '}
           <Money cents={a.short.byCents} />.
+        </p>
+      ) : a.status === 'running_down' && a.short && a.bank ? (
+        // Every bill now is paid; the money already there is what is being
+        // spent (D39). Plain words, the two weekly figures side by side.
+        <p className="mt-2 text-sm text-[var(--color-caution)]">
+          Covers every bill this time round, but{' '}
+          <Money cents={a.bank.perWeekCents} /> a week is less than these bills cost (
+          <Money cents={a.runRatePerWeekCents} /> a week), so it is using up what is already
+          set aside. On this transfer the money runs out{' '}
+          <When date={a.short.on} today={today} />.
         </p>
       ) : a.parts.length > 0 && a.horizon && a.status === 'on_track' ? (
         <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
-          Covers everything due through {humanDate(a.horizon)} on the transfer set up now
+          Covers everything due <When date={a.horizon} today={today} as="until" /> on the transfer set up now
           {a.catchingUpParts > 0
             ? `, including ${a.catchingUpParts === 1 ? 'the part' : `the ${a.catchingUpParts} parts`} catching up.`
             : '.'}
@@ -84,7 +101,9 @@ export function AccountPositionCard({ account: a }: { account: AccountPosition }
                 <Money cents={a.transferChange.toCents} /> a week
                 {a.transferChange.reason === 'raise'
                   ? ', so every date is covered.'
-                  : ', since less now does the job.'}
+                  : a.transferChange.reason === 'keep_up'
+                    ? ', so it keeps up with what its bills cost.'
+                    : ', since less now does the job.'}
               </>
             )}
           </p>
@@ -93,8 +112,8 @@ export function AccountPositionCard({ account: a }: { account: AccountPosition }
         ) : null}
         {a.oneTimeMove ? (
           <p className="mt-1 font-medium">
-            And a one-time move of <Money cents={a.oneTimeMove.amountCents} /> by{' '}
-            {humanDate(a.oneTimeMove.byDate)}, too soon for the weekly transfer to cover.
+            And a one-time move of <Money cents={a.oneTimeMove.amountCents} />,{' '}
+            <When date={a.oneTimeMove.byDate} today={today} as="due" />, too soon for the weekly transfer to cover.
           </p>
         ) : null}
         {a.parts.length > 0 ? (
