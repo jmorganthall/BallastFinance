@@ -5,8 +5,10 @@ import {
   countTowardParts,
   levelWeekly,
   NEAR_TRANSFERS,
+  planChart,
   position,
   requirementsFor,
+  slotTicks,
   steadyLineStart,
   type PositionInput,
 } from '../position'
@@ -193,8 +195,9 @@ describe('the weekly amount is the smallest level transfer that keeps the accoun
 describe('the account and its parts cannot disagree (the screenshot that started D35)', () => {
   // Gifts & Giving: a count of $1,100 on Sunday, $60 a week confirmed.
   // Birthdays is due Thursday and takes its money first; Mother's Day and the
-  // anniversary are below their steady lines -- catching up, not alarms --
-  // because the account covers every date on the transfer it already has.
+  // anniversary are below an even save since they last came round, but the
+  // account covers every date on the transfer it already has, so each is at
+  // or above its tick -- what the account must hold for it today (D40).
   const facts = input({
     lineItems: [
       li({ id: 'birthday', label: 'Birthday party', dueDate: '2026-10-01', recurrence: yearly, timelineStart: 'last_occurrence' }),
@@ -215,22 +218,23 @@ describe('the account and its parts cannot disagree (the screenshot that started
     expect(p.allCaughtUp).toBe(true)
   })
 
-  it("Mother's Day is catching up, with the money covering the birthday due sooner", () => {
+  it("Mother's Day is below an even save but at its tick, so it is On track (D40)", () => {
     const md = part('mothers-day')
     expect(md.savingSince).toEqual({ date: '2026-05-01', reason: 'last_occurrence' })
-    expect(md.status).toBe('catching_up')
-    expect(md.coveringSoonerCents).toBe(md.savedForCents - md.countedCents)
-    expect(md.coveringSoonerCents).toBeGreaterThan(0)
+    expect(md.countedCents).toBeLessThan(md.savedForCents)
+    expect(md.countedCents).toBeGreaterThanOrEqual(md.tickCents)
+    expect(md.status).toBe('on_track')
     expect(part('birthday').status).toBe('on_track')
   })
 
-  it('the parts count exactly the money the account has', () => {
-    expect(a.parts.reduce((s, x) => s + x.countedCents, 0)).toBe(110000)
+  it('the parts count the money the account has, less what it holds for a later round (D40)', () => {
+    const later = a.projection.slots.filter((x) => !x.current).reduce((s, x) => s + x.heldCents, 0)
+    expect(a.parts.reduce((s, x) => s + x.countedCents, 0) + later).toBe(110000)
     expect(a.money.totalCents).toBe(110000)
   })
 
   it('the plan reads its worst part', () => {
-    expect(p.plans[0]!.status).toBe('catching_up')
+    expect(p.plans[0]!.status).toBe('on_track')
   })
 
   it('a lower bank transfer makes the account Short, and its parts from that date on with it', () => {
@@ -241,11 +245,12 @@ describe('the account and its parts cannot disagree (the screenshot that started
     const la = low.accounts[0]!
     expect(la.status).toBe('short')
     expect(la.transferChange).toMatchObject({ fromCents: 1000, reason: 'raise' })
-    // A part is Short when its own date is on or after the day the account
-    // runs dry (D38 (6)); one due before it is judged on its own money.
+    // A part is Short where the money runs out before its tick (D40); one
+    // the account can pay on the transfer it has is not.
     expect(la.parts.some((x) => x.status === 'short')).toBe(true)
     for (const x of la.parts) {
-      expect(x.status === 'short').toBe(x.outflowDate >= la.short!.on)
+      if (x.countedCents < x.tickCents) expect(x.status).toBe('short')
+      if (x.status === 'short') expect(x.outflowDate >= la.short!.on).toBe(true)
     }
     expect(low.allCaughtUp).toBe(false)
   })
@@ -427,15 +432,157 @@ describe("a part's steady line starts where the person said", () => {
   })
 })
 
-describe('counting toward parts', () => {
-  it('fills every part to its steady line soonest first, then to its total soonest first', () => {
-    const parts = [
-      { lineItem: li({ id: 'a', label: 'a' }), outflowDate: '2026-10-01', totalCents: 1000, savedForCents: 900 },
-      { lineItem: li({ id: 'b', label: 'b' }), outflowDate: '2027-01-01', totalCents: 1000, savedForCents: 300 },
-    ]
-    expect(countTowardParts(parts, 1000)).toEqual(new Map([['a', 900], ['b', 100]]))
-    expect(countTowardParts(parts, 1250)).toEqual(new Map([['a', 950], ['b', 300]]))
-    expect(countTowardParts(parts, 5000)).toEqual(new Map([['a', 1000], ['b', 1000]]))
+describe('counting toward parts (D40)', () => {
+  const slot = (id: string, cents: number, tickCents: number, current = true) => ({
+    lineItemId: id,
+    cents,
+    tickCents,
+    current,
+  })
+  it('fills every slot to its tick soonest first, then every current round to its total soonest first', () => {
+    const slots = [slot('a', 1000, 900), slot('b', 1000, 300)]
+    expect(countTowardParts(slots, 1000).counted).toEqual(new Map([['a', 900], ['b', 100]]))
+    expect(countTowardParts(slots, 1000).belowTick).toEqual(new Set(['b']))
+    expect(countTowardParts(slots, 1250).counted).toEqual(new Map([['a', 950], ['b', 300]]))
+    expect(countTowardParts(slots, 5000).counted).toEqual(new Map([['a', 1000], ['b', 1000]]))
+  })
+  it('holds money for a later round without counting it to the part', () => {
+    const slots = [slot('a', 1000, 0), slot('a', 1000, 400, false)]
+    const c = countTowardParts(slots, 500)
+    expect(c.counted).toEqual(new Map([['a', 100]]))
+    expect(c.held).toEqual([100, 400])
+    expect(c.belowTick.size).toBe(0)
+  })
+})
+
+describe('the tick is what the account must hold today (D40)', () => {
+  const s = (id: string, on: CivilDate, cents: number) => ({ lineItemId: id, on, cents, current: true, label: id })
+  it('takes off the transfers that land before each date, a surplus carried on', () => {
+    // $20 a week. A: $1,000 by the 10th transfer; B: $100 by the 15th; C: $1,000 by the 20th.
+    const arrived = (on: CivilDate) => 2000 * transferWeeksBetween('2026-10-11', on, 6)
+    const slots = [s('a', '2026-12-19', 100000), s('b', '2027-01-23', 10000), s('c', '2027-02-27', 100000)]
+    // A: 1000 − 200 = 800. B: 100 is covered by the 100 that lands before it, nothing over.
+    // C: 1000 − the 100 that lands after B = 900.
+    expect(slotTicks(slots, arrived)).toEqual([80000, 0, 90000])
+  })
+
+  it('reads the screenshot right: a part at or past its tick is never Short', () => {
+    // RunDisney: a pass due sooner and two parts due later, one account,
+    // the bank moving too little. The two later parts are Short, below
+    // their ticks; the pass, due first, is paid.
+    const p = position(
+      input({
+        lineItems: [
+          li({ id: 'pass', label: 'Premier Pass', unitAmountCents: 48333, quantity: 3, dueDate: '2027-01-08' }),
+          li({ id: 'food', label: 'Food', unitAmountCents: 100000, dueDate: '2027-01-26' }),
+          li({ id: 'room', label: 'Boardwalk Villas', unitAmountCents: 391606, dueDate: '2027-01-26' }),
+        ],
+        counts: [{ accountId: gifts.id, amountCents: 280377, on: TODAY }],
+        transfers: [{ accountId: gifts.id, perWeekCents: 10000, confirmedOn: '2026-09-01' }],
+      }),
+    )
+    const a = p.accounts[0]!
+    expect(a.status).toBe('short')
+    for (const x of a.parts) expect(x.status === 'short').toBe(x.countedCents < x.tickCents)
+    expect(a.parts.find((x) => x.lineItem.id === 'pass')!.status).toBe('on_track')
+    expect(a.missingTodayCents).toBe(a.mustHoldCents - a.money.totalCents)
+  })
+})
+
+describe('an account with money to spare and one that is Short (D40)', () => {
+  // The envelope case: $500 due next week in one account, $500 sitting in
+  // another that is not needed for two years.
+  const soon: ReserveAccount = { ...gifts, id: 'acct-soon', name: 'Soon' }
+  const later: ReserveAccount = { ...gifts, id: 'acct-later', name: 'Later' }
+  const facts = input({
+    accounts: [soon, later],
+    lineItems: [
+      li({ id: 'soon', unitAmountCents: 50000, dueDate: '2026-10-09', reserveAccountId: soon.id }),
+      li({ id: 'later', unitAmountCents: 50000, dueDate: '2028-09-29', reserveAccountId: later.id }),
+    ],
+    counts: [
+      { accountId: soon.id, amountCents: 0, on: TODAY },
+      { accountId: later.id, amountCents: 100000, on: TODAY },
+    ],
+    transfers: [
+      { accountId: soon.id, perWeekCents: 0, confirmedOn: '2026-09-01' },
+      { accountId: later.id, perWeekCents: 0, confirmedOn: '2026-09-01' },
+    ],
+  })
+
+  it('in one account, money for the later plan already pays the sooner one', () => {
+    const one = position({
+      ...facts,
+      accounts: [gifts],
+      lineItems: facts.lineItems.map((x) => ({ ...x, reserveAccountId: gifts.id })),
+      counts: [{ accountId: gifts.id, amountCents: 50000, on: TODAY }],
+      transfers: [{ accountId: gifts.id, perWeekCents: 0, confirmedOn: '2026-09-01' }],
+    })
+    expect(one.todos.some((t) => t.kind === 'move_in')).toBe(false)
+    expect(one.accounts[0]!.weeklyExactCents).toBeGreaterThan(0)
+  })
+
+  it('asks for the spare money to move across before any new money, as one to-do', () => {
+    const p = position(facts)
+    expect(p.accounts.find((a) => a.account.id === soon.id)!.status).toBe('short')
+    expect(p.todos).toEqual([
+      {
+        kind: 'move_between',
+        fromAccountId: later.id,
+        fromAccountName: 'Later',
+        accountId: soon.id,
+        accountName: 'Soon',
+        amountCents: 50000,
+        byDate: '2026-10-09',
+        blocking: true,
+      },
+    ])
+    expect(p.allCaughtUp).toBe(false)
+  })
+
+  it('once it is marked done, every figure is worked out again and nothing more is asked', () => {
+    const done = position({
+      ...facts,
+      movesSinceCount: [
+        { accountId: later.id, amountCents: -50000 },
+        { accountId: soon.id, amountCents: 50000 },
+      ],
+    })
+    expect(done.accounts.map((a) => a.status)).toEqual(['on_track', 'on_track'])
+    expect(done.todos.filter((t) => t.blocking)).toEqual([])
+  })
+
+  it('never lends: an account with nothing to spare is not asked', () => {
+    const p = position({
+      ...facts,
+      counts: [
+        { accountId: soon.id, amountCents: 0, on: TODAY },
+        { accountId: later.id, amountCents: 50000, on: TODAY },
+      ],
+    })
+    expect(p.todos.some((t) => t.kind === 'move_between')).toBe(false)
+    expect(p.todos.some((t) => t.kind === 'move_in' && t.accountId === soon.id)).toBe(true)
+  })
+})
+
+describe('the plan chart (D40)', () => {
+  it('ends short of the total on the transfer set up now, and at it after the fix', () => {
+    const facts = input({
+      lineItems: [li({ id: 'trip', unitAmountCents: 200000, dueDate: '2027-03-26' })],
+      counts: [{ accountId: gifts.id, amountCents: 50000, on: TODAY }],
+      transfers: [{ accountId: gifts.id, perWeekCents: 2000, confirmedOn: '2026-09-01' }],
+    })
+    const p = position(facts)
+    const plan = p.plans[0]!
+    expect(plan.status).toBe('short')
+    const chart = planChart({ plan, household: p, today: TODAY, transferWeekday: FRIDAY })!
+    expect(chart.actual[0]).toEqual({ date: TODAY, cents: 50000 })
+    expect(chart.actual.at(-1)!.cents).toBeLessThan(200000)
+    expect(chart.afterFix!.at(-1)!.cents).toBe(200000)
+    const fine = position({ ...facts, transfers: [{ accountId: gifts.id, perWeekCents: 10000, confirmedOn: '2026-09-01' }] })
+    const fineChart = planChart({ plan: fine.plans[0]!, household: fine, today: TODAY, transferWeekday: FRIDAY })!
+    expect(fineChart.afterFix).toBeNull()
+    expect(fineChart.actual.at(-1)!.cents).toBe(200000)
   })
 })
 
@@ -515,15 +662,28 @@ describe('invariants over randomised households (D35)', () => {
         }
         expect(a.weeklyCents).toBeGreaterThanOrEqual(a.weeklyExactCents)
 
-        // 2. A part is Short exactly when its account is Short and its own
-        // date is on or after the day the account runs dry (D38 (6)), so a
-        // plan card can never say "fine" of a plan its account cannot pay
-        // this time round. A Short account whose dry day falls within its
-        // current dates therefore always has a Short part.
-        for (const x of a.parts) {
-          expect(x.status === 'short').toBe(
-            a.status === 'short' && compareDates(x.outflowDate, a.short!.on) >= 0,
+        // 2. The ticks (D40) add up to the least the account must hold
+        // today for every date to pass on its transfer, and the account is
+        // Short exactly when it holds less. A part is Short exactly when
+        // some slot of it is below its tick on a Short account: a bar below
+        // its tick on a Short account is Short, and a part is never Short
+        // on an account that is not. Its own current date is never before
+        // the day the account runs dry.
+        if (a.bank) {
+          const arrived = (on: CivilDate) => bankTransfersBetween(
+            { confirmations: (facts.transfers ?? []).filter((t) => t.accountId === a.account.id), adjustments: [], transferWeekday },
+            today,
+            on,
           )
+          const least = requirements.reduce((m, r) => Math.max(m, r.needCents - arrived(r.on)), 0)
+          expect(a.mustHoldCents).toBe(least)
+          if (a.status === 'short') expect(a.money.totalCents).toBeLessThan(a.mustHoldCents)
+          if (a.status === 'on_track') expect(a.money.totalCents).toBeGreaterThanOrEqual(a.mustHoldCents)
+        }
+        for (const x of a.parts) {
+          expect(x.status === 'short').toBe(a.status === 'short' && x.countedCents < x.tickCents)
+          if (x.status === 'short') expect(compareDates(x.outflowDate, a.short!.on)).toBeGreaterThanOrEqual(0)
+          expect(x.tickCents).toBeLessThanOrEqual(x.totalCents)
         }
         // A Short account cannot pay a current bill, so it always has a Short
         // part. Running down (D39) pays every current bill and runs out only
@@ -533,20 +693,19 @@ describe('invariants over randomised households (D35)', () => {
           expect(compareDates(a.short!.on, a.horizon!)).toBeLessThanOrEqual(0)
           expect(a.parts.some((x) => x.status === 'short')).toBe(true)
         }
+        // Running down: every current round is paid and a later round
+        // runs out -- beyond the horizon, or within it after them (D40).
         if (a.status === 'running_down') {
-          expect(compareDates(a.short!.on, a.horizon!)).toBeGreaterThan(0)
-          expect(a.bank!.perWeekCents).toBeLessThan(a.runRatePerWeekCents)
-          expect(a.transferChange?.reason).toBe('keep_up')
+          expect(a.parts.some((x) => x.status === 'short')).toBe(false)
+          expect(a.transferChange?.reason === 'keep_up' || a.oneTimeMove !== null).toBe(true)
         }
         for (const x of a.parts) {
           // 3. Counting never invents money and never over-fills a part.
           expect(x.countedCents).toBeGreaterThanOrEqual(0)
           expect(x.countedCents).toBeLessThanOrEqual(x.totalCents)
-          if (x.status === 'catching_up') expect(x.countedCents).toBeLessThan(x.savedForCents)
-          expect(x.coveringSoonerCents + x.notYetHereCents).toBe(
-            Math.max(0, Math.min(x.savedForCents, x.totalCents) - x.countedCents),
-          )
-          if (x.status === 'on_track') expect(x.countedCents).toBeGreaterThanOrEqual(Math.min(x.savedForCents, x.totalCents))
+          if (x.status === 'on_track' && a.status !== 'unconfirmed') {
+            expect(x.countedCents).toBeGreaterThanOrEqual(x.tickCents)
+          }
           // 6. Ready to spend (D38) is a part on or past its date with all its
           // money there; and on an account whose transfer is known, a part on
           // or past its date is either that or Short, so a snoozed question
@@ -571,7 +730,12 @@ describe('invariants over randomised households (D35)', () => {
           expect(a.transferChange?.reason).not.toBe('keep_up')
         }
         if (a.transferChange?.reason === 'raise') expect(a.status).toBe('short')
-        if (a.transferChange?.reason === 'keep_up') expect(a.status).toBe('running_down')
+        // A Short account a surplus move puts right on its current dates may
+        // still be asked to keep up (D40); otherwise keeping up is Running down's.
+        if (a.transferChange?.reason === 'keep_up') {
+          const movedIn = p.todos.some((t) => t.kind === 'move_between' && t.accountId === a.account.id)
+          expect(a.status === 'running_down' || (a.status === 'short' && movedIn)).toBe(true)
+        }
         // What could leave today is never more than is there today.
         expect(a.extraCents).toBeLessThanOrEqual(Math.max(0, a.money.totalCents))
         // Lowering is only ever offered to where the account is still fine,
@@ -588,7 +752,44 @@ describe('invariants over randomised households (D35)', () => {
           expect(lowered.oneTimeMove).toBeNull()
         }
         if (a.status === 'short') {
-          expect(a.transferChange?.reason === 'raise' || a.oneTimeMove !== null).toBe(true)
+          const movedIn = p.todos.some((t) => t.kind === 'move_between' && t.accountId === a.account.id)
+          expect(a.transferChange?.reason === 'raise' || a.oneTimeMove !== null || movedIn).toBe(true)
+        }
+      }
+
+      // 7. Money moves between accounts only as a surplus (D40): from an
+      // account On track on its own transfer, never more than its extra,
+      // never more than the Short account is missing, and the lender is
+      // still On track with it gone.
+      const between = p.todos.filter((t) => t.kind === 'move_between')
+      for (const t of between) {
+        if (t.kind !== 'move_between') continue
+        const from = p.accounts.find((x) => x.account.id === t.fromAccountId)!
+        const to = p.accounts.find((x) => x.account.id === t.accountId)!
+        expect(from.status).toBe('on_track')
+        expect(to.status).toBe('short')
+        expect(t.amountCents).toBeGreaterThan(0)
+        expect(t.amountCents).toBeLessThanOrEqual(from.extraCents)
+        expect(t.amountCents).toBeLessThanOrEqual(to.missingTodayCents)
+      }
+      if (between.length > 0) {
+        const after = position({
+          ...facts,
+          movesSinceCount: between.flatMap((t) =>
+            t.kind === 'move_between'
+              ? [
+                  { accountId: t.fromAccountId, amountCents: -t.amountCents },
+                  { accountId: t.accountId, amountCents: t.amountCents },
+                ]
+              : [],
+          ),
+        })
+        for (const t of between) {
+          if (t.kind !== 'move_between') continue
+          expect(after.accounts.find((x) => x.account.id === t.fromAccountId)!.status).toBe('on_track')
+          const was = p.accounts.find((x) => x.account.id === t.accountId)!
+          const now = after.accounts.find((x) => x.account.id === t.accountId)!
+          expect(now.missingTodayCents).toBeLessThanOrEqual(was.missingTodayCents - t.amountCents)
         }
       }
 
@@ -598,7 +799,7 @@ describe('invariants over randomised households (D35)', () => {
         const expected =
           statuses.length === 0
             ? 'on_track'
-            : (['short', 'catching_up', 'on_track', 'ready_to_spend'] as const).find((st) => statuses.includes(st))
+            : (['short', 'on_track', 'ready_to_spend'] as const).find((st) => statuses.includes(st))
         expect(plan.status).toBe(expected)
       }
       if (p.allCaughtUp) {
@@ -609,18 +810,13 @@ describe('invariants over randomised households (D35)', () => {
   })
 })
 
-describe('barOf (D38)', () => {
-  it('stripes the stretch from the fill up to the pace tick, and nothing at or ahead of pace', () => {
-    expect(barOf({ totalCents: 10000, countedCents: 2500, savedForCents: 6000 })).toEqual({
+describe('barOf (D40)', () => {
+  it('puts the tick where the account must hold the money today', () => {
+    expect(barOf({ totalCents: 10000, countedCents: 2500, tickCents: 6000 })).toEqual({
       fillPercent: 25,
       tickPercent: 60,
-      catchUpPercent: 35,
       fullyFunded: false,
     })
-    expect(barOf({ totalCents: 10000, countedCents: 7000, savedForCents: 6000 }).catchUpPercent).toBe(0)
-    expect(barOf({ totalCents: 10000, countedCents: 10000, savedForCents: 10000 })).toMatchObject({
-      catchUpPercent: 0,
-      fullyFunded: true,
-    })
+    expect(barOf({ totalCents: 10000, countedCents: 10000, tickCents: 10000 }).fullyFunded).toBe(true)
   })
 })

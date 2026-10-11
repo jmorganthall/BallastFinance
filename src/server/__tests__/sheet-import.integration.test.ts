@@ -104,11 +104,15 @@ describeDb('bringing in the spreadsheet', () => {
     // Christmas: $250 reserved now is what Gifts & Giving starts from.
     expect(gifts.money).toMatchObject({ from: 'openings', on: TODAY, startCents: 25000, totalCents: 25000 })
     // Its steady line from last Christmas (19 Dec 2025) is 53 transfers, 40
-    // gone: ceil(100000 x 40 / 53) = $754.72 by now, so $250 is catching up...
+    // gone: ceil(100000 x 40 / 53) = $754.72 by now. $250 is below that even
+    // save but past its tick (D40): unconfirmed, the account is read on the
+    // $60 Ballast asks for, so 100,000 less 13 x 6,000 = 22,000 must be there
+    // today, and it is...
     const christmas = gifts.parts[0]!
     expect(christmas.savedForCents).toBe(75472)
     expect(christmas.countedCents).toBe(25000)
-    expect(christmas.status).toBe('catching_up')
+    expect(christmas.tickCents).toBe(22000)
+    expect(christmas.status).toBe('on_track')
     // ...and the rest, $750, is spread over the 13 transfers to 19 Dec:
     // ceil(75000 / 13) = $57.70, above its run-rate of ceil(100000 / 52).
     expect(gifts.weeklyExactCents).toBe(5770)

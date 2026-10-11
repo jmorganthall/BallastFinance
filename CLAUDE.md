@@ -39,7 +39,7 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35): money today, the run-forward, the level weekly amount and the one-time move, the three status words, parts counted automatically, the derived to-dos, the plan chart. `rollup.ts` only lists plans with their totals. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rollup.ts` only lists plans with their totals. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -111,18 +111,41 @@ principles, and they are non-negotiable.
   `runRatePerWeekCents`, so the money runs out on a later round; calm amber,
   its to-do is a `keep_up` transfer change, and it blocks "All caught up")
   or `unconfirmed`.
-  Parts are `on_track` / `catching_up` / `short`, counted automatically
-  soonest due first up to each steady line, then up to totals; nothing is
-  counted by hand and there is no reshuffle. To-dos (`position.todos`) are
-  derived, not issued ahead: marking one done records the instruction and
-  its confirmation together (`confirmTransfer`, `confirmMoveIn`). The
-  invariants in `src/domain/__tests__/position.test.ts` pin the rest: a
-  part is Short exactly when its account is Short and its own current date
-  is on or after the day the account runs short (D38 (6), rev 69: a later
-  time round of a repeating part does not make it Short today); a Short
-  account always has a Short part and a fix, a Running down one none;
-  lowering never makes an account Short; extra
-  never exceeds money today. There is no drift, no
+  **Each account is one pile, and the tick is what it must hold today**
+  (PRD D40, rev 73). Every amount a part needs by a date is a `Slot`
+  (`requirementsFor` returns them: the current round, a later round within
+  the horizon, the share of the round running at the horizon). `slotTicks`
+  takes off each slot the transfers that land on or before it and are not
+  already spoken for, soonest first, a surplus carried on; the ticks add up
+  to `mustHoldCents`, the least the account must hold today on its bank
+  transfer (on the ask, with its move, while unconfirmed).
+  `countTowardParts` fills every slot to its tick soonest first, then every
+  current round to its total soonest first; money held for a later round is
+  in no part's count. Parts are `on_track` / `short` (and `ready_to_spend`);
+  Catching up is retired. An account is `short` when a current round is
+  below its tick, and `running_down` when only a later round runs out,
+  inside the horizon or past it. A part is Short exactly when its account is
+  Short and its count is below its `tickCents`, so a bar at or past its tick
+  is never Short. Nothing is counted by hand and there is no reshuffle; no
+  reshuffle inside one account could lower the weekly amount anyway.
+  **Between accounts there is no lending, ever.** An account On track on
+  its own confirmed transfer, at or above its run-rate, with `extraCents`,
+  is asked to move it into a Short one (`move_between` to-do, the smaller of
+  the extra and `missingTodayCents`) before any new money; the Short
+  account's own asks are worked out as if the move were made, and
+  `position.fixes` carries what fixes each Short account for the plan
+  chart. To-dos (`position.todos`) are derived, not issued ahead: marking one
+  done records the instruction and its confirmation together
+  (`confirmTransfer`, `confirmMoveIn`, and `confirmMoveBetween`, which
+  records the move out and the move in in one transaction and needs write
+  access to both accounts). The invariants in
+  `src/domain/__tests__/position.test.ts` pin the rest: the ticks add up to
+  the least the account must hold; a part is Short exactly when it is below
+  its tick on a Short account; a Short account always has a Short part and a
+  fix, a Running down one none; a surplus move never exceeds the lender's
+  extra or what the Short account is missing, and leaves the lender On
+  track; lowering never makes an account Short; extra never exceeds money
+  today. There is no drift, no
   should-hold, no catch-up bump or ease-off offer and no rate component on
   screen any more.
 - **"Did this get spent?" can be snoozed, and a part waiting to be spent is
@@ -147,12 +170,14 @@ principles, and they are non-negotiable.
   `src/components/tip.tsx`). A date inside a to-do sentence is a
   `SentencePart` with `date`, whose `text` keeps the date for the digest.
   Trip and park-calendar dates stay dates. **A plan card is read at a glance**
-  (D38 (5), rev 66): `ProgressBar` draws the fill, the white pace tick with a
-  chequered flag above it, and -- while Catching up -- a green fill with the
-  stretch to the tick striped in two soft greens and a green word, because
-  catching up is fine by definition (`barOf().catchUpPercent`); one line
-  "$X of $Y, due in N"; the reasons only on a tap of the word or the flag. No
-  "$/week steady" on any card: the weekly figure is the account's.
+  (D38 (5), rev 66; D40): `ProgressBar` draws the fill and the white tick
+  with a chequered flag above it -- what the account must hold for it
+  today; one line "$X of $Y, due in N"; and, when Short, a line under the
+  bar saying which account runs short, when, and the fix This week asks for
+  (`shortReasons`), not only on a tap. No "$/week steady" on any card: the
+  weekly figure is the account's. The plan chart (`planChart`) runs from
+  today: what will happen on the transfer set up now, and, while Short, a
+  dashed line for after the fix; the even-pace steady line is not drawn.
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
   order the events were recorded (`recorded_at`, then id), answered by
@@ -330,7 +355,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 689 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 701 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
@@ -352,14 +377,16 @@ days -- asserting that W is the smallest level transfer that works, that a
 part is Short exactly when its own date is on or after its account's short
 day and a Short account always has a fix, that lowering never makes an
 account Short, and that "All caught up" means nothing is Short. They caught
-real bugs while the position was being built; run them with more seeds
+real bugs while the position was being built (and D40's: a later round once
+made a part due this week read Short); run them with more seeds
 (`SEED`/`RUNS` in a scratch copy) after any change to `position.ts`.
 
 ## Plain language is a product requirement
 
 PRD §9 carries a binding dictionary: UI copy says "weekly set-aside", not
-"accrual"; a part, plan or account is "On track", "Catching up" or "Short"
-(D35) -- never "behind" as a status, and never "drift"; "did this get spent?", not
+"accrual"; a part, plan or account is "On track" or "Short" (D35, D40;
+"Catching up" is retired), an account also "Running down" (D39) -- never
+"behind" as a status, and never "drift"; "did this get spent?", not
 "close-out"; "payoff order", not "priority score". The internal vocabulary
 belongs in tooltips. If a non-technical reader needs a translation, the screen
 has failed.

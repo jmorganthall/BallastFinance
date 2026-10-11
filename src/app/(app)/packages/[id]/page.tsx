@@ -31,7 +31,9 @@ import {
   latestSnoozeDay,
   previousOccurrence,
   snoozeDays,
+  shortReasons,
   steadySinceWords,
+  type ShortReason,
 } from '@/domain'
 import { RecurrenceFields } from '@/components/recurrence-fields'
 import { SavingSinceFields } from '@/components/saving-since-fields'
@@ -85,7 +87,7 @@ export default async function PackageDetailPage({
   const position = isDraft || isDone ? null : await engine.position()
   const plan = position?.plans.find((p) => p.package.id === id) ?? null
   const partOf = new Map((plan?.parts ?? []).map((p) => [p.lineItem.id, p]))
-  const shortOn = new Map((position?.accounts ?? []).map((a) => [a.account.id, a.short?.on ?? null]))
+  const reasons = position ? shortReasons(position) : new Map<string, ShortReason>()
   // The day a plan started saving is the earliest day any of its parts'
   // steady lines runs from (D33, D35). A part whose own day differs says so.
   const savingSinceDate = plan?.savingSince ?? view.package.committedAt
@@ -213,8 +215,8 @@ export default async function PackageDetailPage({
                           <>
                             <p className="mt-2 hidden text-xs text-[var(--color-ink-soft)] group-has-[.tl-last:checked]/part:block">
                               Saving steadily since then, <Money cents={offer.cents} /> would be here
-                              today. If the account does not have it, the part reads as catching up and
-                              the weekly transfer covers it by the due date.
+                              today. If the account does not have it, the weekly transfer is set so it
+                              is all there by the due date.
                             </p>
                             <p className="mt-2 hidden text-xs text-[var(--color-ink-soft)] group-has-[.tl-commit:checked]/part:block">
                               You would have <Money cents={offer.cents} /> set aside by now if you
@@ -271,12 +273,10 @@ export default async function PackageDetailPage({
               className="mt-4"
               totalCents={plan.totalCents}
               countedCents={plan.countedCents}
-              savedForCents={plan.savedForCents}
-              coveringSoonerCents={plan.coveringSoonerCents}
-                        notYetHereCents={plan.notYetHereCents}
+              tickCents={plan.tickCents}
               status={plan.status}
               today={today}
-              shortOn={plan.parts.map((p) => shortOn.get(p.accountId) ?? null).find((d) => d !== null)}
+              shortReasons={[...new Set(plan.parts.map((p) => p.accountId))].flatMap((id) => reasons.get(id) ?? [])}
             />
           </div>
         ) : null}
@@ -367,14 +367,11 @@ export default async function PackageDetailPage({
                     className="mt-3"
                     totalCents={part.totalCents}
                     countedCents={part.countedCents}
-                    savedForCents={part.savedForCents}
-                    coveringSoonerCents={part.coveringSoonerCents}
-                    notYetHereCents={part.notYetHereCents}
+                    tickCents={part.tickCents}
                     status={part.status}
                     today={today}
-                    savingSince={{ date: part.savingSince.date, words: steadySinceWords(part.savingSince.reason) }}
                     dueDate={part.lineItem.dueDate}
-                    shortOn={shortOn.get(part.accountId) ?? null}
+                    shortReasons={reasons.get(part.accountId) ? [reasons.get(part.accountId)!] : []}
                   />
                 </>
               ) : null}

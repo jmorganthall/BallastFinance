@@ -315,6 +315,26 @@ export async function confirmMoveInAction(formData: FormData): Promise<void> {
   revalidatePath('/packages')
 }
 
+/**
+ * "Yes, I moved it" for spare money from one account into one that is Short
+ * (D40): the move out and the move in recorded together, at the amount in
+ * the box. A box left as junk changes nothing.
+ */
+export async function confirmMoveBetweenAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull } = await import('@/domain')
+  const amountCents = parseAmountOrNull(String(formData.get('amount') ?? ''))
+  if (amountCents === null || amountCents <= 0) return
+  await engine.confirmMoveBetween({
+    fromAccountId: String(formData.get('from_account_id') ?? ''),
+    toAccountId: String(formData.get('reserve_account_id') ?? ''),
+    amountCents,
+  })
+  revalidatePath('/')
+  revalidatePath('/check-in')
+  revalidatePath('/packages')
+}
+
 export async function createReserveAccountAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const name = String(formData.get('name') ?? '').trim()

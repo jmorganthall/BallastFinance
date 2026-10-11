@@ -1,15 +1,14 @@
 /**
- * How a plan's money builds up (PRD §5, capability 6; D35).
+ * How a plan's money builds up (PRD §5, capability 6; D40).
  *
  * Server-rendered inline SVG: no chart library, no client JavaScript.
  *
- * Form: one quantity over time, drawn two ways. The steady line is where the
- * plan would be saving steadily from its Saving since date, in the soft ink
- * of the pace tick (blue is Ready to spend, D38). When the plan is catching
- * up, a second line, dashed in the calm green of the bar's stripes (catching
- * up is not a problem, D38 (5)), runs from what is counted
- * today up to the total by the due date: "you should be on the steady path;
- * you are here; this is how the money gets there". The dot is today's
+ * Form: one quantity over time, from today to the plan's last due date. The
+ * solid line is what will happen on the transfer set up now, in the soft ink
+ * of the tick: each transfer paying the account's dates soonest first. When
+ * the plan is Short it ends below the total, and a second line, dashed in the
+ * on-track green, shows the same after the fix This week asks for: "this is
+ * where it is heading; this is where the fix takes it". The dot is today's
  * figure. Both lines are labelled directly, so identity never depends on
  * colour alone, and the colours are tokens with separate light and dark
  * values.
@@ -41,7 +40,7 @@ function dayNumber(iso: string): number {
 }
 
 export function AccrualChart({ chart, today }: { chart: PlanChart; today: string }) {
-  const points = chart.steady
+  const points = chart.actual
   if (points.length < 2) return null
 
   const first = points[0]!
@@ -66,9 +65,10 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
     }
     return steps.join(' ')
   }
-  const steadyLine = stepped(points)
-  const area = `${steadyLine} L ${sx(last.date)} ${sy(0)} L ${sx(first.date)} ${sy(0)} Z`
-  const catchUpLine = chart.catchUp && chart.catchUp.length > 1 ? stepped(chart.catchUp) : null
+  const actualLine = stepped(points)
+  const area = `${actualLine} L ${sx(last.date)} ${sy(0)} L ${sx(first.date)} ${sy(0)} Z`
+  const fixLine = chart.afterFix && chart.afterFix.length > 1 ? stepped(chart.afterFix) : null
+  const endsShort = last.cents < chart.targetCents
   const todayX = dayNumber(today) >= x0 && dayNumber(today) <= x1 ? sx(today) : null
 
   return (
@@ -77,7 +77,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         className="h-auto w-full"
         role="img"
-        aria-label={`Saving steadily, this plan reaches ${formatCents(chart.targetCents)} by ${shortDate(last.date)}. ${formatCents(chart.countedToday.cents)} is here today${catchUpLine ? ', below the steady line; the catch-up line shows the money reaching the total by the due date' : ''}.`}
+        aria-label={`${formatCents(chart.countedToday.cents)} is here today. On the transfer set up now this plan reaches ${formatCents(last.cents)} of ${formatCents(chart.targetCents)} by ${shortDate(last.date)}${fixLine ? `; after the fix on This week it reaches ${formatCents(chart.afterFix!.at(-1)!.cents)}` : ''}.`}
       >
         {/* Recessive frame: a baseline and one reference line, nothing more. */}
         <line
@@ -100,16 +100,16 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
 
         <path d={area} fill="var(--color-ink-soft)" opacity="0.10" />
         <path
-          d={steadyLine}
+          d={actualLine}
           fill="none"
           stroke="var(--color-ink-soft)"
           strokeWidth="2"
           strokeLinejoin="round"
           strokeLinecap="round"
         />
-        {catchUpLine ? (
+        {fixLine ? (
           <path
-            d={catchUpLine}
+            d={fixLine}
             fill="none"
             stroke="var(--color-ahead)"
             strokeDasharray="5 4"
@@ -159,12 +159,12 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
       <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-ink-soft)]">
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-ink-soft)]" />
-          Steady line
+          On the transfer set up now{endsShort ? ` (ends ${formatCents(chart.targetCents - last.cents)} short)` : ''}
         </span>
-        {catchUpLine ? (
+        {fixLine ? (
           <span className="flex items-center gap-1.5">
             <span aria-hidden className="inline-block w-4 border-t-2 border-dashed border-[var(--color-ahead)]" />
-            Catching up from here
+            After the fix on This week
           </span>
         ) : null}
         <span className="flex items-center gap-1.5">

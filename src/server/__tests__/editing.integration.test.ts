@@ -196,10 +196,14 @@ describeDb('editing plans and debts', () => {
       expect(registration.savingSince).toEqual({ date: '2026-01-16', reason: 'last_occurrence' })
       expect(registration.steadyPerWeekCents).toBe(378) // ceil(20000 / 53)
       expect(registration.savedForCents).toBe(13585)
-      // The $400 is counted up to each steady line first (22223 + 13585),
-      // then soonest due -- a tie, so by name -- toward the totals: the 4192
-      // left goes to insurance. Both are on track.
-      expect([insurance.countedCents, registration.countedCents]).toEqual([26415, 13585])
+      // The ticks (D40): unconfirmed, so read on the $30 Ballast asks for.
+      // Both are due 16 Jan, 17 transfers away; on a tie the names decide,
+      // so insurance takes the 17 x 3,000 = 51,000 first and must hold
+      // 60,000 − 51,000 = 9,000 today, registration all 20,000. The $400
+      // fills both ticks, and the 11,000 over goes to insurance, first by name.
+      // Both are on track.
+      expect([insurance.tickCents, registration.tickCents]).toEqual([9000, 20000])
+      expect([insurance.countedCents, registration.countedCents]).toEqual([20000, 20000])
       expect([insurance.status, registration.status]).toEqual(['on_track', 'on_track'])
     })
 
@@ -254,10 +258,14 @@ describeDb('editing plans and debts', () => {
       expect(a.weeklyExactCents).toBe(4770)
       expect(a.weeklyCents).toBe(5000)
       // On the $30 the bank still moves, 16 Jan comes up short:
-      // 52000 + 13 × 3000 = 91000 against 114000. Every part is due that day.
+      // 52000 + 13 × 3000 = 91000 against 114000. Every part is due that day,
+      // so the names decide the order (D40): insurance must hold 60,000 −
+      // 39,000 = 21,000 today, registration 20,000, tyres 34,000. The 52,000
+      // fills the first two and 11,000 of the tyres, which is Short.
       expect(a.status).toBe('short')
       expect(a.short).toEqual({ on: '2027-01-16', byCents: 23000 })
-      expect(a.parts.map((p) => p.status)).toEqual(['short', 'short', 'short'])
+      expect(a.parts.map((p) => p.status)).toEqual(['on_track', 'on_track', 'short'])
+      expect(a.missingTodayCents).toBe(23000)
       expect(todos).toEqual([
         expect.objectContaining({ kind: 'set_transfer', reason: 'raise', fromCents: 3000, toCents: 5000, blocking: true }),
       ])
@@ -367,7 +375,9 @@ describeDb('editing plans and debts', () => {
       expect(tyres.savingSince).toEqual({ date: '2026-01-16', reason: 'last_occurrence' })
       expect(tyres.savedForCents).toBe(60378)
       expect(tyres.steadyPerWeekCents).toBe(1510) // ceil(80000 / 53)
-      expect(tyres.status).toBe('catching_up')
+      // Far below an even save, but the account is read on the transfer
+      // Ballast asks for, which has it all there on 16 Jan: On track (D40).
+      expect(tyres.status).toBe('on_track')
       // What has to be there by 16 Jan did not move: still ceil(80000 / 13),
       // above next year's run-rate of ceil(80000 / 52) = 1539.
       expect(a.weeklyExactCents).toBe(6154)
@@ -511,12 +521,16 @@ describeDb('editing plans and debts', () => {
 
       ;({ a } = await standing(engine, christmasAccountId))
       expect(a.money).toMatchObject({ from: 'count', on: '2026-09-19', startCents: 115000, totalCents: 115000 })
-      // Soonest due first: all $1,000 to the gifts due 19 Dec, the other $150
-      // to the food due 24 Dec. Both steady lines start today at $0, so both
-      // are on track.
+      // The ticks (D40), on the $20 Ballast asks for ($11.54 rounded up to the
+      // $10 step): the 13 transfers before 19 Dec (26,000) go to the gifts,
+      // so they must hold 74,000 today, and none land between 19 and 24 Dec,
+      // so the food must hold all 30,000. The $1,150 fills both, and the
+      // 11,000 over goes to the gifts, soonest first. Both are on track.
       const byLabel = Object.fromEntries(a.parts.map((p) => [p.lineItem.label, p]))
-      expect(byLabel.Gifts!.countedCents).toBe(100000)
-      expect(byLabel.Food!.countedCents).toBe(15000)
+      expect(byLabel.Gifts!.tickCents).toBe(74000)
+      expect(byLabel.Food!.tickCents).toBe(30000)
+      expect(byLabel.Gifts!.countedCents).toBe(85000)
+      expect(byLabel.Food!.countedCents).toBe(30000)
       expect(a.parts.every((p) => p.status === 'on_track')).toBe(true)
       // Only the food's other $150 is left to find, over the same 13 Saturdays.
       expect(a.weeklyExactCents).toBe(1154) // ceil(15000 / 13)
@@ -630,14 +644,15 @@ describeDb('editing plans and debts', () => {
 
       const { a } = await standing(engine, boatAccountId)
       expect(a.money).toMatchObject({ from: 'openings', on: '2026-09-19', totalCents: 36000 })
-      // Saving since the commit, as chosen, so no steady line is above $0
-      // yet; the $360 is counted toward the totals soonest due, a tie broken
-      // by name, which puts it all on the insurance.
+      // Saving since the commit, as chosen. Both are due 16 Jan, a tie
+      // broken by name (D40): the transfers to then go to the insurance, so
+      // the one-off must hold all its $200 today and the insurance the rest
+      // of the $360.
       const insurance = part(a, insuranceId)
       expect(insurance.savingSince).toEqual({ date: '2026-09-19', reason: 'plan_started' })
       expect(insurance.savedForCents).toBe(0)
-      expect(insurance.countedCents).toBe(36000)
-      expect(part(a, oneOffId).countedCents).toBe(0)
+      expect(insurance.countedCents).toBe(16000)
+      expect(part(a, oneOffId).countedCents).toBe(20000)
       // $730 due in 17 transfers with $360 held: ceil(37000 / 17) = 2177,
       // above the insurance's run-rate of ceil(53000 / 52) = 1020.
       expect(a.weeklyExactCents).toBe(2177)
@@ -695,11 +710,15 @@ describeDb('editing plans and debts', () => {
       expect(gutter.savingSince).toEqual({ date: '2026-09-26', reason: 'plan_started' })
       expect(gutter.savedForCents).toBe(0)
       expect(gutter.steadyPerWeekCents).toBe(4286) // ceil(30000 / 7)
-      // The account holds only the $100. It is counted up to the steady
-      // lines first, so it goes to the insurance, which is far below its line.
+      // The account holds only the $100. Both are due 15 Nov, a tie broken
+      // by name (D40): the 7 transfers of $200 Ballast asks for go to the
+      // gutter first, and the 110,000 over leaves the insurance 10,000 to
+      // hold today. The $100 is exactly that, so both are On track though
+      // the insurance is far below an even save.
+      expect(insurance.tickCents).toBe(10000)
       expect(insurance.countedCents).toBe(10000)
       expect(gutter.countedCents).toBe(0)
-      expect(insurance.status).toBe('catching_up')
+      expect(insurance.status).toBe('on_track')
       expect(gutter.status).toBe('on_track')
       // $1,500 is due Sunday 15 Nov, 7 transfers away, from $100:
       // 140000 / 7 = 20000 a week. The parts' steady shares are 2308 + 4286
@@ -707,7 +726,6 @@ describeDb('editing plans and debts', () => {
       expect(a.weeklyExactCents).toBe(20000)
       expect(a.steadyPerWeekCents).toBe(6594)
       expect(a.catchUpPerWeekCents).toBe(13406)
-      expect(a.catchingUpParts).toBe(1)
     })
 
     it('can be unticked later, which is recorded, and the steady line then runs from the commit; the weekly amount does not move', async () => {
@@ -719,9 +737,10 @@ describeDb('editing plans and debts', () => {
       expect(insurance.savingSince).toEqual({ date: '2026-09-26', reason: 'plan_started' })
       expect(insurance.savedForCents).toBe(0)
       expect(insurance.steadyPerWeekCents).toBe(17143) // $1,200 over the 7 Saturdays left
-      // Neither part's steady line is above $0 today, so the $100 is counted
-      // soonest due -- a tie, by name -- to the one-off, and both are on track.
-      expect(part(a, gutterId).countedCents).toBe(10000)
+      // Saving since changes no tick (D40): the $100 is still what the
+      // insurance must hold today, and both are on track.
+      expect(insurance.countedCents).toBe(10000)
+      expect(part(a, gutterId).countedCents).toBe(0)
       expect(insurance.status).toBe('on_track')
       // Saving since moves the steady line, never what has to be there by
       // the due date.
@@ -841,32 +860,30 @@ describeDb('editing plans and debts', () => {
       expect(insurance.savingSince).toEqual({ date: '2026-03-15', reason: 'typed' })
       expect(insurance.savedForCents).toBe(96000)
       expect(insurance.steadyPerWeekCents).toBe(3429) // ceil(120000 / 35)
-      // The $100 held is counted toward it, far below its line.
+      // The $100 held is counted toward it: far below an even save, and
+      // exactly what it must hold today on the $200 Ballast asks for (D40).
       expect(insurance.countedCents).toBe(10000)
-      expect(insurance.status).toBe('catching_up')
+      expect(insurance.tickCents).toBe(10000)
+      expect(insurance.status).toBe('on_track')
 
       // The plan is headed by the earliest day any part saves from.
       const plan = p.plans.find((x) => x.package.id === packageId)!
       expect(plan.savingSince).toBe('2026-03-15')
       expect(plan.savedForCents).toBe(96000) // the one-off's line starts today, at $0
       expect(plan.countedCents).toBe(10000)
-      expect(plan.status).toBe('catching_up')
+      expect(plan.status).toBe('on_track')
 
-      // The chart starts there too, and is sampled on transfer days: the day
-      // given, the 35 Saturdays to the due date, and the due date itself.
+      // The chart runs from today (D40), sampled on transfer days: today, the
+      // 7 Saturdays to the due date, and the due date itself. On the $200 a
+      // week it reaches the total, so there is no fix line.
       const chart = (await engine.planChart(packageId))!
       expect(chart.targetCents).toBe(150000)
-      expect(chart.steady).toHaveLength(37)
-      expect(chart.steady[0]).toEqual({ date: '2026-03-15', cents: 0 })
-      expect(chart.steady.slice(1, -1).every((pt) => weekdayOf(pt.date) === 6)).toBe(true)
-      expect(chart.steady.at(-1)).toEqual({ date: '2026-11-15', cents: 150000 })
-      // Today's point on the steady line is the plan's figure, from the same position.
-      expect(chart.steady.find((pt) => pt.date === '2026-09-26')!.cents).toBe(plan.savedForCents)
+      expect(chart.actual).toHaveLength(9)
+      expect(chart.actual[0]).toEqual({ date: '2026-09-26', cents: 10000 })
+      expect(chart.actual.slice(1, -1).every((pt) => weekdayOf(pt.date) === 6)).toBe(true)
+      expect(chart.actual.at(-1)).toEqual({ date: '2026-11-15', cents: 150000 })
       expect(chart.countedToday).toEqual({ date: '2026-09-26', cents: 10000 })
-      // Catching up, so the chart also draws the money from what is counted
-      // today up to every total by the due date.
-      expect(chart.catchUp![0]).toEqual({ date: '2026-09-26', cents: 10000 })
-      expect(chart.catchUp!.at(-1)).toEqual({ date: '2026-11-15', cents: 150000 })
+      expect(chart.afterFix).toBeNull()
     })
 
     it('refuses a day after today or not before the due date, and a typed choice with no day, in plain words', async () => {
@@ -921,9 +938,14 @@ describeDb('editing plans and debts', () => {
       expect(insurance.lineItem.timelineStartDate).toBe('2026-03-15')
       expect(insurance.savingSince).toEqual({ date: '2026-03-15', reason: 'typed' })
       expect(insurance.savedForCents).toBe(96000)
-      // All $900 is counted toward it, still $60 short of its line.
-      expect(insurance.countedCents).toBe(90000)
-      expect(insurance.status).toBe('catching_up')
+      // On the $90 Ballast now asks for, the 7 transfers (63,000) go to the
+      // gutter first, by name, and the 33,000 over leaves the insurance
+      // 87,000 to hold today; the $900 fills that and the gutter takes the
+      // 3,000 left. Both are On track (D40).
+      expect(insurance.tickCents).toBe(87000)
+      expect(insurance.countedCents).toBe(87000)
+      expect(part(a, gutterId).countedCents).toBe(3000)
+      expect(insurance.status).toBe('on_track')
       // ceil((150000 − 90000) / 7) = 8572
       expect(a.weeklyExactCents).toBe(8572)
     })

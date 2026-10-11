@@ -41,7 +41,7 @@ export function AccountPositionCard({
         {a.extraCents > 0 && a.parts.length > 0 ? (
           <>
             {' · '}
-            <Hint detail="What could leave this account today with every plan still covered on its date, on the transfer set up now. Until then it is counted toward the plans due soonest. Nothing is asked of it; it is a cushion until you decide otherwise.">
+            <Hint detail="What could leave this account today with every plan still covered on its date, on the transfer set up now. Until then it is counted toward the plans due soonest. If another account is Short, This week asks to move it there before asking for new money; otherwise it is a cushion until you decide.">
               <Money cents={a.extraCents} /> extra
             </Hint>
           </>
@@ -57,18 +57,21 @@ export function AccountPositionCard({
         // Every bill now is paid; the money already there is what is being
         // spent (D39). Plain words, the two weekly figures side by side.
         <p className="mt-2 text-sm text-[var(--color-caution)]">
-          Covers every bill this time round, but{' '}
-          <Money cents={a.bank.perWeekCents} /> a week is less than these bills cost (
-          <Money cents={a.runRatePerWeekCents} /> a week), so it is using up what is already
-          set aside. On this transfer the money runs out{' '}
-          <When date={a.short.on} today={today} />.
+          {a.bank.perWeekCents < a.runRatePerWeekCents ? (
+            <>
+              Covers every bill this time round, but{' '}
+              <Money cents={a.bank.perWeekCents} /> a week is less than these bills cost (
+              <Money cents={a.runRatePerWeekCents} /> a week), so it is using up what is already
+              set aside.
+            </>
+          ) : (
+            <>Covers every bill it is saving for now, but not the time after.</>
+          )}{' '}
+          On this transfer the money runs out <When date={a.short.on} today={today} />.
         </p>
       ) : a.parts.length > 0 && a.horizon && a.status === 'on_track' ? (
         <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
-          Covers everything due <When date={a.horizon} today={today} as="until" /> on the transfer set up now
-          {a.catchingUpParts > 0
-            ? `, including ${a.catchingUpParts === 1 ? 'the part' : `the ${a.catchingUpParts} parts`} catching up.`
-            : '.'}
+          Covers everything due <When date={a.horizon} today={today} as="until" /> on the transfer set up now.
         </p>
       ) : null}
 
@@ -125,7 +128,7 @@ export function AccountPositionCard({
               {a.catchUpPerWeekCents > 0 ? (
                 <>
                   : <Money cents={a.steadyPerWeekCents} /> steady + <Money cents={a.catchUpPerWeekCents} />{' '}
-                  catching up
+                  for what is not here yet
                   {a.neededPerWeekCents !== a.neededExactPerWeekCents ? ', rounded up' : ''}
                 </>
               ) : a.catchUpPerWeekCents < 0 ? (
