@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   bankTransfersBetween,
+  barOf,
   countTowardParts,
   levelWeekly,
   NEAR_TRANSFERS,
@@ -575,5 +576,21 @@ describe('invariants over randomised households (D35)', () => {
         expect(p.todos.some((t) => t.blocking)).toBe(false)
       }
     }
+  })
+})
+
+describe('barOf (D38)', () => {
+  it('stripes the stretch from the fill up to the pace tick, and nothing at or ahead of pace', () => {
+    expect(barOf({ totalCents: 10000, countedCents: 2500, savedForCents: 6000 })).toEqual({
+      fillPercent: 25,
+      tickPercent: 60,
+      catchUpPercent: 35,
+      fullyFunded: false,
+    })
+    expect(barOf({ totalCents: 10000, countedCents: 7000, savedForCents: 6000 }).catchUpPercent).toBe(0)
+    expect(barOf({ totalCents: 10000, countedCents: 10000, savedForCents: 10000 })).toMatchObject({
+      catchUpPercent: 0,
+      fullyFunded: true,
+    })
   })
 })

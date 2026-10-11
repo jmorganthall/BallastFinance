@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 
 const STATE_COPY = {
   simulated: { tone: 'neutral' as const, label: 'Draft — costs nothing yet' },
-  active: { tone: 'accent' as const, label: 'Saving now' },
+  active: null,
   retired: { tone: 'neutral' as const, label: 'Done' },
 }
 
@@ -64,6 +64,7 @@ export default async function PackagesPage() {
         <ul className="space-y-3">
           {views.map((view) => {
             const copy = STATE_COPY[view.package.state]
+            const liveParts = view.items.filter((item) => item.lineItem.state !== 'retired').length
             const plan = plans.get(view.package.id)
             const snoozed = view.items
               .map((item) => snoozedParts.get(item.lineItem.id))
@@ -93,21 +94,17 @@ export default async function PackagesPage() {
                             </span>
                           </Hint>
                         ) : null}
-                        <Pill tone={copy.tone}>{copy.label}</Pill>
+                        {/* A live plan says nothing here: the bar is its state (D38). */}
+                        {copy ? <Pill tone={copy.tone}>{copy.label}</Pill> : null}
                       </span>
                     </div>
-                    <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
-                      <Money cents={plan?.totalCents ?? view.totalCents} /> total
-                      {plan ? (
-                        <>
-                          {' · '}
-                          <Money cents={plan.steadyPerWeekCents} />/week steady
-                          {' · '}
-                          <Money cents={plan.countedCents} /> here now
-                        </>
-                      ) : null}
-                    </p>
-                    {next ? (
+                    {!plan || plan.parts.length === 0 ? (
+                      <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+                        <Money cents={view.totalCents} /> total
+                      </p>
+                    ) : null}
+                    {/* With one part the bar names its date; with more, which is next. */}
+                    {next && liveParts > 1 ? (
                       <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                         Next out: {next.label},{' '}
                         <span className={URGENCY_WEIGHT[next.urgency]}>
@@ -125,6 +122,7 @@ export default async function PackagesPage() {
                         notYetHereCents={plan.notYetHereCents}
                         status={plan.status}
                         today={today}
+                        dueDate={liveParts === 1 ? next?.dueDate : undefined}
                         savingSince={
                           plan.savingSince
                             ? {

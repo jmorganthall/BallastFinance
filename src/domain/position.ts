@@ -1149,14 +1149,19 @@ export function position(input: PositionInput): HouseholdPosition {
 export function barOf(v: { totalCents: Cents; countedCents: Cents; savedForCents: Cents }): {
   fillPercent: number
   tickPercent: number
+  /** The stretch from the fill up to the tick: what is being caught up, drawn striped. */
+  catchUpPercent: number
   fullyFunded: boolean
 } {
   const total = Math.max(0, v.totalCents)
   const percent = (cents: Cents) =>
     total === 0 ? 100 : Math.round((Math.max(0, Math.min(cents, total)) / total) * 100)
+  const fillPercent = percent(v.countedCents)
+  const tickPercent = percent(v.savedForCents)
   return {
-    fillPercent: percent(v.countedCents),
-    tickPercent: percent(v.savedForCents),
+    fillPercent,
+    tickPercent,
+    catchUpPercent: Math.max(0, tickPercent - fillPercent),
     fullyFunded: v.countedCents >= total,
   }
 }

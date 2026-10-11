@@ -137,7 +137,12 @@ principles, and they are non-negotiable.
   with the date on hover or tap (`Hint` now opens on a tap too, via
   `src/components/tip.tsx`). A date inside a to-do sentence is a
   `SentencePart` with `date`, whose `text` keeps the date for the digest.
-  Trip and park-calendar dates stay dates.
+  Trip and park-calendar dates stay dates. **A plan card is read at a glance**
+  (D38 (5), rev 66): `ProgressBar` draws the fill, the white pace tick with a
+  chequered flag above it, and -- while Catching up -- a green fill with the
+  stretch to the tick striped yellow (`barOf().catchUpPercent`); one line
+  "$X of $Y, due in N"; the reasons only on a tap of the word or the flag. No
+  "$/week steady" on any card: the weekly figure is the account's.
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
   order the events were recorded (`recorded_at`, then id), answered by
@@ -315,7 +320,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 688 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 689 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

@@ -11,7 +11,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { requireEngine } from '@/server/session'
-import { Card, Hint, humanDate, Money, Pill, When } from '@/components/ui'
+import { Card, humanDate, Money, Pill, When } from '@/components/ui'
 import { CloseOutCard } from '@/components/close-out-card'
 import { EditableTitle } from '@/components/editable-title'
 import { AccrualChart } from '@/components/accrual-chart'
@@ -267,16 +267,6 @@ export default async function PackageDetailPage({
           </>
         ) : plan && plan.parts.length > 0 ? (
           <div className="mt-4">
-            <p className="text-lg font-semibold">
-              <Money cents={plan.steadyPerWeekCents} />
-              <span className="text-base font-normal text-[var(--color-ink-soft)]"> / week steady</span>
-            </p>
-            <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-              <Hint detail="What saving steadily for each part costs a week. The bank transfer is set per account, not per plan: This week shows what each account needs, which can be more while a part catches up, or less when money already there covers it.">
-                Its share of the weekly transfer
-              </Hint>
-              ; the account sets the transfer.
-            </p>
             <ProgressBar
               className="mt-4"
               totalCents={plan.totalCents}
@@ -362,10 +352,6 @@ export default async function PackageDetailPage({
 
               {part ? (
                 <>
-                  <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-                    <Money cents={part.countedCents} /> here ·{' '}
-                    {formatCents(part.steadyPerWeekCents)}/wk steady
-                  </p>
                   {/*
                     Where this part's steady line runs from (D33, D35), when
                     that is not the day the heading shows. The date and the
