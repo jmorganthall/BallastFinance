@@ -7,7 +7,7 @@
  * the domain; this only draws it.
  */
 
-import { Hint, humanDate } from '@/components/ui'
+import { Hint, humanDate, When } from '@/components/ui'
 import { PartStatusPill, STATUS_FILL } from '@/components/status'
 import { barOf, formatCents, PART_STATUS_WORDS, type Cents, type CivilDate, type PartStatus } from '@/domain'
 
@@ -21,6 +21,7 @@ export function ProgressBar({
   savingSince,
   dueDate,
   shortOn,
+  today,
   className = '',
 }: {
   totalCents: Cents
@@ -34,12 +35,18 @@ export function ProgressBar({
   dueDate?: CivilDate
   /** The first date the account runs short, when the status is Short. */
   shortOn?: CivilDate | null
+  /** Dates are said as a distance from today (D38). */
+  today: CivilDate
   className?: string
 }) {
   const bar = barOf({ totalCents, countedCents, savedForCents })
-  const goal = dueDate
-    ? `${formatCents(totalCents)} by ${humanDate(dueDate)}`
-    : `${formatCents(totalCents)} in all`
+  const goal = dueDate ? (
+    <>
+      {formatCents(totalCents)}, <When date={dueDate} today={today} as="due" />
+    </>
+  ) : (
+    `${formatCents(totalCents)} in all`
+  )
   const tickDetail = savingSince
     ? `Saving steadily since ${humanDate(savingSince.date)} (${savingSince.words})${dueDate ? ` to ${humanDate(dueDate)}` : ''}, ${formatCents(savedForCents)} would be here by today. That is the tick on the bar.`
     : `Saving steadily over each part's own stretch, ${formatCents(savedForCents)} would be here by today. That is the tick on the bar.`
@@ -76,8 +83,16 @@ export function ProgressBar({
           <>
             {' · '}
             on the transfer set up now the account runs short
-            {shortOn ? ` on ${humanDate(shortOn)}` : ''}; This week says what fixes it
+            {shortOn ? (
+              <>
+                {' '}
+                <When date={shortOn} today={today} />
+              </>
+            ) : null}
+            ; This week says what fixes it
           </>
+        ) : status === 'ready_to_spend' ? (
+          ' · all here, ready to spend'
         ) : bar.fullyFunded ? (
           ' · nothing more to save'
         ) : status === 'catching_up' ? (
@@ -92,7 +107,7 @@ export function ProgressBar({
                 ? `${formatCents(notYetHereCents)} ${coveringSoonerCents > 0 ? 'more ' : ''}is not in the account yet`
                 : null}
             </Hint>
-            {dueDate ? `; the account has it by ${humanDate(dueDate)}` : ''}
+            {dueDate ? '; the account has it by the day it is due' : ''}
           </>
         ) : (
           <>

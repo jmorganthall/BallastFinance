@@ -116,6 +116,28 @@ principles, and they are non-negotiable.
   account Short; extra never exceeds money today. There is no drift, no
   should-hold, no catch-up bump or ease-off offer and no rate component on
   screen any more.
+- **"Did this get spent?" can be snoozed, and a part waiting to be spent is
+  Ready to spend** (PRD D38, rev 64). A snooze is a `close_out_snoozed` event
+  (migration 0017) with the part, the due date asked about and the day it
+  wakes; the latest for the part's current due date decides, and "Wake it up"
+  / undo is one that wakes today (`Engine.snoozeCloseOut`). The rules and
+  words are in `src/domain/closeout.ts` (`resolveSnoozeUntil`,
+  `snoozeDays`, at most `SNOOZE_MAX_MONTHS` 6). Nothing about a snooze reaches
+  the position: the part still goes out today, so its money stays held.
+  `CloseOutPrompt.snoozedUntil` says it is asleep; This week and the digest
+  show only `awakeCloseOuts`, the plan's page shows both. Either spouse may
+  snooze: it moves no money. `ready_to_spend` is a fourth `PartStatus`: on or
+  past its due date with every cent counted. It is the best status, so a plan
+  reads it only when every part does; a past-due part not all there is
+  Short, snoozed or not (invariant 6 in `position.test.ts`). It is drawn in
+  `--color-accent`, and the plans list carries a `Zzz` mark while a part is
+  snoozed. **Money and to-do dates are said as a distance from today**
+  (`humanDistance` in `src/domain/next-due.ts`: days under 14, weeks under
+  60 days, months under two years) through `When` in `src/components/ui.tsx`,
+  with the date on hover or tap (`Hint` now opens on a tap too, via
+  `src/components/tip.tsx`). A date inside a to-do sentence is a
+  `SentencePart` with `date`, whose `text` keeps the date for the digest.
+  Trip and park-calendar dates stay dates.
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
   order the events were recorded (`recorded_at`, then id), answered by
@@ -293,7 +315,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 687 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 688 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

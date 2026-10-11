@@ -10,6 +10,7 @@ import { Engine } from '@/server/engine'
 import type { Db } from '@/db/client'
 import type { NotificationPayload } from '@/server/notifications'
 import {
+  awakeCloseOuts,
   derivedTodoSentence,
   formatCents,
   instructionSentence,
@@ -72,10 +73,11 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   const engine = engineFor(input)
   const today = engine.today()
 
+  // A snoozed "did this get spent?" stays out of the digest until it wakes (D38).
   const [position, outstanding, closeOuts, transferWeekday] = await Promise.all([
     engine.position(),
     engine.outstandingInstructions(),
-    engine.closeOutPrompts(),
+    engine.closeOutPrompts().then(awakeCloseOuts),
     engine.transferWeekday(),
   ])
 
@@ -195,7 +197,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
 export async function buildDueDatePrompts(input: DigestInput): Promise<NotificationPayload[]> {
   const engine = engineFor(input)
   const [prompts, accounts] = await Promise.all([
-    engine.closeOutPrompts(),
+    engine.closeOutPrompts().then(awakeCloseOuts),
     engine.listReserveAccounts(),
   ])
   const accountName = (id: string) => accounts.find((a) => a.id === id)?.name ?? 'your savings'

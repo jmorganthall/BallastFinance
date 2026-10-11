@@ -11,39 +11,44 @@
 
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Empty, humanDate, Money, PageHeader, Pill, When, Zzz } from '@/components/ui'
 import { AccountPositionCard } from '@/components/account-position'
+import { CloseOutCard } from '@/components/close-out-card'
 import {
+  awakeCloseOuts,
   derivedTodoSentenceParts,
+  latestSnoozeDay,
+  snoozeDays,
   doneMovesSummary,
   formatCents,
   instructionSentenceParts,
   runningAdjustments,
   taskBucket,
+  type CivilDate,
   type DerivedTodo,
   type IssuedInstruction,
+  type SentencePart,
   type Weekday,
 } from '@/domain'
 import {
   confirmBalancesAction,
   confirmInstructionAction,
   confirmMoveInAction,
-  confirmSpendAction,
   confirmTransferAction,
   endInstructionAction,
   toggleTaskAction,
+  wakeCloseOutAction,
 } from '@/server/actions'
 
 export const dynamic = 'force-dynamic'
 
-type Part = { text: string; target?: true }
-
 /**
  * A to-do sentence, with the account the money goes to set apart (D34):
- * bold and a gentle accent, so it is the first thing the eye finds. The
- * words are the domain's; this only decides how one piece looks.
+ * bold and a gentle accent, so it is the first thing the eye finds. A date
+ * is said as a distance from today, with the date on hover (D38). The words
+ * are the domain's; this only decides how one piece looks.
  */
-function Parts({ parts }: { parts: Part[] }) {
+function Parts({ parts, today }: { parts: SentencePart[]; today: CivilDate }) {
   return (
     <p className="text-sm">
       {parts.map((part, i) =>
@@ -51,6 +56,8 @@ function Parts({ parts }: { parts: Part[] }) {
           <strong key={i} className="font-semibold text-[var(--color-accent)]">
             {part.text}
           </strong>
+        ) : part.date ? (
+          <When key={i} date={part.date.on} today={today} as={part.date.as} />
         ) : (
           <span key={i}>{part.text}</span>
         ),
@@ -59,8 +66,16 @@ function Parts({ parts }: { parts: Part[] }) {
   )
 }
 
-function Sentence({ instruction, transferWeekday }: { instruction: IssuedInstruction; transferWeekday: Weekday }) {
-  return <Parts parts={instructionSentenceParts(instruction, transferWeekday)} />
+function Sentence({
+  instruction,
+  transferWeekday,
+  today,
+}: {
+  instruction: IssuedInstruction
+  transferWeekday: Weekday
+  today: CivilDate
+}) {
+  return <Parts parts={instructionSentenceParts(instruction, transferWeekday)} today={today} />
 }
 
 const plain = (cents: number) => formatCents(cents).replace('$', '').replace(/,/g, '')
@@ -70,11 +85,11 @@ const plain = (cents: number) => formatCents(cents).replace('$', '').replace(/,/
  * person says they did, at the amount in the box, and the run-forward uses
  * it from then on.
  */
-function DerivedTodoCard({ todo }: { todo: DerivedTodo }) {
+function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate }) {
   const amount = todo.kind === 'move_in' ? todo.amountCents : todo.toCents
   return (
     <Card className={todo.blocking ? '' : 'border-dashed'}>
-      <Parts parts={derivedTodoSentenceParts(todo, humanDate)} />
+      <Parts parts={derivedTodoSentenceParts(todo, humanDate)} today={today} />
       <form
         action={todo.kind === 'move_in' ? confirmMoveInAction : confirmTransferAction}
         className="mt-3 flex items-end gap-2"
@@ -108,11 +123,17 @@ function DerivedTodoCard({ todo }: { todo: DerivedTodo }) {
 export default async function ThisWeekPage({
   searchParams,
 }: {
-  searchParams: Promise<{ balances?: string }>
+  searchParams: Promise<{
+    balances?: string
+    snoozed?: string
+    until?: string
+    snooze_error?: string
+    item?: string
+  }>
 }) {
-  const { balances } = await searchParams
+  const { balances, snoozed, until, snooze_error: snoozeError, item: errorItem } = await searchParams
   const { engine, viewer } = await requireEngine()
-  const [position, outstanding, closeOuts, commitments, tripToDos, transferWeekday, lastCounts] =
+  const [position, outstanding, allCloseOuts, commitments, tripToDos, transferWeekday, lastCounts] =
     await Promise.all([
       engine.position(),
       engine.outstandingInstructions(),
@@ -123,6 +144,11 @@ export default async function ThisWeekPage({
       engine.latestConfirmedBalances(),
     ])
   const today = engine.today()
+  // A snoozed "did this get spent?" is off this screen until it wakes (D38);
+  // the one just snoozed stays as a line with an undo, so a slip is cheap.
+  const closeOuts = awakeCloseOuts(allCloseOuts)
+  const justSnoozed = snoozed ? allCloseOuts.find((p) => p.lineItemId === snoozed && p.snoozedUntil) : undefined
+  const snoozeOn = snoozeDays(today, transferWeekday)
 
   // Accounts a done move has changed since they were last counted (D34): the
   // position already carries the moves; what is missing is the count.
@@ -181,7 +207,15 @@ export default async function ThisWeekPage({
             <p className="font-semibold text-[var(--color-ahead)]">All caught up.</p>
             <p className="mt-1 text-sm">
               On autopilot, every account covers everything due
-              {position.coveredThrough ? ` through ${humanDate(position.coveredThrough)}` : ''}. The
+              {position.coveredThrough ? (
+                <>
+                  {' '}
+                  <When date={position.coveredThrough} today={today} as="until" />.
+                </>
+              ) : (
+                '.'
+              )}{' '}
+              The
               bank moves <Money cents={position.bankPerWeekCents} /> a week in all.
             </p>
             {todos.length > 0 ? (
@@ -209,6 +243,22 @@ export default async function ThisWeekPage({
         * an optional amount edit, never a form. They come first because an
         * unconfirmed ask is the only thing that can silently rot.
         */}
+      {justSnoozed?.snoozedUntil ? (
+        <Card className="mb-5 flex items-center justify-between gap-3 border-dashed">
+          <p className="text-sm">
+            <Zzz className="mr-1 text-[var(--color-accent)]" />
+            {justSnoozed.label} is snoozed: it asks again{' '}
+            <When date={justSnoozed.snoozedUntil} today={today} />. The money stays held.
+          </p>
+          <form action={wakeCloseOutAction}>
+            <input type="hidden" name="line_item_id" value={justSnoozed.lineItemId} />
+            <button type="submit" className="shrink-0 rounded-lg px-3 py-2 text-sm text-[var(--color-ink-soft)] underline">
+              Undo
+            </button>
+          </form>
+        </Card>
+      ) : null}
+
       {closeOuts.length > 0 ? (
         <section className="mb-5">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
@@ -217,41 +267,13 @@ export default async function ThisWeekPage({
           <ul className="space-y-3">
             {closeOuts.map((prompt) => (
               <li key={prompt.lineItemId}>
-                <Card className="border-[var(--color-behind)]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-medium">{prompt.label}</p>
-                      <p className="mt-0.5 text-sm text-[var(--color-ink-soft)]">
-                        Was due {prompt.dueDate}
-                        {prompt.daysOverdue > 0 ? ` — ${prompt.daysOverdue} days ago` : ''}
-                      </p>
-                    </div>
-                    <Pill tone="behind">Needs an answer</Pill>
-                  </div>
-
-                  <form action={confirmSpendAction} className="mt-3 flex items-end gap-2">
-                    <input type="hidden" name="line_item_id" value={prompt.lineItemId} />
-                    <input type="hidden" name="planned_cents" value={prompt.plannedCents} />
-                    <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
-                      How much actually went out
-                      <input
-                        name="actual_amount"
-                        inputMode="decimal"
-                        defaultValue={formatCents(prompt.plannedCents).replace('$', '').replace(/,/g, '')}
-                        className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
-                      />
-                    </label>
-                    <button
-                      type="submit"
-                      className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
-                    >
-                      Yes, spent
-                    </button>
-                  </form>
-                  <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
-                    Until you answer, this money stays counted in your totals.
-                  </p>
-                </Card>
+                <CloseOutCard
+                  prompt={prompt}
+                  today={today}
+                  snoozeOn={snoozeOn}
+                  latestSnooze={latestSnoozeDay(today)}
+                  error={errorItem === prompt.lineItemId ? snoozeError : null}
+                />
               </li>
             ))}
           </ul>
@@ -266,13 +288,13 @@ export default async function ThisWeekPage({
           <ul className="space-y-3">
             {todos.map((todo) => (
               <li key={`${todo.kind}:${todo.accountId}`}>
-                <DerivedTodoCard todo={todo} />
+                <DerivedTodoCard todo={todo} today={today} />
               </li>
             ))}
             {dueNow.map((instruction) => (
               <li key={instruction.instructionId}>
                 <Card>
-                  <Sentence instruction={instruction} transferWeekday={transferWeekday} />
+                  <Sentence instruction={instruction} transferWeekday={transferWeekday} today={today} />
                   {instruction.note ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
                   ) : null}
@@ -340,7 +362,7 @@ export default async function ThisWeekPage({
                 <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                   {last ? (
                     <>
-                      Since you last counted it on {humanDate(last.on)} at <Money cents={last.amountCents} />, you moved
+                      Since you last counted it <When date={last.on} today={today} /> at <Money cents={last.amountCents} />, you moved
                     </>
                   ) : (
                     <>It has never been counted, and you moved</>
@@ -398,10 +420,7 @@ export default async function ThisWeekPage({
             {comingUp.map((instruction) => (
               <li key={instruction.instructionId}>
                 <Card className="border-dashed">
-                  <div className="flex items-start justify-between gap-3">
-                    <Sentence instruction={instruction} transferWeekday={transferWeekday} />
-                    <Pill tone="neutral">From {humanDate(instruction.availableOn!)}</Pill>
-                  </div>
+                  <Sentence instruction={instruction} transferWeekday={transferWeekday} today={today} />
                   {instruction.note ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
                   ) : null}
@@ -497,7 +516,7 @@ export default async function ThisWeekPage({
           <ul className="space-y-4">
             {shown.map((a) => (
               <li key={a.account.id}>
-                <AccountPositionCard account={a} />
+                <AccountPositionCard account={a} today={today} />
                 {(running.get(a.account.id) ?? []).length > 0 ? (
                   <Card className="mt-2">
                     <ul className="space-y-2 text-sm">
@@ -508,7 +527,7 @@ export default async function ThisWeekPage({
                               ? `A catch-up from before: ${formatCents(r.perWeekCents)} a week extra`
                               : `An ease-off from before: ${formatCents(-r.perWeekCents)} a week less`}
                             <span className="block text-xs text-[var(--color-ink-soft)]">
-                              Until {humanDate(r.endDate)}. Setting the transfer to what Ballast
+                              It runs <When date={r.endDate} today={today} as="until" />. Setting the transfer to what Ballast
                               asks replaces it; so does stopping it here.
                             </span>
                           </span>

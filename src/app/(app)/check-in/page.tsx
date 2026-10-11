@@ -12,7 +12,7 @@
 
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Hint, humanDate, Money, PageHeader } from '@/components/ui'
+import { Card, Hint, Money, PageHeader, When } from '@/components/ui'
 import { AccountPositionCard } from '@/components/account-position'
 import { confirmBalancesAction } from '@/server/actions'
 import { doneMovesSummary, formatCents } from '@/domain'
@@ -28,6 +28,7 @@ export default async function CheckInPage({
 }) {
   const { done } = await searchParams
   const { engine } = await requireEngine()
+  const today = engine.today()
   const [position, confirmed, commitments] = await Promise.all([
     engine.position(),
     engine.latestConfirmedBalances(),
@@ -72,7 +73,7 @@ export default async function CheckInPage({
                     </Hint>
                     {last ? (
                       <>
-                        {' · '}last counted {humanDate(last.on)} at <Money cents={last.amountCents} />
+                        {' · '}last counted <When date={last.on} today={today} /> at <Money cents={last.amountCents} />
                       </>
                     ) : (
                       ' · never counted'
@@ -135,7 +136,7 @@ export default async function CheckInPage({
             <ul className="space-y-4">
               {live.map((a) => (
                 <li key={a.account.id}>
-                  <AccountPositionCard account={a} />
+                  <AccountPositionCard account={a} today={today} />
                 </li>
               ))}
             </ul>

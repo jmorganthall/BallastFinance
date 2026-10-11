@@ -18,7 +18,7 @@ import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
 import { Engine } from '@/server/engine'
-import { INTAKE_CONTRACT_VERSION, type AccountPosition } from '@/domain'
+import { awakeCloseOuts, INTAKE_CONTRACT_VERSION, type AccountPosition } from '@/domain'
 
 const url = process.env.DATABASE_URL
 const describeDb = url ? describe : describe.skip
@@ -251,9 +251,45 @@ describeDb('check-ins and close-out (D35)', () => {
       totalCents: 170000,
       savedForCents: 170000,
       countedCents: 170000,
-      status: 'on_track',
+      // All of it there and waiting to be spent (D38).
+      status: 'ready_to_spend',
     })
     expect(a.status).toBe('on_track')
+    expect((await engine.position()).plans.find((p) => p.package.id === packageId)?.status).toBe(
+      'ready_to_spend',
+    )
+  })
+
+  it('snoozes the question without touching a figure, and wakes it on the day (D38)', async () => {
+    const before = await account()
+    const [prompt] = await engine.closeOutPrompts()
+    const until = await engine.snoozeCloseOut({ lineItemId: prompt!.lineItemId, choice: 'week' })
+    expect(until).toBe('2027-01-02')
+
+    const [snoozed] = await engine.closeOutPrompts()
+    expect(snoozed!.snoozedUntil).toBe('2027-01-02')
+    expect(awakeCloseOuts(await engine.closeOutPrompts())).toEqual([])
+    // The money stays held: the position is exactly what it was.
+    expect(await account()).toEqual(before)
+
+    // A day too far, or not after today, is refused in words.
+    await expect(
+      engine.snoozeCloseOut({ lineItemId: prompt!.lineItemId, choice: 'date', pickedDate: '2027-06-27' }),
+    ).rejects.toThrow('at most 6 months')
+    await expect(
+      engine.snoozeCloseOut({ lineItemId: prompt!.lineItemId, choice: 'date', pickedDate: '2026-12-26' }),
+    ).rejects.toThrow('after today')
+
+    // On the day it wakes, it asks again.
+    pin('2027-01-02')
+    expect(awakeCloseOuts(await engine.closeOutPrompts())).toHaveLength(1)
+
+    // Snoozed again and woken by hand, it asks again at once.
+    pin('2026-12-26')
+    await engine.snoozeCloseOut({ lineItemId: prompt!.lineItemId, choice: 'date', pickedDate: '2027-02-01' })
+    expect((await engine.closeOutPrompts())[0]!.snoozedUntil).toBe('2027-02-01')
+    await engine.snoozeCloseOut({ lineItemId: prompt!.lineItemId, wake: true })
+    expect(awakeCloseOuts(await engine.closeOutPrompts())).toHaveLength(1)
   })
 
   it('retires the item on confirmation and takes it out of the totals', async () => {

@@ -11,7 +11,8 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { requireEngine } from '@/server/session'
-import { Card, Hint, humanDate, Money, Pill } from '@/components/ui'
+import { Card, Hint, humanDate, Money, Pill, When } from '@/components/ui'
+import { CloseOutCard } from '@/components/close-out-card'
 import { EditableTitle } from '@/components/editable-title'
 import { AccrualChart } from '@/components/accrual-chart'
 import { ProgressBar } from '@/components/progress-bar'
@@ -24,7 +25,14 @@ import {
   retirePackageAction,
   updateLineItemAction,
 } from '@/server/actions'
-import { describeRecurrence, formatCents, previousOccurrence, steadySinceWords } from '@/domain'
+import {
+  describeRecurrence,
+  formatCents,
+  latestSnoozeDay,
+  previousOccurrence,
+  snoozeDays,
+  steadySinceWords,
+} from '@/domain'
 import { RecurrenceFields } from '@/components/recurrence-fields'
 import { SavingSinceFields } from '@/components/saving-since-fields'
 import { DeletePlan } from './delete-plan'
@@ -42,10 +50,16 @@ export default async function PackageDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string; saved?: string; confirm?: string }>
+  searchParams: Promise<{
+    error?: string
+    saved?: string
+    confirm?: string
+    snooze_error?: string
+    item?: string
+  }>
 }) {
   const { id } = await params
-  const { error, saved, confirm } = await searchParams
+  const { error, saved, confirm, snooze_error: snoozeError, item: errorItem } = await searchParams
   const { engine } = await requireEngine()
 
   const view = (await engine.packageViews()).find((v) => v.package.id === id)
@@ -78,6 +92,13 @@ export default async function PackageDetailPage({
   const whatIf = isDraft ? await engine.whatIfCommit(id) : []
   const curve = plan && plan.parts.length > 0 ? await engine.planChart(id) : null
   const accounts = await engine.reserveAccountsForViewer()
+  // "Did this get spent?" for this plan's parts, snoozed ones too, so one
+  // can be answered early or woken up here (D38).
+  const planItemIds = new Set(view.items.map((i) => i.lineItem.id))
+  const closeOuts = isDraft || isDone
+    ? []
+    : (await engine.closeOutPrompts()).filter((c) => planItemIds.has(c.lineItemId))
+  const snoozeOn = snoozeDays(today, await engine.transferWeekday())
   const accountName = (accountId: string) =>
     accounts.find((a) => a.id === accountId)?.name ?? 'Unknown account'
   const defaultAccount = accounts.find((a) => a.writable)?.id ?? accounts[0]?.id ?? ''
@@ -264,6 +285,7 @@ export default async function PackageDetailPage({
               coveringSoonerCents={plan.coveringSoonerCents}
                         notYetHereCents={plan.notYetHereCents}
               status={plan.status}
+              today={today}
               shortOn={plan.parts.map((p) => shortOn.get(p.accountId) ?? null).find((d) => d !== null)}
             />
           </div>
@@ -275,6 +297,28 @@ export default async function PackageDetailPage({
           <h2 className="mb-3 text-sm font-semibold">How the money builds up</h2>
           <AccrualChart chart={curve} today={today} />
         </Card>
+      ) : null}
+
+      {closeOuts.length > 0 ? (
+        <section className="mt-6">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            Did this get spent?
+          </h2>
+          <ul className="space-y-3">
+            {closeOuts.map((prompt) => (
+              <li key={prompt.lineItemId}>
+                <CloseOutCard
+                  prompt={prompt}
+                  today={today}
+                  snoozeOn={snoozeOn}
+                  latestSnooze={latestSnoozeDay(today)}
+                  packageId={id}
+                  error={errorItem === prompt.lineItemId ? snoozeError : null}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       <h2 className="mb-3 mt-6 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
@@ -293,12 +337,20 @@ export default async function PackageDetailPage({
                   <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
                     {accountName(item.lineItem.reserveAccountId)}
                     {' · '}
-                    {item.lineItem.recurrence === null
-                      ? `needed by ${humanDate(item.lineItem.dueDate)}`
-                      : `${describeRecurrence(item.lineItem.recurrence).toLowerCase()}, next ${humanDate(item.lineItem.dueDate)}`}
+                    {item.lineItem.recurrence === null ? (
+                      <When date={item.lineItem.dueDate} today={today} as="due" />
+                    ) : (
+                      <>
+                        {describeRecurrence(item.lineItem.recurrence).toLowerCase()}, next{' '}
+                        <When date={item.lineItem.dueDate} today={today} as="due" />
+                      </>
+                    )}
                   </p>
                 </div>
-                {item.isOverdue ? <Pill tone="behind">Date has passed</Pill> : null}
+                {/* All of it there and waiting is not a warning (D38): the bar says Ready to spend. */}
+                {item.isOverdue && part?.status !== 'ready_to_spend' ? (
+                  <Pill tone="behind">Date has passed</Pill>
+                ) : null}
               </div>
 
               <p className="mt-2 text-sm">
@@ -333,8 +385,9 @@ export default async function PackageDetailPage({
                     coveringSoonerCents={part.coveringSoonerCents}
                     notYetHereCents={part.notYetHereCents}
                     status={part.status}
+                    today={today}
                     savingSince={{ date: part.savingSince.date, words: steadySinceWords(part.savingSince.reason) }}
-                    dueDate={part.outflowDate}
+                    dueDate={part.lineItem.dueDate}
                     shortOn={shortOn.get(part.accountId) ?? null}
                   />
                 </>

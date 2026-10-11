@@ -38,6 +38,10 @@ import {
   apportion,
   canWriteAccount,
   closeOutPrompts,
+  dueState,
+  resolveSnoozeUntil,
+  type CloseOutSnooze,
+  type SnoozeChoice,
   DEFAULT_TRANSFER_ROUND_UP_CENTS,
   DEFAULT_TRANSFER_WEEKDAY,
   isWeekday,
@@ -1628,15 +1632,78 @@ export class Engine {
 
   // ---------------------------------------------------------------- close-out
 
-  /** Passed due dates awaiting "did this get spent?" (PRD §5, capability 4). */
+  /**
+   * Passed due dates awaiting "did this get spent?" (PRD §5, capability 4),
+   * each with the day it wakes while snoozed (D38). Every caller that asks
+   * the question shows only the awake ones (`awakeCloseOuts`); the plan page
+   * shows the snoozed ones too, so they can be answered early.
+   */
   async closeOutPrompts(): Promise<CloseOutPrompt[]> {
-    const [lineItems, packages] = await Promise.all([this.listLineItems(), this.listPackages()])
+    const [lineItems, packages, snoozes] = await Promise.all([
+      this.listLineItems(),
+      this.listPackages(),
+      this.closeOutSnoozes(),
+    ])
     const byId = new Map(packages.map((p) => [p.id, p]))
     return closeOutPrompts({
       lineItems,
       today: this.today(),
       isLive: (item) => byId.get(item.packageId)?.state === 'active',
+      snoozes,
     })
+  }
+
+  /** Every snooze recorded (D38), in the order it was recorded. */
+  private async closeOutSnoozes(): Promise<CloseOutSnooze[]> {
+    const rows = await this.db
+      .select()
+      .from(events)
+      .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'close_out_snoozed')))
+      .orderBy(events.recordedAt, events.id)
+    return rows.map((row) => {
+      const p = row.payload as { line_item_id: Id; due_date: CivilDate; until: CivilDate }
+      return { lineItemId: p.line_item_id, dueDate: p.due_date, until: p.until }
+    })
+  }
+
+  /**
+   * Snooze "did this get spent?" (D38) until a day, or wake it today. Either
+   * spouse may: it moves no money and changes no figure, so account scope
+   * (which restricts money writes) does not apply. Only a question that is
+   * asking can be snoozed.
+   */
+  async snoozeCloseOut(
+    input: { lineItemId: Id } & (
+      | { choice: SnoozeChoice; pickedDate?: CivilDate | null }
+      | { wake: true }
+    ),
+  ): Promise<CivilDate> {
+    const today = this.today()
+    const item = (await this.listLineItems()).find((li) => li.id === input.lineItemId)
+    if (!item) throw new EngineError('No such line item in this household')
+    if (dueState(item, today) !== 'due') {
+      throw new EngineError('That one is not waiting on "did this get spent?"')
+    }
+    let until: CivilDate = today
+    if (!('wake' in input)) {
+      const resolved = resolveSnoozeUntil({
+        choice: input.choice,
+        today,
+        transferWeekday: await this.transferWeekday(),
+        pickedDate: input.pickedDate ?? null,
+      })
+      if (!resolved.ok) throw new EngineError(resolved.reason)
+      until = resolved.until
+    }
+    await this.db.insert(events).values({
+      householdId: this.householdId,
+      kind: 'close_out_snoozed',
+      occurredAt: today,
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload: { line_item_id: item.id, due_date: item.dueDate, until },
+    })
+    return until
   }
 
   /**

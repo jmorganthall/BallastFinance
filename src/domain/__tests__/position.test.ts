@@ -9,7 +9,7 @@ import {
   steadyLineStart,
   type PositionInput,
 } from '../position'
-import { addDays, transferWeeksBetween, type CivilDate, type Weekday } from '../dates'
+import { addDays, compareDates, transferWeeksBetween, type CivilDate, type Weekday } from '../dates'
 import type { LineItem, LineItemCycle, Package, ReserveAccount } from '../types'
 
 // Monday. The household's money moves on Fridays.
@@ -518,6 +518,18 @@ describe('invariants over randomised households (D35)', () => {
             Math.max(0, Math.min(x.savedForCents, x.totalCents) - x.countedCents),
           )
           if (x.status === 'on_track') expect(x.countedCents).toBeGreaterThanOrEqual(Math.min(x.savedForCents, x.totalCents))
+          // 6. Ready to spend (D38) is a part on or past its date with all its
+          // money there; and on an account whose transfer is known, a part on
+          // or past its date is either that or Short, so a snoozed question
+          // can never sit on a shortfall that reads as anything gentler.
+          const dueByToday = compareDates(x.lineItem.dueDate, today) <= 0
+          if (x.status === 'ready_to_spend') {
+            expect(dueByToday).toBe(true)
+            expect(x.countedCents).toBe(x.totalCents)
+          }
+          if (dueByToday && a.status !== 'unconfirmed') {
+            expect(['ready_to_spend', 'short']).toContain(x.status)
+          }
         }
         expect(a.parts.reduce((s, x) => s + x.countedCents, 0)).toBeLessThanOrEqual(Math.max(0, a.money.totalCents))
 
@@ -549,10 +561,13 @@ describe('invariants over randomised households (D35)', () => {
         }
       }
 
-      // 5. A plan is its worst part; All caught up means nothing is Short or unknown.
+      // 5. A plan is its worst part, Ready to spend only when every part is; All caught up means nothing is Short or unknown.
       for (const plan of p.plans) {
         const statuses = plan.parts.map((x) => x.status)
-        const expected = statuses.includes('short') ? 'short' : statuses.includes('catching_up') ? 'catching_up' : 'on_track'
+        const expected =
+          statuses.length === 0
+            ? 'on_track'
+            : (['short', 'catching_up', 'on_track', 'ready_to_spend'] as const).find((st) => statuses.includes(st))
         expect(plan.status).toBe(expected)
       }
       if (p.allCaughtUp) {

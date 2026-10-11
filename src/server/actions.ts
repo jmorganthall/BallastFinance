@@ -409,6 +409,63 @@ export async function confirmSpendAction(formData: FormData): Promise<void> {
   revalidatePath('/packages')
 }
 
+/** Where a snooze form sends a person back to: This week, or a plan's page. */
+function snoozeBack(formData: FormData): string {
+  const packageId = String(formData.get('package_id') ?? '')
+  return packageId ? `/packages/${packageId}` : '/'
+}
+
+/**
+ * Snooze "did this get spent?" (D38): Tomorrow, Next transfer day, 1 week,
+ * 1 month, or a picked day. The money stays held; only the asking stops.
+ * Comes back to the page it was on, which says until when, with an undo.
+ */
+export async function snoozeCloseOutAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  const { isSnoozeChoice } = await import('@/domain')
+  const lineItemId = String(formData.get('line_item_id'))
+  const choice = formData.get('choice')
+  const picked = String(formData.get('snooze_date') ?? '').trim()
+  const back = snoozeBack(formData)
+  let until: string
+  try {
+    if (!isSnoozeChoice(choice)) throw new EngineError('Pick how long to snooze it.')
+    if (picked !== '' && choice === 'date') assertCivilDate(picked)
+    until = await engine.snoozeCloseOut({
+      lineItemId,
+      choice,
+      pickedDate: choice === 'date' && picked !== '' ? picked : null,
+    })
+  } catch (error) {
+    const message =
+      error instanceof EngineError
+        ? error.message
+        : choice === 'date'
+          ? 'Pick the day to ask again.'
+          : 'That did not save. Try again.'
+    redirect(`${back}?snooze_error=${encodeURIComponent(message)}&item=${lineItemId}`)
+  }
+  revalidatePath('/')
+  revalidatePath('/packages')
+  redirect(`${back}?snoozed=${lineItemId}&until=${until}`)
+}
+
+/** "Wake it up" and "undo" (D38): the question asks again from today. */
+export async function wakeCloseOutAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  try {
+    await engine.snoozeCloseOut({ lineItemId: String(formData.get('line_item_id')), wake: true })
+  } catch (error) {
+    // Answered in the meantime: there is nothing left to wake.
+    if (!(error instanceof EngineError)) throw error
+  }
+  revalidatePath('/')
+  revalidatePath('/packages')
+  redirect(snoozeBack(formData))
+}
+
 /**
  * Record an allocation run (PRD §6). Produces a set of instructions, each of
  * which stays outstanding until a human confirms it happened.

@@ -477,6 +477,13 @@ export interface SentencePart {
   text: string
   /** True on the piece that names where the money goes. */
   target?: true
+  /**
+   * Set on the piece that is a date (D38). `text` keeps the date itself, for
+   * the digest and anything that joins the words; a screen says it as a
+   * distance from today ("In 5 days", "due tomorrow") with the date on
+   * hover. `lead` opens the sentence; `due` follows "once,".
+   */
+  date?: { on: CivilDate; as: 'lead' | 'due' }
 }
 
 export function instructionSentenceParts(
@@ -497,7 +504,7 @@ export function instructionSentenceParts(
       switch (instruction.purpose ?? 'catch_up') {
         case 'share_out':
           return later
-            ? [t(`On ${later}, move ${amount} into `), target, t('.')]
+            ? [{ text: `On ${later}`, date: { on: later, as: 'lead' } }, t(`, move ${amount} into `), target, t('.')]
             : [t(`Move ${amount} into `), target, t(', its share of what was spare.')]
         case 'cover':
           return [t(`Move ${amount} into `), target, t(' once, to cover what it is behind.')]

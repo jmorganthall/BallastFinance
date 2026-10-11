@@ -90,6 +90,7 @@ import {
   type CivilDate,
   type Weekday,
 } from './dates'
+import type { SentencePart } from './instructions'
 import { ceilDiv, formatCents, roundUpToStep, type Cents } from './money'
 import { isRecurring, nextOccurrence, previousOccurrence } from './recurrence'
 import {
@@ -169,8 +170,12 @@ export interface PositionInput {
 
 // ---------------------------------------------------------------- outputs
 
-/** The three words, everywhere (D35). */
-export type PartStatus = 'on_track' | 'catching_up' | 'short'
+/**
+ * The status words, everywhere (D35): On track, Catching up, Short, and --
+ * for a part past its date with all its money there, waiting to be spent --
+ * Ready to spend (D38).
+ */
+export type PartStatus = 'ready_to_spend' | 'on_track' | 'catching_up' | 'short'
 /** An account is fine or it is not; "unconfirmed" until its transfer is known. */
 export type AccountStatus = 'on_track' | 'short' | 'unconfirmed'
 
@@ -808,8 +813,14 @@ export function moneyToday(args: {
 
 // ---------------------------------------------------------------- the position
 
+/**
+ * A plan's status is its worst part's. Ready to spend is the best (D38): a
+ * plan reads it only when every part does, so one part waiting to be spent
+ * never hides another that is Short. No part at all is on track.
+ */
+const STATUS_ORDER: readonly PartStatus[] = ['short', 'catching_up', 'on_track', 'ready_to_spend']
 const worst = (statuses: readonly PartStatus[]): PartStatus =>
-  statuses.includes('short') ? 'short' : statuses.includes('catching_up') ? 'catching_up' : 'on_track'
+  statuses.length === 0 ? 'on_track' : STATUS_ORDER.find((s) => statuses.includes(s))!
 
 function accountPosition(args: {
   account: ReserveAccount
@@ -971,15 +982,22 @@ function accountPosition(args: {
       const steady = Math.min(f.savedForCents, f.totalCents)
       // A part is Short when the day the account runs dry is one it still
       // needs money on: a one-off due on or after it, or a part that comes
-      // round again, which goes on needing money every cycle after.
+      // round again, which goes on needing money every cycle after. On or
+      // past its date -- the day "did this get spent?" starts asking -- with
+      // every cent of it counted, it is Ready to spend (D38):
+      // whether or not "did this get spent?" is snoozed, which changes no
+      // figure. Past its date and not all there, it goes out today and the
+      // account is Short, so it reads Short.
       const partStatus: PartStatus =
         status === 'short' &&
         judged.short &&
         (isRecurring(f.lineItem.recurrence) || compareDates(f.outflowDate, judged.short.on) >= 0)
           ? 'short'
-          : countedCents >= steady
-            ? 'on_track'
-            : 'catching_up'
+          : compareDates(f.lineItem.dueDate, today) <= 0 && countedCents >= f.totalCents
+            ? 'ready_to_spend'
+            : countedCents >= steady
+              ? 'on_track'
+              : 'catching_up'
       const gap = Math.max(0, steady - countedCents)
       const coveringSoonerCents = Math.min(gap, countedSooner)
       countedSooner += countedCents
@@ -1143,8 +1161,9 @@ export function barOf(v: { totalCents: Cents; countedCents: Cents; savedForCents
   }
 }
 
-/** The words for a part's or plan's status (D35): three, everywhere. */
+/** The words for a part's or plan's status (D35, D38), everywhere. */
 export const PART_STATUS_WORDS: Record<PartStatus, string> = {
+  ready_to_spend: 'Ready to spend',
   on_track: 'On track',
   catching_up: 'Catching up',
   short: 'Short',
@@ -1181,14 +1200,16 @@ export function steadySinceWords(reason: SteadySinceReason): string {
 export function derivedTodoSentenceParts(
   todo: DerivedTodo,
   humanDate: (d: CivilDate) => string = (d) => d,
-): { text: string; target?: true }[] {
-  const t = (text: string) => ({ text })
-  const target = { text: todo.accountName, target: true as const }
+): SentencePart[] {
+  const t = (text: string): SentencePart => ({ text })
+  const target: SentencePart = { text: todo.accountName, target: true }
   if (todo.kind === 'move_in') {
     return [
       t(`Move ${formatCents(todo.amountCents)} into `),
       target,
-      t(` once, by ${humanDate(todo.byDate)}. It is too soon for the weekly transfer to cover.`),
+      t(' once, '),
+      { text: `by ${humanDate(todo.byDate)}`, date: { on: todo.byDate, as: 'due' } },
+      t('. It is too soon for the weekly transfer to cover.'),
     ]
   }
   const to = formatCents(todo.toCents)
