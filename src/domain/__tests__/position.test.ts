@@ -241,9 +241,12 @@ describe('the account and its parts cannot disagree (the screenshot that started
     const la = low.accounts[0]!
     expect(la.status).toBe('short')
     expect(la.transferChange).toMatchObject({ fromCents: 1000, reason: 'raise' })
-    // Every part here comes round again, so every one needs money on the
-    // day the account runs dry, or on a later round of it.
-    expect(la.parts.every((x) => x.status === 'short')).toBe(true)
+    // A part is Short when its own date is on or after the day the account
+    // runs dry (D38 (6)); one due before it is judged on its own money.
+    expect(la.parts.some((x) => x.status === 'short')).toBe(true)
+    for (const x of la.parts) {
+      expect(x.status === 'short').toBe(x.outflowDate >= la.short!.on)
+    }
     expect(low.allCaughtUp).toBe(false)
   })
 })
@@ -270,9 +273,11 @@ describe('an account that is fine to its last date but not for ever', () => {
   it('is Short on the day the money would actually run out, after the horizon', () => {
     expect(a.weeklyExactCents).toBeGreaterThan(6000)
     expect(a.status).toBe('short')
-    // Its plans all come round again, so the plan cards say Short too.
-    expect(a.parts.every((x) => x.status === 'short')).toBe(true)
     expect(a.short!.on > a.horizon!).toBe(true)
+    // It runs dry only on a later time round, so no plan it holds now is
+    // Short (D38 (6)): the account card says so, and This week asks for the
+    // fix; the plan cards judge the plans in front of them.
+    expect(a.parts.some((x) => x.status === 'short')).toBe(false)
     expect(a.transferChange).toEqual({ fromCents: 6000, toCents: a.weeklyCents, reason: 'raise' })
     expect(a.extraCents).toBe(0)
   })
@@ -507,9 +512,19 @@ describe('invariants over randomised households (D35)', () => {
         }
         expect(a.weeklyCents).toBeGreaterThanOrEqual(a.weeklyExactCents)
 
-        // 2. A Short account has a Short part and only a Short account does,
-        // so a plan card can never say "fine" of a plan its account cannot pay.
-        expect(a.parts.some((x) => x.status === 'short')).toBe(a.status === 'short' && a.parts.length > 0)
+        // 2. A part is Short exactly when its account is Short and its own
+        // date is on or after the day the account runs dry (D38 (6)), so a
+        // plan card can never say "fine" of a plan its account cannot pay
+        // this time round. A Short account whose dry day falls within its
+        // current dates therefore always has a Short part.
+        for (const x of a.parts) {
+          expect(x.status === 'short').toBe(
+            a.status === 'short' && compareDates(x.outflowDate, a.short!.on) >= 0,
+          )
+        }
+        if (a.status === 'short' && a.horizon && compareDates(a.short!.on, a.horizon) <= 0) {
+          expect(a.parts.some((x) => x.status === 'short')).toBe(true)
+        }
         for (const x of a.parts) {
           // 3. Counting never invents money and never over-fills a part.
           expect(x.countedCents).toBeGreaterThanOrEqual(0)

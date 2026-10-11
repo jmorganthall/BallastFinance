@@ -980,9 +980,11 @@ function accountPosition(args: {
     .map((f) => {
       const countedCents = counted.get(f.lineItem.id) ?? 0
       const steady = Math.min(f.savedForCents, f.totalCents)
-      // A part is Short when the day the account runs dry is one it still
-      // needs money on: a one-off due on or after it, or a part that comes
-      // round again, which goes on needing money every cycle after. On or
+      // A part is Short when its own current date -- the one it is saving
+      // for now -- is on or after the day the account runs dry (D38 (6)).
+      // A later time round of a repeating part does not make it Short today:
+      // the account card says the account runs short, and when, and This
+      // week asks for the fix; a plan card judges the plan in front of it. On or
       // past its date -- the day "did this get spent?" starts asking -- with
       // every cent of it counted, it is Ready to spend (D38):
       // whether or not "did this get spent?" is snoozed, which changes no
@@ -991,7 +993,7 @@ function accountPosition(args: {
       const partStatus: PartStatus =
         status === 'short' &&
         judged.short &&
-        (isRecurring(f.lineItem.recurrence) || compareDates(f.outflowDate, judged.short.on) >= 0)
+        compareDates(f.outflowDate, judged.short.on) >= 0
           ? 'short'
           : compareDates(f.lineItem.dueDate, today) <= 0 && countedCents >= f.totalCents
             ? 'ready_to_spend'

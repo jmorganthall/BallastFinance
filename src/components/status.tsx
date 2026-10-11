@@ -16,7 +16,8 @@ import {
 const PART_TONE = {
   ready_to_spend: 'accent',
   on_track: 'ahead',
-  catching_up: 'caution',
+  // Catching up is fine by definition -- it will be there on the day (D38 (5)).
+  catching_up: 'ahead',
   short: 'behind',
 } as const
 const ACCOUNT_TONE = { on_track: 'ahead', short: 'behind', unconfirmed: 'neutral' } as const
@@ -34,6 +35,6 @@ export const STATUS_FILL: Record<PartStatus, string> = {
   // All the money there, waiting to be spent (D38): the accent blue.
   ready_to_spend: 'var(--color-accent)',
   on_track: 'var(--color-ahead)',
-  catching_up: 'var(--color-caution)',
+  catching_up: 'var(--color-ahead)',
   short: 'var(--color-behind)',
 }

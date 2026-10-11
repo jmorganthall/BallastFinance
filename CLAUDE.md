@@ -112,8 +112,11 @@ principles, and they are non-negotiable.
   derived, not issued ahead: marking one done records the instruction and
   its confirmation together (`confirmTransfer`, `confirmMoveIn`). The
   invariants in `src/domain/__tests__/position.test.ts` pin the rest: a
-  Short account always has a Short part and a fix; lowering never makes an
-  account Short; extra never exceeds money today. There is no drift, no
+  part is Short exactly when its account is Short and its own current date
+  is on or after the day the account runs short (D38 (6), rev 69: a later
+  time round of a repeating part does not make it Short today); a Short
+  account always has a fix; lowering never makes an account Short; extra
+  never exceeds money today. There is no drift, no
   should-hold, no catch-up bump or ease-off offer and no rate component on
   screen any more.
 - **"Did this get spent?" can be snoozed, and a part waiting to be spent is
@@ -140,7 +143,8 @@ principles, and they are non-negotiable.
   Trip and park-calendar dates stay dates. **A plan card is read at a glance**
   (D38 (5), rev 66): `ProgressBar` draws the fill, the white pace tick with a
   chequered flag above it, and -- while Catching up -- a green fill with the
-  stretch to the tick striped yellow (`barOf().catchUpPercent`); one line
+  stretch to the tick striped in two soft greens and a green word, because
+  catching up is fine by definition (`barOf().catchUpPercent`); one line
   "$X of $Y, due in N"; the reasons only on a tap of the word or the flag. No
   "$/week steady" on any card: the weekly figure is the account's.
 - **A move marked done is money the account holds until the next count**
@@ -339,7 +343,8 @@ Before changing any money figure, read the invariants in
 `src/domain/__tests__/position.test.ts` (D35). They are a randomised property
 test over generated households -- accounts, parts, counts, transfers, transfer
 days -- asserting that W is the smallest level transfer that works, that a
-Short account always has a Short part and a fix, that lowering never makes an
+part is Short exactly when its own date is on or after its account's short
+day and a Short account always has a fix, that lowering never makes an
 account Short, and that "All caught up" means nothing is Short. They caught
 real bugs while the position was being built; run them with more seeds
 (`SEED`/`RUNS` in a scratch copy) after any change to `position.ts`.

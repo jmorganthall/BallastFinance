@@ -2,8 +2,9 @@
  * A part's or plan's progress, read at a glance (D35, D38): the fill is what
  * the account's money counts toward it; the white tick with the pace flag
  * above it is where steady saving would have it today; while it is catching
- * up, the stretch from the fill to the tick is striped yellow on a green
- * fill -- the account will have it on the day, it is just below pace now.
+ * up, the stretch from the fill to the tick is striped in two soft greens
+ * after a solid green fill -- the account will have it on the day, it is
+ * just below pace now, and nothing about that asks for attention.
  * Short is red, Ready to spend blue. The colour never stands alone: the pill
  * says the word, and a tap on the pill or the flag says the rest. One line of
  * numbers, "$X of $Y, due in N". The reading comes from the domain; this only
@@ -66,9 +67,7 @@ export function ProgressBar({
           : bar.fullyFunded
             ? 'All of it is here; nothing more to save.'
             : 'At or ahead of pace.'
-  // On a catch-up the fill is green -- it will be there on the day -- and the
-  // gap to the pace tick is striped yellow (D38).
-  const fill = status === 'catching_up' ? STATUS_FILL.on_track : STATUS_FILL[status]
+  const fill = STATUS_FILL[status]
 
   return (
     <div className={className}>
@@ -112,8 +111,10 @@ export function ProgressBar({
               className="h-full"
               style={{
                 width: `${bar.catchUpPercent}%`,
+                // Two soft shades of the on-track green: calm, because
+                // catching up is not a problem (D38 (5)).
                 background:
-                  'repeating-linear-gradient(-45deg, var(--color-caution) 0 4px, var(--color-caution-soft) 4px 8px)',
+                  'repeating-linear-gradient(-45deg, color-mix(in oklch, var(--color-ahead) 60%, transparent) 0 4px, color-mix(in oklch, var(--color-ahead) 25%, transparent) 4px 8px)',
               }}
             />
           ) : null}
