@@ -176,8 +176,14 @@ export interface PositionInput {
  * Ready to spend (D38).
  */
 export type PartStatus = 'ready_to_spend' | 'on_track' | 'catching_up' | 'short'
-/** An account is fine or it is not; "unconfirmed" until its transfer is known. */
-export type AccountStatus = 'on_track' | 'short' | 'unconfirmed'
+/**
+ * An account is fine or it is not; "unconfirmed" until its transfer is known.
+ * Running down (D39): every bill this time round is covered, but the
+ * transfer is less than the bills cost a year, so the money already there --
+ * the household's ballast -- is being spent down and runs out on a later
+ * time round. Short: a bill among the current dates cannot be paid.
+ */
+export type AccountStatus = 'on_track' | 'running_down' | 'short' | 'unconfirmed'
 
 /** Why a part's steady line starts where it does, for the words on screen. */
 export type SteadySinceReason = 'last_occurrence' | 'plan_started' | 'added' | 'typed' | 'spent'
@@ -236,7 +242,12 @@ export interface AccountShort {
   byCents: Cents
 }
 
-export type TransferChangeReason = 'confirm' | 'raise' | 'lower'
+/**
+ * Why the transfer should change: confirm what it is, raise it so a current
+ * date is met, keep it up with what the bills cost a year so the money
+ * already there stops being spent down (D39), or lower it.
+ */
+export type TransferChangeReason = 'confirm' | 'raise' | 'keep_up' | 'lower'
 
 export interface AccountPosition {
   account: ReserveAccount
@@ -272,7 +283,10 @@ export interface AccountPosition {
   /** What is set up at the bank, or null when nobody has confirmed it yet. */
   bank: BankTransfer | null
   status: AccountStatus
+  /** The day the money runs out on the transfer set up now: Short, or Running down (on a later time round). */
   short: AccountShort | null
+  /** What the repeating bills cost a week, steadily: the least a transfer must be not to run down (D39). */
+  runRatePerWeekCents: Cents
   /** What could leave the account today with every date still passing. */
   extraCents: Cents
   /** A change to the transfer this account asks for, or null. */
@@ -895,8 +909,22 @@ function accountPosition(args: {
         requirements,
         arrivedBy: (r) => weeklyCents * r.transfers,
       })
+  // Money that runs out only after the last current date -- on a later time
+  // round, because the transfer is below what the bills cost a year -- is an
+  // account Running down, not Short (D39): every bill now is paid, and the
+  // ballast is what is being spent.
+  const runsOutLater =
+    judged.short !== null && horizon !== null && compareDates(judged.short.on, horizon) > 0
   const status: AccountStatus =
-    frames.length === 0 && !bank ? 'on_track' : !bank ? 'unconfirmed' : judged.short ? 'short' : 'on_track'
+    frames.length === 0 && !bank
+      ? 'on_track'
+      : !bank
+        ? 'unconfirmed'
+        : judged.short
+          ? runsOutLater
+            ? 'running_down'
+            : 'short'
+          : 'on_track'
 
   // A Short account always says what fixes it, and an account that is fine
   // is asked for nothing it depends on. When a one-time move alone puts it
@@ -942,7 +970,11 @@ function accountPosition(args: {
       }
       moveNeeded = { amountCents: high, byDate: firstShort.on }
     } else {
-      transferChange = { fromCents: bank.perWeekCents, toCents: weeklyCents, reason: 'raise' }
+      transferChange = {
+        fromCents: bank.perWeekCents,
+        toCents: weeklyCents,
+        reason: runsOutLater ? 'keep_up' : 'raise',
+      }
       if (level.moveCents > 0 && level.moveBy) {
         moveNeeded = { amountCents: level.moveCents, byDate: level.moveBy }
       }
@@ -1035,7 +1067,8 @@ function accountPosition(args: {
     oneTimeMove,
     bank,
     status,
-    short: status === 'short' ? judged.short : null,
+    short: status === 'short' || status === 'running_down' ? judged.short : null,
+    runRatePerWeekCents,
     // What could leave today: never more than is there today, and never
     // what a later date still needs once the transfers up to it are in.
     extraCents: judged.short ? 0 : Math.max(0, Math.min(money.totalCents, judged.slackCents)),
@@ -1179,6 +1212,7 @@ export const PART_STATUS_WORDS: Record<PartStatus, string> = {
 /** The words for an account's status. */
 export const ACCOUNT_STATUS_WORDS: Record<AccountStatus, string> = {
   on_track: 'On track',
+  running_down: 'Running down',
   short: 'Short',
   unconfirmed: 'Confirm the transfer',
 }
@@ -1232,6 +1266,14 @@ export function derivedTodoSentenceParts(
         t('In Capital One 360, set the recurring transfer into '),
         target,
         t(` to ${to} per week (it is ${formatCents(todo.fromCents ?? 0)} now), so every date is covered.`),
+      ]
+    case 'keep_up':
+      return [
+        t('In Capital One 360, set the recurring transfer into '),
+        target,
+        t(
+          ` to ${to} per week (it is ${formatCents(todo.fromCents ?? 0)} now), so it keeps up with what its bills cost and stops using up what is already set aside.`,
+        ),
       ]
     case 'lower':
       return [

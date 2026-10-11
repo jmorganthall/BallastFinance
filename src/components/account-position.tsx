@@ -53,6 +53,16 @@ export function AccountPositionCard({
           On the transfer set up now it runs short <When date={a.short.on} today={today} />, by{' '}
           <Money cents={a.short.byCents} />.
         </p>
+      ) : a.status === 'running_down' && a.short && a.bank ? (
+        // Every bill now is paid; the money already there is what is being
+        // spent (D39). Plain words, the two weekly figures side by side.
+        <p className="mt-2 text-sm text-[var(--color-caution)]">
+          Covers every bill this time round, but{' '}
+          <Money cents={a.bank.perWeekCents} /> a week is less than these bills cost (
+          <Money cents={a.runRatePerWeekCents} /> a week), so it is using up what is already
+          set aside. On this transfer the money runs out{' '}
+          <When date={a.short.on} today={today} />.
+        </p>
       ) : a.parts.length > 0 && a.horizon && a.status === 'on_track' ? (
         <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
           Covers everything due <When date={a.horizon} today={today} as="until" /> on the transfer set up now
@@ -91,7 +101,9 @@ export function AccountPositionCard({
                 <Money cents={a.transferChange.toCents} /> a week
                 {a.transferChange.reason === 'raise'
                   ? ', so every date is covered.'
-                  : ', since less now does the job.'}
+                  : a.transferChange.reason === 'keep_up'
+                    ? ', so it keeps up with what its bills cost.'
+                    : ', since less now does the job.'}
               </>
             )}
           </p>

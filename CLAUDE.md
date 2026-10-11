@@ -105,7 +105,12 @@ principles, and they are non-negotiable.
   date four transfers away or fewer that it cannot meet is a one-time move,
   so the transfer never spikes. The status is judged on the transfer
   *confirmed* at the bank (`set_weekly_transfer` confirmed), never on an ask
-  not yet done: `on_track`, `short` (with the first date) or `unconfirmed`.
+  not yet done: `on_track`, `short` (a current bill cannot be paid, with the
+  first date), `running_down` (PRD D39, rev 70: every current bill is paid
+  but the transfer is below what the repeating bills cost a year,
+  `runRatePerWeekCents`, so the money runs out on a later round; calm amber,
+  its to-do is a `keep_up` transfer change, and it blocks "All caught up")
+  or `unconfirmed`.
   Parts are `on_track` / `catching_up` / `short`, counted automatically
   soonest due first up to each steady line, then up to totals; nothing is
   counted by hand and there is no reshuffle. To-dos (`position.todos`) are
@@ -115,7 +120,8 @@ principles, and they are non-negotiable.
   part is Short exactly when its account is Short and its own current date
   is on or after the day the account runs short (D38 (6), rev 69: a later
   time round of a repeating part does not make it Short today); a Short
-  account always has a fix; lowering never makes an account Short; extra
+  account always has a Short part and a fix, a Running down one none;
+  lowering never makes an account Short; extra
   never exceeds money today. There is no drift, no
   should-hold, no catch-up bump or ease-off offer and no rate component on
   screen any more.

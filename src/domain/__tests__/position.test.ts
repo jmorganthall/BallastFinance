@@ -270,15 +270,18 @@ describe('an account that is fine to its last date but not for ever', () => {
   })
   const a = position(facts).accounts[0]!
 
-  it('is Short on the day the money would actually run out, after the horizon', () => {
+  it('is Running down: every bill now paid, the money there spent down, out on a later round (D39)', () => {
     expect(a.weeklyExactCents).toBeGreaterThan(6000)
-    expect(a.status).toBe('short')
+    expect(a.status).toBe('running_down')
+    // $1,000 + $1,635 + $750 + $1,000 = $4,385 a year: $83.62 a week at the
+    // run-rate; the bank moves $60.
+    expect(a.runRatePerWeekCents).toBe(8362)
+    expect(a.short).toEqual({ on: '2029-03-15', byCents: 8960 })
     expect(a.short!.on > a.horizon!).toBe(true)
-    // It runs dry only on a later time round, so no plan it holds now is
-    // Short (D38 (6)): the account card says so, and This week asks for the
-    // fix; the plan cards judge the plans in front of them.
+    // No plan it holds now is Short (D38 (6)): the account says what is
+    // wrong, and This week asks for the fix.
     expect(a.parts.some((x) => x.status === 'short')).toBe(false)
-    expect(a.transferChange).toEqual({ fromCents: 6000, toCents: a.weeklyCents, reason: 'raise' })
+    expect(a.transferChange).toEqual({ fromCents: 6000, toCents: a.weeklyCents, reason: 'keep_up' })
     expect(a.extraCents).toBe(0)
   })
 
@@ -522,8 +525,18 @@ describe('invariants over randomised households (D35)', () => {
             a.status === 'short' && compareDates(x.outflowDate, a.short!.on) >= 0,
           )
         }
-        if (a.status === 'short' && a.horizon && compareDates(a.short!.on, a.horizon) <= 0) {
+        // A Short account cannot pay a current bill, so it always has a Short
+        // part. Running down (D39) pays every current bill and runs out only
+        // on a later round, because the bank moves less than the bills cost
+        // a year: no Short part, and it is asked to keep up.
+        if (a.status === 'short') {
+          expect(compareDates(a.short!.on, a.horizon!)).toBeLessThanOrEqual(0)
           expect(a.parts.some((x) => x.status === 'short')).toBe(true)
+        }
+        if (a.status === 'running_down') {
+          expect(compareDates(a.short!.on, a.horizon!)).toBeGreaterThan(0)
+          expect(a.bank!.perWeekCents).toBeLessThan(a.runRatePerWeekCents)
+          expect(a.transferChange?.reason).toBe('keep_up')
         }
         for (const x of a.parts) {
           // 3. Counting never invents money and never over-fills a part.
@@ -555,8 +568,10 @@ describe('invariants over randomised households (D35)', () => {
         if (a.status === 'on_track') {
           expect(a.oneTimeMove).toBeNull()
           expect(a.transferChange?.reason).not.toBe('raise')
+          expect(a.transferChange?.reason).not.toBe('keep_up')
         }
         if (a.transferChange?.reason === 'raise') expect(a.status).toBe('short')
+        if (a.transferChange?.reason === 'keep_up') expect(a.status).toBe('running_down')
         // What could leave today is never more than is there today.
         expect(a.extraCents).toBeLessThanOrEqual(Math.max(0, a.money.totalCents))
         // Lowering is only ever offered to where the account is still fine,

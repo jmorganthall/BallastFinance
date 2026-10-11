@@ -20,7 +20,13 @@ const PART_TONE = {
   catching_up: 'ahead',
   short: 'behind',
 } as const
-const ACCOUNT_TONE = { on_track: 'ahead', short: 'behind', unconfirmed: 'neutral' } as const
+// Running down is calm amber: not an emergency, but the one thing worth doing (D39).
+const ACCOUNT_TONE = {
+  on_track: 'ahead',
+  running_down: 'caution',
+  short: 'behind',
+  unconfirmed: 'neutral',
+} as const
 
 export function PartStatusPill({ status }: { status: PartStatus }) {
   return <Pill tone={PART_TONE[status]}>{PART_STATUS_WORDS[status]}</Pill>

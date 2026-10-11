@@ -100,11 +100,13 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
       const verdict =
         a.status === 'short' && a.short
           ? `runs short on ${a.short.on} by ${formatCents(a.short.byCents)}`
-          : a.status === 'unconfirmed'
-            ? `needs ${formatCents(a.weeklyCents)}/week`
-            : a.horizon
-              ? `covers everything through ${a.horizon}`
-              : 'nothing due'
+          : a.status === 'running_down' && a.short
+            ? `covers this time round, but the transfer is below what its bills cost a year; the money runs out on ${a.short.on}`
+            : a.status === 'unconfirmed'
+              ? `needs ${formatCents(a.weeklyCents)}/week`
+              : a.horizon
+                ? `covers everything through ${a.horizon}`
+                : 'nothing due'
       lines.push(`- **${a.account.name}**: ${transfer} — ${verdict}`)
       if (a.transferChange && a.transferChange.reason !== 'confirm') {
         lines.push(
