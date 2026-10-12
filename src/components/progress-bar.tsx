@@ -6,8 +6,10 @@
  * track; below it, on an account that is Short, it is Short -- and a Short
  * bar says why and what fixes it under the bar, not only on a tap.
  * Short is red, Ready to spend blue. The colour never stands alone: the pill
- * says the word. One line of numbers, "$X of $Y, due in N". The reading comes
- * from the domain; this only draws it.
+ * says the word. One line of numbers, "$X of $Y · N%, due in N", the
+ * percentage small and quiet (D41 (3)); a Short bar given its shortfall says
+ * "+ $Y to make up" beside the word (D41 (2)). The reading comes from the
+ * domain; this only draws it.
  */
 
 import { Hint, humanDate, When } from '@/components/ui'
@@ -28,6 +30,7 @@ export function ProgressBar({
   tickCents,
   status,
   dueDate,
+  shortByCents,
   shortReasons = [],
   today,
   className = '',
@@ -38,6 +41,8 @@ export function ProgressBar({
   tickCents: Cents
   status: PartStatus
   dueDate?: CivilDate
+  /** What it is missing today (D41), said beside the word when it is Short; left out where the card says it elsewhere. */
+  shortByCents?: Cents
   /** Why its accounts are Short and what fixes each, when the status is Short. */
   shortReasons?: readonly ShortReason[]
   /** Dates are said as a distance from today (D38). */
@@ -60,11 +65,17 @@ export function ProgressBar({
   return (
     <div className={className}>
       <div className="flex items-center justify-between gap-3">
-        <Hint detail={statusDetail}>
-          <PartStatusPill status={status} />
-        </Hint>
+        <span className="flex items-center gap-2">
+          <Hint detail={statusDetail}>
+            <PartStatusPill status={status} />
+          </Hint>
+          {status === 'short' && shortByCents !== undefined && shortByCents > 0 ? (
+            <MakeUp cents={shortByCents} />
+          ) : null}
+        </span>
         <span className="tabular text-xs text-[var(--color-ink-soft)]">
           {formatCents(countedCents)} of {formatCents(totalCents)}
+          <span className="opacity-70"> · {bar.savedPercent}%</span>
           {dueDate ? (
             <>
               , <When date={dueDate} today={today} as="due" />
@@ -88,7 +99,7 @@ export function ProgressBar({
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={bar.fillPercent}
+          aria-valuenow={bar.savedPercent}
           aria-label={`${formatCents(countedCents)} of ${formatCents(totalCents)} here, ${formatCents(tickCents)} needed today, ${PART_STATUS_WORDS[status].toLowerCase()}`}
           className="relative flex h-3 w-full overflow-hidden rounded-full bg-[var(--color-line)]"
         >
@@ -106,13 +117,28 @@ export function ProgressBar({
         <div className="mt-2 space-y-1 text-xs text-[var(--color-ink-soft)]">
           {shortReasons.map((r) => (
             <p key={r.accountId}>
-              {r.accountName} runs short <When date={r.on} today={today} as="due" />.
+              {r.accountName} runs short <When date={r.on} today={today} />.
               {r.fixes.length > 0 ? ` Fix on This week: ${r.fixes.join(', then ')}.` : ''}
             </p>
           ))}
         </div>
       ) : null}
     </div>
+  )
+}
+
+/**
+ * "+ $Y to make up" (D41 (2)): what a Short part or plan is missing today,
+ * its tick less what is counted. The plans list says it on the weekly line;
+ * the plan's page and each part say it beside the word.
+ */
+export function MakeUp({ cents }: { cents: Cents }) {
+  return (
+    <Hint detail="What it is missing today: what the account needs to hold for it now, less what is there for it. This week says how to make it up.">
+      <span className="tabular text-xs font-medium text-[var(--color-behind)]">
+        + {formatCents(cents)} to make up
+      </span>
+    </Hint>
   )
 }
 

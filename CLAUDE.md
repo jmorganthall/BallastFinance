@@ -39,7 +39,7 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rollup.ts` only lists plans with their totals. `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -174,10 +174,23 @@ principles, and they are non-negotiable.
   with a chequered flag above it -- what the account must hold for it
   today; one line "$X of $Y, due in N"; and, when Short, a line under the
   bar saying which account runs short, when, and the fix This week asks for
-  (`shortReasons`), not only on a tap. No "$/week steady" on any card: the
-  weekly figure is the account's. The plan chart (`planChart`) runs from
-  today: what will happen on the transfer set up now, and, while Short, a
-  dashed line for after the fix; the even-pace steady line is not drawn.
+  (`shortReasons`), not only on a tap. The plan chart (`planChart`) runs
+  from today: what will happen on the transfer set up now, and, while Short,
+  a dashed line for after the fix; the even-pace steady line is not drawn.
+- **Plan cards say the weekly cost and how short, and the list sorts**
+  (PRD D41, rev 74). A live card shows "$X a week", the plan's
+  `steadyPerWeekCents`, a figure for comparing plans and never the transfer
+  (its tooltip names the account whose transfer it is). A Short part or plan
+  says "+ $Y to make up" (`MakeUp` in `progress-bar.tsx`): `shortByCents` on
+  `PartPosition` (tick less counted while Short, 0 otherwise) and
+  `PlanPosition` (its parts' added up), above zero exactly when Short --
+  invariant 7 in `position.test.ts`. `barOf` draws the fill and the tick to
+  a fraction of a percent and gives `savedPercent`, rounded down, printed
+  small beside "$X of $Y". Every card says "Next due: <part>, in N" ("Next
+  out" is retired). The order is `src/domain/plan-order.ts`: Next due ·
+  Per week · Total · Most short, each reversible, in the address
+  (`?sort=&dir=`), never a setting; live, then drafts, then done; a draft
+  falls back to Next due under the two figures it lacks.
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
   order the events were recorded (`recorded_at`, then id), answered by
@@ -361,7 +374,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 703 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 710 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
