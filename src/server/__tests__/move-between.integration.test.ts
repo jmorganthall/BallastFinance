@@ -130,10 +130,11 @@ describeDb('spare money between accounts (D40)', () => {
   })
 
   it('records the move out and the move in together, and every figure is worked out again', async () => {
-    const before = (await instructionEvents()).length
+    // By id, not position: the query has no order, so the rows can come back in any.
+    const before = new Set((await instructionEvents()).map((e) => e.id))
     await josh.confirmMoveBetween({ fromAccountId: laterId, toAccountId: soonId, amountCents: 50000 })
 
-    const added = (await instructionEvents()).slice(before)
+    const added = (await instructionEvents()).filter((e) => !before.has(e.id))
     expect(added.map((e) => (e.payload as { type: string; target_id: string }).type).sort()).toEqual([
       'one_time_move',
       'one_time_move_out',
