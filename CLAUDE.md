@@ -268,7 +268,9 @@ principles, and they are non-negotiable.
   ThemeParks.wiki (park ids resolved once from the destination's children
   by name and kept in setting `park_hours_ids`; a name not found is an
   error in the log), RopeDrop Planner's public JSON (URL in setting
-  `ropedrop_outlook_url`, parsed defensively), Queue-Times (park names in
+  `ropedrop_outlook_url`, parsed defensively; there is no default address:
+  the first one shipped was a guess never seen live and answered 404, so the
+  outlook runs only when a person sets an address that works), Queue-Times (park names in
   setting `park_wait_names`). None is reachable from the sandbox; every
   adapter is tested on fixtures from the documented shapes and a fake
   fetch. **Queue-Times' data must appear with "Powered by Queue-Times.com"
@@ -281,7 +283,11 @@ principles, and they are non-negotiable.
   "no arithmetic in SQL", stated in `Engine.waitHistory`: the per-park,
   per-day mean wait is summed in SQL because a row per ride per five
   minutes is too big to read; its shape matches the domain's
-  `summariseWaits`, and the ranking stays in the domain. Jobs
+  `summariseWaits`, and the ranking stays in the domain. "Refresh park data"
+  also checks the crowd calendars (Thrill Data, then Undercover Tourist, and
+  the reader only after both gave nothing) for the month shown and the next,
+  through `Engine.checkCrowds`, and holds what came back on `/trips` for a
+  person to keep (D42); it is the same hold "Check how busy" uses on a trip. Jobs
   (`PARK_WEATHER_CRON`, `PARK_HOURS_CRON`, `WAIT_POLL_CRON`, all off with
   `PARK_DATA_FETCH=off`, each off with its cron set to `off`) run once
   through the first household's engine, not per household. The calendar
@@ -368,7 +374,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 708 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 710 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

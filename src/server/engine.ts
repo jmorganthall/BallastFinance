@@ -203,6 +203,9 @@ import {
   bestWeeks,
   DEFAULT_HORIZON_MONTHS,
   DVC_LISTING_SOURCES,
+  CROWD_SOURCES,
+  type CrowdCalendarRead,
+  type CrowdSource,
   DEFAULT_WEEK_WEIGHTS,
   diffDaysOff,
   listingWindow,
@@ -255,9 +258,8 @@ import {
   type WaitParkNames,
   type WeatherHorizon,
 } from '@/domain'
-import { fetchSchoolCalendarIcal, pullDvcListings } from '@/server/trip-fetch'
+import { fetchSchoolCalendarIcal, pullCrowdCalendar, pullDvcListings } from '@/server/trip-fetch'
 import {
-  DEFAULT_ROPEDROP_OUTLOOK_URL,
   fetchArchive,
   fetchForecast,
   fetchQueueTimesParks,
@@ -3577,6 +3579,51 @@ export class Engine {
     await this.putSetting('trip_crowd_pull', pull ?? false)
   }
 
+  /**
+   * How busy, from the crowd calendars (D23): "Check how busy" on a trip, and
+   * the crowd step of "Refresh park data" on the calendar (D42). The parsers
+   * first; the reader only when the action says so, after they gave nothing
+   * (D27), one page a month from the first source. What came back is held
+   * for a person to look at; nothing is a crowd level until they keep it.
+   */
+  async checkCrowds(
+    input: { destination: TripDestination; months: readonly string[] },
+    options: { fallbackToReader: boolean; sources?: readonly CrowdSource[] } & ReadDeps,
+  ): Promise<ReadOutcome> {
+    const fetchImpl = options.fetchImpl ?? fetch
+    const read = options.read ?? readStructured
+    const sources = options.sources ?? CROWD_SOURCES
+    const months = [...input.months]
+    const hold = (pull: { source: string; label: string; levels: ParsedCrowdLevel[]; notes: string[] }) =>
+      this.stashCrowdPull({ ...pull, destination: input.destination, months, fetchedOn: this.today() })
+    const pulled = await pullCrowdCalendar(input.destination, months, fetchImpl, sources)
+    if (pulled.source) {
+      await hold({ source: pulled.source.key, label: pulled.source.label, levels: pulled.levels, notes: pulled.notes })
+      return { ok: true, count: pulled.levels.length }
+    }
+    const notes = [...pulled.notes]
+    const giveUp = async (line?: string): Promise<ReadOutcome> => {
+      await this.stashCrowdPull(null)
+      return { ok: false, notes: line ? [...notes, line] : notes }
+    }
+    if (!options.fallbackToReader) return giveUp()
+    if (!readerEnabled(options.env)) return giveUp('Add a reader key in the environment to read pages the app cannot.')
+    const first = sources[0]
+    if (!first) return giveUp()
+    const levels: ParsedCrowdLevel[] = []
+    let model = ''
+    for (const month of months) {
+      const result = await read({ source: { url: first.url(input.destination, month) }, shape: 'crowd_calendar', instruction: `Only days in ${month} matter.` }, options)
+      if (!result.ok) return giveUp(result.reason)
+      model = result.model
+      const got = (result.value as CrowdCalendarRead).levels.filter((l) => l.date.startsWith(`${month}-`))
+      if (got.length === 0) return giveUp(`The reader found no crowd levels for ${month} on ${first.label}.`)
+      levels.push(...got)
+    }
+    await hold({ source: readerSourceName(model), label: first.label, levels, notes: [...notes, `The reader read ${levels.length} park-days from ${first.label}.`] })
+    return { ok: true, count: levels.length }
+  }
+
   /** "Use these": the held pull becomes crowd levels, and the hold is cleared. */
   async keepCrowdPull(): Promise<number> {
     const pull = await this.pendingCrowdPull()
@@ -4057,14 +4104,15 @@ export class Engine {
     return this.getSetting<string>('park_wait_group', DEFAULT_QUEUE_TIMES_GROUP)
   }
 
+  /** The crowd outlook's address, or '' when none is set: there is no default (see park-fetch.ts). */
   async outlookUrl(): Promise<string> {
-    return this.getSetting<string>('ropedrop_outlook_url', DEFAULT_ROPEDROP_OUTLOOK_URL)
+    return this.getSetting<string>('ropedrop_outlook_url', '')
   }
 
   /**
    * Where the park data comes from, as the household may set it: the crowd
    * outlook's address and the names the wait feed files the four parks under.
-   * An empty address puts the default back; an empty name puts that park's
+   * An empty address turns the outlook off; an empty name puts that park's
    * default back. Only https addresses are kept, so a typo cannot send the
    * nightly job somewhere plain.
    */
@@ -4079,7 +4127,7 @@ export class Engine {
       }
       if (parsed.protocol !== 'https:') throw new TripPlanError('The crowd outlook address must start with https://.')
     }
-    await this.putSetting('ropedrop_outlook_url', url === '' ? DEFAULT_ROPEDROP_OUTLOOK_URL : url)
+    await this.putSetting('ropedrop_outlook_url', url)
 
     const names: WaitParkNames = {}
     for (const [park, name] of Object.entries(input.waitParkNames)) {
@@ -4087,8 +4135,8 @@ export class Engine {
       if (tidy !== '') names[park as TripPark] = tidy
     }
     await this.putSetting('park_wait_names', names)
-    // The park ids the wait feed was matched under belong to the old names.
-    await this.putSetting('park_wait_ids', null)
+    // The park ids the wait feed was matched under belong to the old names. Cleared as false: a setting's value is never null.
+    await this.putSetting('park_wait_ids', false)
   }
 
   /** The park ids the hours feed knows the four parks by, found once and kept (park_hours_ids). */
@@ -4220,9 +4268,10 @@ export class Engine {
       }
     }
 
-    if (parts.includes('outlook')) {
+    const outlookUrl = parts.includes('outlook') ? await this.outlookUrl() : ''
+    if (outlookUrl !== '') {
       try {
-        const got = await fetchRopeDropOutlook(await this.outlookUrl(), fetchImpl)
+        const got = await fetchRopeDropOutlook(outlookUrl, fetchImpl)
         if (got.reason) note(`Crowd outlook: ${got.reason}`)
         else done.outlook += await this.recordCrowdLevels(got.rows, { destination, source: OUTLOOK_SOURCE, fetchedOn: today })
       } catch (error) {

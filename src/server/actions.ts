@@ -17,8 +17,10 @@ import {
   type ThemePark,
   type TimelineStart,
   type TimelineStartChoice,
+  type TripDestination,
   type TripPark,
 } from '@/domain'
+import type { Engine } from '@/server/engine'
 
 export interface FormState {
   problems: { path: string; message: string }[]
@@ -1422,7 +1424,7 @@ export async function typeCrowdLevelAction(formData: FormData): Promise<void> {
  */
 export async function checkCrowdsAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const { pullCrowdCalendar, tripFetchEnabled } = await import('@/server/trip-fetch')
+  const { tripFetchEnabled } = await import('@/server/trip-fetch')
   const { monthsOf } = await import('@/domain')
   const tripId = String(formData.get('trip_id'))
   if (!tripFetchEnabled()) {
@@ -1430,36 +1432,38 @@ export async function checkCrowdsAction(formData: FormData): Promise<void> {
   }
   const trip = (await engine.listTrips()).find((t) => t.id === tripId)
   if (!trip) backToTrip(tripId, 'No such trip.')
-  const months = monthsOf(trip)
-  const pulled = await pullCrowdCalendar(trip.destination, months)
-  if (!pulled.source) {
-    await engine.stashCrowdPull(null)
-    backToTrip(tripId, `No crowd calendar could be read. ${pulled.notes.join(' ')} Type how busy each day is instead.`)
-  }
-  await engine.stashCrowdPull({
-    source: pulled.source.key,
-    label: pulled.source.label,
-    destination: trip.destination,
-    months,
-    levels: pulled.levels,
-    fetchedOn: engine.today(),
-    notes: pulled.notes,
-  })
+  const outcome = await checkCrowdsParsersFirst(engine, { destination: trip.destination, months: monthsOf(trip) })
+  if (!outcome.ok) backToTrip(tripId, `No crowd calendar could be read. ${outcome.notes.join(' ')} Type how busy each day is instead.`)
   backToTrip(tripId, null, 'crowds=1')
 }
 
+/** The crowd calendars by their parsers, and the reader only once they gave nothing (D27). */
+async function checkCrowdsParsersFirst(engine: Engine, input: { destination: TripDestination; months: string[] }) {
+  const first = await engine.checkCrowds(input, { fallbackToReader: false })
+  if (first.ok) return first
+  return engine.checkCrowds(input, { fallbackToReader: true })
+}
+
+/** A crowd pull is kept or put aside from a trip, or from the calendar on /trips when no trip is named. */
 export async function keepCrowdPullAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const tripId = String(formData.get('trip_id'))
+  const tripId = String(formData.get('trip_id') ?? '')
   const done = await tripRefusalOf(() => engine.keepCrowdPull())
+  if (!tripId) backToTrips(done.message, monthQuery(formData), '#calendar')
   backToTrip(tripId, done.message)
 }
 
 export async function discardCrowdPullAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const tripId = String(formData.get('trip_id'))
+  const tripId = String(formData.get('trip_id') ?? '')
   await engine.stashCrowdPull(null)
+  if (!tripId) backToTrips(null, monthQuery(formData), '#calendar')
   backToTrip(tripId, null)
+}
+
+function monthQuery(formData: FormData): string {
+  const month = String(formData.get('month') ?? '')
+  return /^\d{4}-\d{2}$/.test(month) ? `month=${month}` : 'saved=1'
 }
 
 function reservationFields(formData: FormData) {
@@ -1720,6 +1724,8 @@ export async function checkDvcListingsAction(formData: FormData): Promise<void> 
 export async function refreshParkDataAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const { parkDataFetchEnabled } = await import('@/server/park-fetch')
+  const { tripFetchEnabled } = await import('@/server/trip-fetch')
+  const { shiftMonth } = await import('@/domain')
   const tripId = String(formData.get('trip_id') ?? '')
   const month = String(formData.get('month') ?? '')
   const back = (message: string | null, query: string) => (tripId ? backToTrip(tripId, message, query) : backToTrips(message, query, '#calendar'))
@@ -1729,9 +1735,21 @@ export async function refreshParkDataAction(formData: FormData): Promise<void> {
   const done = await engine.refreshParkData()
   const w = done.weatherByHorizon
   const typical = done.typicalKept ? 'typical days kept from this month' : `${w.normal} typical days`
-  const stored = `Stored ${w.forecast} forecast days, ${w.subseasonal} seasonal-outlook days and ${typical}; ${done.hours} park-days of hours; ${done.outlook} park-days of crowd outlook.`
-  if (done.weather + done.hours + done.outlook === 0) back(`Nothing could be fetched. ${done.notes.join(' ')}`, query.toString())
-  query.set('refreshed', done.notes.length > 0 ? `${stored} ${done.notes.join(' ')}` : stored)
+  const outlook = (await engine.outlookUrl()) === '' ? '' : `; ${done.outlook} park-days of crowd outlook`
+  const stored = `Stored ${w.forecast} forecast days, ${w.subseasonal} seasonal-outlook days and ${typical}; ${done.hours} park-days of hours${outlook}.`
+  // How busy (D42): the crowd calendars for the month shown and the next, held for a person to keep.
+  const notes = [...done.notes]
+  let crowdsHeld = false
+  if (tripFetchEnabled()) {
+    const shown = /^\d{4}-\d{2}$/.test(month) ? month : engine.today().slice(0, 7)
+    const crowds = await checkCrowdsParsersFirst(engine, { destination: 'wdw', months: [shown, shiftMonth(shown, 1)] })
+    if (crowds.ok) {
+      crowdsHeld = true
+      notes.push(`How busy: ${crowds.count} park-days read, waiting for you to keep them.`)
+    } else notes.push(`How busy: no crowd calendar could be read. ${crowds.notes.join(' ')}`)
+  } else notes.push('How busy: looking things up is switched off on this machine (TRIP_FETCH=off).')
+  if (done.weather + done.hours + done.outlook === 0 && !crowdsHeld) back(`Nothing could be fetched. ${notes.join(' ')}`, query.toString())
+  query.set('refreshed', notes.length > 0 ? `${stored} ${notes.join(' ')}` : stored)
   back(null, query.toString())
 }
 

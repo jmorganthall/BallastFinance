@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { DvcListingsShape, READER_INSTRUCTIONS, readerJsonSchema, SchoolCalendarShape, validateReaderReply } from '../reader-shapes'
+import { CrowdCalendarShape, DvcListingsShape, READER_INSTRUCTIONS, readerJsonSchema, SchoolCalendarShape, validateReaderReply } from '../reader-shapes'
 
 describe('reader shapes', () => {
   it('accepts a school calendar and refuses a bad date, a missing field, or an extra one', () => {
@@ -24,6 +24,17 @@ describe('reader shapes', () => {
     expect(DvcListingsShape.safeParse({ listings: [{ ...good.listings[0], nights: 2.5 }] }).success).toBe(false)
     expect(DvcListingsShape.safeParse({ listings: [{ ...good.listings[0], priceCents: -1 }] }).success).toBe(false)
     expect(DvcListingsShape.safeParse({ listings: [{ ...good.listings[0], points: null, priceCents: null }] }).success).toBe(true)
+  })
+
+  it('accepts a crowd calendar of the four theme parks, 1 to 10, and refuses anything else', () => {
+    const good = { levels: [{ date: '2026-12-14', park: 'epcot', level: 3 }] }
+    expect(validateReaderReply('crowd_calendar', good)).toEqual({ ok: true, value: good })
+    expect(CrowdCalendarShape.safeParse({ levels: [{ ...good.levels[0], level: 11 }] }).success).toBe(false)
+    expect(CrowdCalendarShape.safeParse({ levels: [{ ...good.levels[0], level: 2.5 }] }).success).toBe(false)
+    expect(CrowdCalendarShape.safeParse({ levels: [{ ...good.levels[0], park: 'water_park' }] }).success).toBe(false)
+    expect(CrowdCalendarShape.safeParse({ levels: [{ ...good.levels[0], date: '2026-12-32' }] }).success).toBe(false)
+    const schema = readerJsonSchema('crowd_calendar') as { required: string[]; additionalProperties: boolean }
+    expect(schema).toMatchObject({ required: ['levels'], additionalProperties: false })
   })
 
   it('emits a strict JSON schema: every property required, no extras', () => {
