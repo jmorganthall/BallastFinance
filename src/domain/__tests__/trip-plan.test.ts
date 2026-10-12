@@ -29,7 +29,6 @@ import {
   parseCrowdPage,
   parseNominatim,
   parseThrillDataCrowd,
-  parseUndercoverTouristCrowd,
   pickLevel,
   reservationCostCents,
   reservationMoney,
@@ -47,7 +46,9 @@ import {
   type TripDay,
   type TripReservation,
   type TripTask,
+  monthPageName,
 } from '../trip-plan'
+import { busynessStep } from '../park-data'
 import { DEFAULT_REFERENCE_PRICES, defaultLines, variantPrice, type Trip, type TripLine, type TripVariant, type VariantChoices } from '../trip'
 
 const TODAY = '2026-09-25'
@@ -450,7 +451,39 @@ describe('reading a crowd calendar', () => {
   const singleParkTable = `<table><tr><th>Day</th><th>Crowd level</th></tr><tr><td>2027-06-12</td><td>7</td></tr><tr><td>2027-06-13</td><td>8</td></tr></table>`
   const dataAttributes = `<div class="month"><div class="day" data-date="2027-06-12" data-park="Magic Kingdom" data-level="7"><span>12</span></div><div class="day" data-date="2027-06-12" data-park="mk" data-level="9"></div><div class="day" data-date="12" data-park="Epcot" data-crowd="40%"></div><div class="day" data-date="2027-06-12" data-park="Typhoon Lagoon" data-index="3"></div><div class="day" data-date="2027-06-12" data-level="6"></div></div>`
 
-  it('Thrill Data: JSON in a script tag, the park named by the parent key, only the month asked for', () => {
+  // Thrill Data's calendar as the live page drew it on 2026-10-12: the cells are copied from the page, the frame around them trimmed.
+  const thrillDataPage = `<html><head><title>Walt Disney World Crowd Calendar 2027 — Best Days to Visit | Thrill Data</title></head><body>
+<div class="cal-month"><div class="cal-mhead"><span class="cal-mname">January</span><span class="cal-mavg">43 min</span></div><div class="cal-grid">
+<span class="cal-dow">S</span><span class="cal-cell empty"></span><span class="cal-cell empty"></span>
+<span class="cal-cell l5" title="Jan 01 — 40 min average wait · New Year&#x27;s Day"><span class="cal-hol"></span>1</span>
+<span class="cal-cell l5" title="Jan 02 — 53 min average wait">2</span>
+<span class="cal-cell l1" title="Jan 13 — 21 min average wait">13</span>
+</div></div>
+<div class="cal-month"><div class="cal-mhead"><span class="cal-mname">October</span></div><div class="cal-grid">
+<span class="cal-cell l3 today" title="Oct 12 — 34 min average wait · Tuesday of Columbus Day Week">12</span>
+<span class="cal-cell l2" title="Oct 31 — 30 min average wait">31</span>
+</div></div></body></html>`
+
+  it('Thrill Data: a cell per day, its level l1–l5 as 1, 3, 5, 7, 9 for the whole resort, only the month asked for', () => {
+    expect(parseThrillDataCrowd(thrillDataPage, '2027-01')).toEqual({
+      levels: [
+        { date: '2027-01-01', park: 'other', level: 9 },
+        { date: '2027-01-02', park: 'other', level: 9 },
+        { date: '2027-01-13', park: 'other', level: 1 },
+      ],
+      reason: null,
+    })
+    // "today" beside the level is still the level; the year is the month's.
+    expect(parseThrillDataCrowd(thrillDataPage, '2027-10').levels).toEqual([
+      { date: '2027-10-12', park: 'other', level: 5 },
+      { date: '2027-10-31', park: 'other', level: 3 },
+    ])
+    expect(parseThrillDataCrowd(thrillDataPage, '2027-06')).toEqual({ levels: [], reason: 'The calendar had days, but none for 2027-06.' })
+    // Each of the site's five steps is its own step on the busyness colours.
+    expect([1, 3, 5, 7, 9].map(busynessStep)).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('Thrill Data: a page with no calendar cells falls back to the general reader of crowd pages', () => {
     const got = parseThrillDataCrowd(thrillDataJson, '2027-06')
     expect(got.reason).toBeNull()
     expect(got.levels).toEqual([
@@ -481,8 +514,8 @@ describe('reading a crowd calendar', () => {
     ])
   })
 
-  it('Undercover Tourist: a table with a park per column; a dash is not a level', () => {
-    const got = parseUndercoverTouristCrowd(table, '2027-06')
+  it('a table with a park per column; a dash is not a level', () => {
+    const got = parseCrowdPage(table, '2027-06')
     expect(got.reason).toBeNull()
     expect(got.levels).toEqual([
       { date: '2027-06-12', park: 'magic_kingdom', level: 7 },
@@ -520,7 +553,7 @@ describe('reading a crowd calendar', () => {
     }
     expect(parseCrowdPage('<html>x</html>', '2027-06').reason).toBe('Nothing on the page read as a crowd calendar.')
     expect(parseCrowdPage(thrillDataJson, '2028-01').reason).toContain('none for 2028-01')
-    expect(parseUndercoverTouristCrowd(`<script>[{"date":"2027-06-12","crowd_level":0},{"date":"2027-06-12","crowd_level":500}]</script>`, '2027-06').levels).toEqual([])
+    expect(parseCrowdPage(`<script>[{"date":"2027-06-12","crowd_level":0},{"date":"2027-06-12","crowd_level":500}]</script>`, '2027-06').levels).toEqual([])
   })
 
   it('the pieces: dates as pages write them, levels as pages write them, park names', () => {
@@ -546,10 +579,11 @@ describe('reading a crowd calendar', () => {
   })
 
   it('the sources, in order, each with its own page', () => {
-    expect(CROWD_SOURCES.map((s) => s.key)).toEqual(['thrill_data', 'undercover_tourist'])
-    expect(CROWD_SOURCES[0]!.url('wdw', '2027-06')).toBe('https://www.thrill-data.com/trip-planning/crowd-calendar/resort/wdw?month=2027-06&destination=wdw')
-    expect(CROWD_SOURCES[1]!.url('wdw', '2027-06')).toBe('https://www.undercovertourist.com/orlando/crowd-calendar/june-2027/')
-    expect(CROWD_SOURCES[1]!.url('wdw', '2026-10')).toBe('https://www.undercovertourist.com/orlando/crowd-calendar/october-2026/')
+    expect(CROWD_SOURCES.map((s) => s.key)).toEqual(['thrill_data'])
+    // One page a year: every month of a year reads the same page.
+    expect(CROWD_SOURCES[0]!.url('wdw', '2027-06')).toBe('https://www.thrill-data.com/trip-planning/crowd-calendar/resort/wdw/2027')
+    expect(CROWD_SOURCES[0]!.url('wdw', '2026-10')).toBe('https://www.thrill-data.com/trip-planning/crowd-calendar/resort/wdw/2026')
+    expect(monthPageName('2026-10')).toBe('october-2026')
     expect(monthsOf(trip)).toEqual(['2027-06'])
     expect(monthsOf({ startDate: '2027-11-28', endDate: '2028-01-02' })).toEqual(['2027-11', '2027-12', '2028-01'])
   })

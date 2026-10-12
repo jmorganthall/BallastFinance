@@ -236,9 +236,11 @@ principles, and they are non-negotiable.
   cached), stores the address as typed with the point and the resolved name,
   and a failed lookup keeps the address with no point, so the drive waits.
   `HomeLocation.latitude/longitude` are therefore nullable; use
-  `homeIsLocated()` before measuring a drive. The two crowd sites and
-  Nominatim are unreachable from the build sandbox: every parser is tested on
-  hand-written fixtures, never a live page.
+  `homeIsLocated()` before measuring a drive. The crowd site and
+  Nominatim are unreachable from the build sandbox: the parsers are tested on
+  fixtures, Thrill Data's copied from the live page the household's server
+  fetched. Undercover Tourist answers an honest User-Agent with 403 and is no
+  longer tried.
 - **The When section proposes dates** (PRD §16, D25–D26, rev 38). Every
   window of the trip's length across a horizon (`trip_horizon_months`, 12)
   plus every long weekend a federal holiday or a day off school makes, each
@@ -284,8 +286,10 @@ principles, and they are non-negotiable.
   per-day mean wait is summed in SQL because a row per ride per five
   minutes is too big to read; its shape matches the domain's
   `summariseWaits`, and the ranking stays in the domain. "Refresh park data"
-  also checks the crowd calendars (Thrill Data, then Undercover Tourist, and
-  the reader only after both gave nothing) for the month shown and the next,
+  also checks the crowd calendar (Thrill Data's year page,
+  `/resort/wdw/<year>`, one `cal-cell lN` per day for the whole resort, read
+  as park `other` at level 2N − 1; the reader only after it gave nothing)
+  for the month shown and the next,
   through `Engine.checkCrowds`, and holds what came back on `/trips` for a
   person to keep (D42); it is the same hold "Check how busy" uses on a trip. Jobs
   (`PARK_WEATHER_CRON`, `PARK_HOURS_CRON`, `WAIT_POLL_CRON`, all off with
@@ -374,7 +378,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 710 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 711 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

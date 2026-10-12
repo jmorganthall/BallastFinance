@@ -557,7 +557,7 @@ export default async function TripsPage({
       <Card>
         <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
           Weather comes from Open-Meteo and park hours from ThemeParks.wiki; neither needs setting. How busy comes from
-          the crowd calendars (Thrill Data, then Undercover Tourist), checked by &ldquo;Refresh park data&rdquo; and
+          Thrill Data&rsquo;s crowd calendar, checked by &ldquo;Refresh park data&rdquo; and
           shown to you before it is kept. A crowd outlook is read only from an address you give below: there is no
           usual one, because none could be confirmed to work. Live waits come from Queue-Times, which files each park
           under the name shown. Change a name only if &ldquo;Refresh park data&rdquo; says a park was not found.

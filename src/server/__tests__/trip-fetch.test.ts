@@ -13,7 +13,7 @@ import {
   resetGeocoder,
   userAgent,
 } from '../trip-fetch'
-import { CROWD_SOURCES, DVC_LISTING_SOURCES } from '@/domain'
+import { CROWD_SOURCES, DVC_LISTING_SOURCES, parseCrowdPage, type CrowdSource } from '@/domain'
 
 describe('the school calendar feed and the DVC listing pulls', () => {
   it('reads an iCal feed into days off and throws on an error status', async () => {
@@ -151,7 +151,8 @@ describe('finding home on the map', () => {
 
 describe('checking how busy', () => {
   const thrill = CROWD_SOURCES[0]!
-  const undercover = CROWD_SOURCES[1]!
+  // A second source, named by month, to show the order and the fall-through; the live chain has only Thrill Data.
+  const second: CrowdSource = { key: 'undercover_tourist', label: 'Second', url: (_d, month) => `https://second.test/${month}/`, parse: parseCrowdPage }
   const page = (month: string) =>
     `<script>window.__CROWD__ = {"parks":{"magic_kingdom":[{"date":"${month}-12","crowd_level":7}],"epcot":[{"date":"${month}-12","crowd_level":4}]}}</script>`
 
@@ -174,27 +175,23 @@ describe('checking how busy', () => {
   it('tries the sources in order: the first that reads every month wins, and each failure is a line for the screen', async () => {
     const fake = (async (url: string) => {
       if (url.startsWith('https://www.thrill-data.com')) return new Response('<html>Access denied</html>', { status: 403 })
-      // Undercover Tourist's pages are named by month: .../june-2027/
-      return new Response(page(url.includes('june-2027') ? '2027-06' : '2027-07'))
+      return new Response(page(url.includes('2027-06') ? '2027-06' : '2027-07'))
     }) as unknown as typeof fetch
-    const got = await pullCrowdCalendar('wdw', ['2027-06', '2027-07'], fake)
+    const got = await pullCrowdCalendar('wdw', ['2027-06', '2027-07'], fake, [thrill, second])
     expect(got.source?.key).toBe('undercover_tourist')
     expect(got.levels).toHaveLength(4)
-    expect(got.notes).toEqual(['Thrill Data: Thrill Data answered 403', 'Undercover Tourist: 4 park-days read.'])
+    expect(got.notes).toEqual(['Thrill Data: Thrill Data answered 403', 'Second: 4 park-days read.'])
   })
 
   it('every source unreadable is no source, with every reason, never a throw', async () => {
     const got = await pullCrowdCalendar('wdw', ['2027-06'], respond('<html>captive portal</html>'))
     expect(got.source).toBeNull()
     expect(got.levels).toEqual([])
-    expect(got.notes).toEqual([
-      'Thrill Data: Nothing on the page read as a crowd calendar.',
-      'Undercover Tourist: Nothing on the page read as a crowd calendar.',
-    ])
+    expect(got.notes).toEqual(['Thrill Data: Nothing on the page read as a crowd calendar.'])
     // A source that reads one month but not the next does not half-win.
     const partial = (async (url: string) => new Response(url.includes('2027-06') ? page('2027-06') : 'nope')) as unknown as typeof fetch
-    const half = await pullCrowdCalendar('wdw', ['2027-06', '2027-07'], partial, [undercover])
+    const half = await pullCrowdCalendar('wdw', ['2027-06', '2027-07'], partial, [second])
     expect(half.source).toBeNull()
-    expect(half.notes[0]).toContain('Undercover Tourist: Nothing on the page')
+    expect(half.notes[0]).toContain('Second: Nothing on the page')
   })
 })

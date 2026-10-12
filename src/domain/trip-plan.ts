@@ -939,10 +939,16 @@ export function parseCrowdPage(text: string, month: string | null): ParsedCrowd 
   return { levels, reason: null }
 }
 
+/**
+ * Thrill Data's Walt Disney World calendar: one page a year, January to
+ * December, at /resort/wdw/<year>. Seen live on 2026-10-12 (the household's
+ * server; the sandbox cannot reach it). The address first shipped,
+ * ?month=..., was a guess the site ignores.
+ */
 export const THRILL_DATA_URL = 'https://www.thrill-data.com/trip-planning/crowd-calendar/resort/wdw'
-export const UNDERCOVER_TOURIST_URL = 'https://www.undercovertourist.com/orlando/crowd-calendar/'
 
 const MONTH_PAGE_NAMES = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'] as const
+const MONTH_ABBREVIATIONS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
 
 /** "2026-10" → "october-2026", the way a month is named in a crowd-calendar page address. */
 export function monthPageName(month: string): string {
@@ -952,30 +958,52 @@ export function monthPageName(month: string): string {
   return `${name}-${month.slice(0, 4)}`
 }
 
-/** Thrill Data's public WDW calendar: the resort page carries every park's levels as data. */
+/**
+ * Thrill Data's calendar, as the live page draws it: one cell per day,
+ *
+ *   <span class="cal-cell l3" title="Oct 12 — 34 min average wait · ...">
+ *
+ * The class carries the site's level, l1 (quiet) to l5 (packed); the title
+ * carries the day. The figure is the whole resort, so it is park "other",
+ * which the calendar and the week score read; a single park's day plan does
+ * not borrow it. A level becomes 2N − 1 on the 1–10 scale (1, 3, 5, 7, 9),
+ * so each of the site's five steps lands on its own step of the green-to-red
+ * scale (busynessStep, two levels a step). The year is the page's: the
+ * month asked for names it. A page that does not draw cells falls back to
+ * the general reader of crowd pages.
+ */
 export function parseThrillDataCrowd(text: string, month: string): ParsedCrowd {
+  if (typeof text !== 'string' || !text.trim()) return { levels: [], reason: 'The page was empty.' }
+  const abbreviation = MONTH_ABBREVIATIONS[Number(month.slice(5, 7)) - 1]
+  const levels: ParsedCrowdLevel[] = []
+  let cells = 0
+  for (const tag of text.match(/<span\b[^>]*\bclass="cal-cell\b[^"]*"[^>]*>/g) ?? []) {
+    const step = /\bclass="cal-cell\b[^"]*\bl([1-5])\b/.exec(tag)
+    const title = /\btitle="([A-Z][a-z]{2})\s+(\d{1,2})\b/.exec(tag)
+    if (!step || !title) continue
+    cells += 1
+    if (title[1] !== abbreviation) continue
+    const date = dateFromText(`${month}-${title[2]!.padStart(2, '0')}`, null)
+    if (!date || levels.some((l) => l.date === date)) continue
+    levels.push({ date, park: 'other', level: 2 * Number(step[1]) - 1 })
+  }
+  if (levels.length > 0) return { levels, reason: null }
+  if (cells > 0) return { levels, reason: `The calendar had days, but none for ${month}.` }
   return parseCrowdPage(text, month)
 }
 
-/** Undercover Tourist's Orlando calendar: one level per park per day, as a table or data attributes. */
-export function parseUndercoverTouristCrowd(text: string, month: string): ParsedCrowd {
-  return parseCrowdPage(text, month)
-}
-
-/** The sources in the order tried (D23). TouringPlans is subscriber-only and not fetched. */
+/**
+ * The sources in the order tried (D23). TouringPlans is subscriber-only and
+ * not fetched. Undercover Tourist was the second until it answered the
+ * household's server with a 403 on 2026-10-12: it refuses a request that
+ * says who it is, and Ballast does not pretend to be a browser (§10).
+ */
 export const CROWD_SOURCES: readonly CrowdSource[] = [
   {
     key: 'thrill_data',
     label: 'Thrill Data',
-    url: (destination, month) => `${THRILL_DATA_URL}?month=${month}&destination=${destination}`,
+    url: (_destination, month) => `${THRILL_DATA_URL}/${month.slice(0, 4)}`,
     parse: parseThrillDataCrowd,
-  },
-  {
-    key: 'undercover_tourist',
-    label: 'Undercover Tourist',
-    // One page per month, named the way the site names it: /orlando/crowd-calendar/october-2026/
-    url: (_destination, month) => `${UNDERCOVER_TOURIST_URL}${monthPageName(month)}/`,
-    parse: parseUndercoverTouristCrowd,
   },
 ]
 
