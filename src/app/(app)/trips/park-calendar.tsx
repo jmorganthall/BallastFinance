@@ -70,6 +70,8 @@ export function ParkCalendar({
 }) {
   const cell = selected ? calendar.weeks.flat().find((c) => c?.date === selected) ?? null : null
   const hoursOn = (date: string) => calendar.hours.filter((h) => h.date === date)
+  // Nothing for this month is not the same as never fetched: park hours are published about a month ahead.
+  const age = (fetchedOn: string | null) => (fetchedOn ? dataAge(fetchedOn, today) : 'none yet for this month')
   return (
     <div>
       <div className="mb-2 flex items-center justify-between gap-2">
@@ -111,8 +113,7 @@ export function ParkCalendar({
         is one you cannot go. Tap a day for where each figure came from.
       </p>
       <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-        Weather {dataAge(calendar.freshness.weather, today)} · park hours {dataAge(calendar.freshness.hours, today)} · how busy{' '}
-        {dataAge(calendar.freshness.busyness, today)}.
+        Weather {age(calendar.freshness.weather)} · park hours {age(calendar.freshness.hours)} · how busy {age(calendar.freshness.busyness)}.
       </p>
       <div className="mt-2">{refresh}</div>
 

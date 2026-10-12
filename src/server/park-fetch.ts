@@ -56,8 +56,13 @@ export const OPEN_METEO_SEASONAL_URL = 'https://seasonal-api.open-meteo.com/v1/s
 export const OPEN_METEO_ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive'
 export const THEMEPARKS_API_URL = 'https://api.themeparks.wiki/v1'
 export const QUEUE_TIMES_PARKS_URL = 'https://queue-times.com/parks.json'
-/** RopeDrop Planner documents a developer feed at /developers; this is the best reading of it, and a setting lays over it. */
-export const DEFAULT_ROPEDROP_OUTLOOK_URL = 'https://ropedropplanner.com/api/crowd-calendar/walt-disney-world.json'
+/**
+ * There is no default crowd-outlook address. The one first shipped was a
+ * guess at RopeDrop Planner's developer feed that was never seen live, and
+ * the household's server got a 404 from it; its developer page documents
+ * wait-time and strategy endpoints, and no crowd calendar could be
+ * confirmed. The outlook runs only when a person sets an address that works.
+ */
 
 export const FORECAST_DAYS = 16
 export const ARCHIVE_YEARS = 10

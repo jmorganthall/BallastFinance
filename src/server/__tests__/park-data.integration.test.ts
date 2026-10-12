@@ -13,7 +13,8 @@ import { and, eq, gte, lte, or } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
 import { Engine, EngineError } from '@/server/engine'
-import { summariseWaits, type ThemePark, type WaitObservation } from '@/domain'
+import type { readStructured } from '@/server/reader'
+import { summariseWaits, type CrowdSource, type ThemePark, type WaitObservation } from '@/domain'
 
 const url = process.env.DATABASE_URL
 const describeDb = url ? describe : describe.skip
@@ -121,6 +122,11 @@ describeDb('park data', () => {
       return new Response('not found', { status: 404 })
     }) as unknown as typeof fetch
 
+    // There is no usual outlook address: with none set, the outlook is never asked.
+    await engine.refreshParkData({ fetchImpl: fake, parts: ['outlook'] })
+    expect(asked).toEqual([])
+    await engine.setParkDataSources({ outlookUrl: 'https://ropedropplanner.com/api/crowd-calendar/walt-disney-world.json', waitParkNames: {} })
+
     const done = await engine.refreshParkData({ fetchImpl: fake })
     expect(done.weather).toBeGreaterThan(4) // 2 forecast + 2 subseasonal + the typical rows laid over 18 months
     expect(done.hours).toBe(1)
@@ -140,6 +146,63 @@ describeDb('park data', () => {
     asked.length = 0
     await engine.refreshParkData({ fetchImpl: fake, parts: ['outlook'] })
     expect(asked).toEqual(['https://ropedropplanner.com/api/crowd-calendar/walt-disney-world.json'])
+  })
+
+  it('how busy from the crowd calendars: the first source that reads every month is held, the reader only with the fallback, nothing kept until a person says so', async () => {
+    const source = (key: CrowdSource['key'], label: string, levels: number | null): CrowdSource => ({
+      key,
+      label,
+      url: (_destination, month) => `https://${key}.test/${month}`,
+      parse: (_text, month) =>
+        levels === null ? { levels: [], reason: 'Nothing on the page read as a crowd calendar.' } : { levels: [{ date: `${month}-14`, park: 'epcot', level: levels }], reason: null },
+    })
+    const fake = (async () => new Response('<html></html>')) as unknown as typeof fetch
+    const months = ['2026-10', '2026-11']
+
+    // The first source reads nothing; the second reads both months and is held, not kept.
+    const held = await engine.checkCrowds({ destination: 'wdw', months }, { fallbackToReader: false, fetchImpl: fake, sources: [source('thrill_data', 'Thrill Data', null), source('undercover_tourist', 'Undercover Tourist', 3)] })
+    expect(held).toEqual({ ok: true, count: 2 })
+    expect(await engine.pendingCrowdPull()).toMatchObject({ source: 'undercover_tourist', label: 'Undercover Tourist', months, notes: ['Thrill Data: Nothing on the page read as a crowd calendar.', 'Undercover Tourist: 2 park-days read.'] })
+    expect(await engine.crowdLevels('wdw', '2026-10-14', '2026-10-14')).toEqual([])
+    expect(await engine.keepCrowdPull()).toBe(2)
+    expect((await engine.crowdLevels('wdw', '2026-10-14', '2026-10-14')).map((l) => `${l.park} ${l.level} ${l.source}`)).toEqual(['epcot 3 undercover_tourist'])
+
+    // Neither reads: without the fallback the reader is not asked, and nothing is held.
+    const nothing = [source('thrill_data', 'Thrill Data', null), source('undercover_tourist', 'Undercover Tourist', null)]
+    let readerCalls = 0
+    const asked: string[] = []
+    const read = (async (request: { source: { url: string }; shape: string }) => {
+      readerCalls += 1
+      asked.push(`${request.shape} ${request.source.url}`)
+      const month = request.source.url.slice(-7)
+      return {
+        ok: true as const,
+        value: { levels: [{ date: `${month}-20`, park: 'magic_kingdom', level: 7 }, { date: '2027-03-01', park: 'epcot', level: 2 }] },
+        model: 'test/model',
+        sourceUrl: request.source.url,
+        chars: 1,
+      }
+    }) as unknown as typeof readStructured
+    const readerEnv = { READER_API_KEY: 'k', READER_MODEL: 'test/model' }
+    expect(await engine.checkCrowds({ destination: 'wdw', months }, { fallbackToReader: false, fetchImpl: fake, sources: nothing, read, env: readerEnv })).toEqual({
+      ok: false,
+      notes: ['Thrill Data: Nothing on the page read as a crowd calendar.', 'Undercover Tourist: Nothing on the page read as a crowd calendar.'],
+    })
+    expect(await engine.pendingCrowdPull()).toBeNull()
+    expect(await engine.checkCrowds({ destination: 'wdw', months }, { fallbackToReader: true, fetchImpl: fake, sources: nothing, read, env: {} })).toMatchObject({
+      ok: false,
+      notes: expect.arrayContaining(['Add a reader key in the environment to read pages the app cannot.']),
+    })
+    expect(readerCalls).toBe(0)
+
+    // With the fallback and a key: one read a month of the first source's page, only that month's days kept, stored as read:<model>.
+    expect(await engine.checkCrowds({ destination: 'wdw', months }, { fallbackToReader: true, fetchImpl: fake, sources: nothing, read, env: readerEnv })).toEqual({ ok: true, count: 2 })
+    expect(asked).toEqual(['crowd_calendar https://thrill_data.test/2026-10', 'crowd_calendar https://thrill_data.test/2026-11'])
+    const pending = (await engine.pendingCrowdPull())!
+    expect(pending).toMatchObject({ source: 'read:test/model', label: 'Thrill Data' })
+    expect(pending.levels.map((l) => l.date)).toEqual(['2026-10-20', '2026-11-20'])
+    await engine.stashCrowdPull(null)
+    await db.delete(schema.crowdLevels).where(eq(schema.crowdLevels.source, 'undercover_tourist'))
   })
 
   it('a poll of the live waits finds the parks by the names set and says which the feed did not list', async () => {

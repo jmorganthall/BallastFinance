@@ -10,7 +10,9 @@ import { Card, Empty, humanDate, PageHeader, Pill } from '@/components/ui'
 import {
   addSchoolDayOffAction,
   createTripAction,
+  discardCrowdPullAction,
   discardSchoolCalendarAction,
+  keepCrowdPullAction,
   refreshParkDataAction,
   keepSchoolCalendarAction,
   readSchoolCalendarSourceAction,
@@ -26,9 +28,11 @@ import {
 import { readerEnabled } from '@/server/reader'
 import {
   addDays,
+  crowdPullSummary,
   dollarsForInput,
   headCount,
   homeIsLocated,
+  PARK_LABELS,
   percentForInput,
   referenceFreshness,
   shortDate,
@@ -79,7 +83,7 @@ export default async function TripsPage({
 }) {
   const { error, saved, month: monthParam, day: dayParam, refreshed, start: startParam, end: endParam } = await searchParams
   const { engine } = await requireEngine()
-  const [trips, prices, home, blackouts, packTemplate, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames] =
+  const [trips, prices, home, blackouts, packTemplate, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames, pendingCrowds] =
     await Promise.all([
       engine.listTrips(),
       engine.referencePrices(),
@@ -94,6 +98,7 @@ export default async function TripsPage({
       engine.weekWeights(),
       engine.outlookUrl(),
       engine.waitParkNames(),
+      engine.pendingCrowdPull(),
     ])
   const readerOn = readerEnabled()
   const open = trips.filter((t) => !t.retiredAt)
@@ -157,6 +162,39 @@ export default async function TripsPage({
       </h2>
       <Card>
         {refreshed ? <p className="mb-3 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
+        {pendingCrowds ? (
+          <div className="mb-3 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
+            <p className="font-semibold">How busy, as {pendingCrowds.label} sees it</p>
+            <p className="mt-1">
+              {pendingCrowds.levels.length} park-days read for {pendingCrowds.months.join(', ')}, fetched {humanDate(pendingCrowds.fetchedOn)}. Keep them? A level
+              you typed yourself is always shown over these.
+            </p>
+            <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
+              {crowdPullSummary(pendingCrowds.levels).map((s) => (
+                <li key={s.park}>
+                  {PARK_LABELS[s.park]}: {s.days} days, {shortDate(s.from)} to {shortDate(s.to)}, how busy {s.lowest} to {s.highest}
+                </li>
+              ))}
+              {pendingCrowds.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              <form action={keepCrowdPullAction} className="flex-1">
+                <input type="hidden" name="month" value={month} />
+                <button type="submit" className={primaryButton}>
+                  Keep these
+                </button>
+              </form>
+              <form action={discardCrowdPullAction} className="flex-1">
+                <input type="hidden" name="month" value={month} />
+                <button type="submit" className={secondaryButton}>
+                  Not now
+                </button>
+              </form>
+            </div>
+          </div>
+        ) : null}
         <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
           How hot, how busy, how late the parks stay open, when school is out and which days are federal holidays. Tap a
           day to start a trip there.
@@ -518,10 +556,11 @@ export default async function TripsPage({
       </h2>
       <Card>
         <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
-          Weather comes from Open-Meteo and park hours from ThemeParks.wiki; neither needs setting. The crowd outlook
-          is read from the address below (leave it blank for the usual one), and live waits from Queue-Times, which
-          files each park under the name shown. Change a name only if &ldquo;Refresh park data&rdquo; says a park was
-          not found.
+          Weather comes from Open-Meteo and park hours from ThemeParks.wiki; neither needs setting. How busy comes from
+          the crowd calendars (Thrill Data, then Undercover Tourist), checked by &ldquo;Refresh park data&rdquo; and
+          shown to you before it is kept. A crowd outlook is read only from an address you give below: there is no
+          usual one, because none could be confirmed to work. Live waits come from Queue-Times, which files each park
+          under the name shown. Change a name only if &ldquo;Refresh park data&rdquo; says a park was not found.
         </p>
         <form action={saveParkDataSourcesAction} className="space-y-2">
           <label className="block text-xs text-[var(--color-ink-soft)]">

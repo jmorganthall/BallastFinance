@@ -56,11 +56,29 @@ export const DvcListingsShape = z.strictObject({
 
 export type DvcListingsRead = z.infer<typeof DvcListingsShape>
 
-export type ReaderShapeKey = 'school_calendar' | 'dvc_listings'
+/** How busy each theme park is said to be on each day, as read from a crowd calendar page the parsers could not (D23). */
+export const CrowdCalendarShape = z.strictObject({
+  levels: z
+    .array(
+      z.strictObject({
+        date: civilDate,
+        park: z.enum(['magic_kingdom', 'epcot', 'hollywood_studios', 'animal_kingdom']),
+        level: z.number().int().min(1).max(10),
+      }),
+    )
+    .max(400),
+})
+
+export type CrowdCalendarRead = z.infer<typeof CrowdCalendarShape>
+
+export type ReaderShapeKey = 'school_calendar' | 'dvc_listings' | 'crowd_calendar'
+
+export type ReaderRead = SchoolCalendarRead | DvcListingsRead | CrowdCalendarRead
 
 export const READER_SHAPES = {
   school_calendar: SchoolCalendarShape,
   dvc_listings: DvcListingsShape,
+  crowd_calendar: CrowdCalendarShape,
 } as const
 
 /** The instruction sent with each shape, in plain words the model follows. */
@@ -69,6 +87,8 @@ export const READER_INSTRUCTIONS: Record<ReaderShapeKey, string> = {
     'This is a school district calendar. List every day students do not attend school (holidays, breaks, teacher work days, early-release days are NOT days off). Give each day as a separate entry with its date as YYYY-MM-DD and a short label. Expand a multi-day break into one entry per weekday. Give the school year as the calendar names it, like "2026-27". If no days off can be found, return an empty list.',
   dvc_listings:
     'This is a page of Disney Vacation Club rooms a broker has available or confirmed. List each room: resort name, room type, check-in date as YYYY-MM-DD, number of nights, points if shown (else null), and the total price in whole US cents if shown (else null). If no rooms can be found, return an empty list.',
+  crowd_calendar:
+    'This is a Walt Disney World crowd calendar. For each day it shows, give how busy each of the four theme parks is predicted to be (magic_kingdom, epcot, hollywood_studios, animal_kingdom) on a scale of 1 (quiet) to 10 (packed), with the date as YYYY-MM-DD. If the page uses another scale, convert it to 1-10 proportionally (a 1-5 scale: multiply by 2). If the page gives one level for the whole resort, give that level for each of the four parks. Leave out any day or park the page does not rate. If no levels can be found, return an empty list.',
 }
 
 /**
@@ -81,7 +101,7 @@ export function readerJsonSchema(key: ReaderShapeKey): Record<string, unknown> {
 }
 
 /** A reply against its shape: the parsed value, or the problems in words. */
-export function validateReaderReply(key: ReaderShapeKey, reply: unknown): { ok: true; value: SchoolCalendarRead | DvcListingsRead } | { ok: false; problems: string[] } {
+export function validateReaderReply(key: ReaderShapeKey, reply: unknown): { ok: true; value: ReaderRead } | { ok: false; problems: string[] } {
   const result = READER_SHAPES[key].safeParse(reply)
   if (result.success) return { ok: true, value: result.data }
   return { ok: false, problems: result.error.issues.map((i) => `${i.path.join('.') || 'reply'}: ${i.message}`) }

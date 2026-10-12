@@ -27,7 +27,7 @@
  * use a fake fetch.
  */
 
-import { READER_INSTRUCTIONS, readerJsonSchema, validateReaderReply, type DvcListingsRead, type ReaderShapeKey, type SchoolCalendarRead } from '@/domain'
+import { READER_INSTRUCTIONS, readerJsonSchema, validateReaderReply, type ReaderRead, type ReaderShapeKey } from '@/domain'
 import { userAgent } from '@/server/trip-fetch'
 
 export const DEFAULT_READER_BASE_URL = 'https://openrouter.ai/api/v1'
@@ -176,7 +176,7 @@ export function replyContent(body: unknown): unknown {
  * Read a source into a shape. Disabled, unreachable, unreadable, or a reply
  * that does not fit: a refusal with a reason. Never throws past here.
  */
-export async function readStructured(request: ReadRequest, deps: ReaderDeps = {}): Promise<ReadResult<SchoolCalendarRead | DvcListingsRead>> {
+export async function readStructured(request: ReadRequest, deps: ReaderDeps = {}): Promise<ReadResult<ReaderRead>> {
   const config = readerConfig(deps.env ?? process.env)
   const sourceUrl = 'url' in request.source ? request.source.url : null
   if (!config) return { ok: false, reason: 'The reader is off: add a reader key in the environment to read PDFs and pages.', sourceUrl }
