@@ -219,6 +219,12 @@ export interface PartPosition {
    */
   tickCents: Cents
   status: PartStatus
+  /**
+   * What it is missing today (D41): its tick less what is counted toward it,
+   * while it is Short; 0 otherwise, so it is above zero exactly when Short.
+   * What "+ $Y to make up" says.
+   */
+  shortByCents: Cents
 }
 
 export interface AccountMoneyToday {
@@ -336,6 +342,8 @@ export interface PlanPosition {
   savingSince: CivilDate | null
   /** Its worst part's status; on track with no live part. */
   status: PartStatus
+  /** Its Short parts' shortfalls added up (D41): what "+ $Y to make up" says on its card. */
+  shortByCents: Cents
 }
 
 /** A to-do the position derives, never issued ahead of time. */
@@ -1151,11 +1159,13 @@ function accountPosition(args: {
           : compareDates(f.lineItem.dueDate, today) <= 0 && countedCents >= f.totalCents
             ? 'ready_to_spend'
             : 'on_track'
+      const tickCents = Math.min(tickOf.get(f.lineItem.id) ?? 0, f.totalCents)
       return {
         ...f,
         countedCents,
-        tickCents: Math.min(tickOf.get(f.lineItem.id) ?? 0, f.totalCents),
+        tickCents,
         status: partStatus,
+        shortByCents: partStatus === 'short' ? Math.max(0, tickCents - countedCents) : 0,
       }
     })
 
@@ -1254,6 +1264,7 @@ export function position(input: PositionInput): HouseholdPosition {
           null,
         ),
         status: worst(parts.map((p) => p.status)),
+        shortByCents: parts.reduce((s, p) => s + p.shortByCents, 0),
       }
     })
 
@@ -1412,21 +1423,26 @@ function surplusMoves(
 
 /**
  * The progress bar's reading, so a screen draws and works nothing out: how
- * full the bar is (what is counted, as a whole-number share of the total)
- * and where the tick sits (what the account must hold for it today, D40).
- * Both capped at 100.
+ * full the bar is (what is counted, as a share of the total) and where the
+ * tick sits (what the account must hold for it today, D40). Both are drawn
+ * to a fraction of a percent, so a fill a few cents below its tick is not
+ * drawn on top of it (D41 (6)), and capped at 100. `savedPercent` is the
+ * whole-number share the card prints beside "$X of $Y", rounded down so it
+ * reads 100 only when every cent is there (D41 (3)).
  */
 export function barOf(v: { totalCents: Cents; countedCents: Cents; tickCents: Cents }): {
   fillPercent: number
   tickPercent: number
+  savedPercent: number
   fullyFunded: boolean
 } {
   const total = Math.max(0, v.totalCents)
-  const percent = (cents: Cents) =>
-    total === 0 ? 100 : Math.round((Math.max(0, Math.min(cents, total)) / total) * 100)
+  const clamp = (cents: Cents) => Math.max(0, Math.min(cents, total))
+  const percent = (cents: Cents) => (total === 0 ? 100 : (clamp(cents) * 100) / total)
   return {
     fillPercent: percent(v.countedCents),
     tickPercent: percent(v.tickCents),
+    savedPercent: total === 0 ? 100 : Math.floor((clamp(v.countedCents) * 100) / total),
     fullyFunded: v.countedCents >= total,
   }
 }

@@ -275,6 +275,7 @@ export default async function PackageDetailPage({
               countedCents={plan.countedCents}
               tickCents={plan.tickCents}
               status={plan.status}
+              shortByCents={plan.shortByCents}
               today={today}
               shortReasons={[...new Set(plan.parts.map((p) => p.accountId))].flatMap((id) => reasons.get(id) ?? [])}
             />
@@ -369,6 +370,7 @@ export default async function PackageDetailPage({
                     countedCents={part.countedCents}
                     tickCents={part.tickCents}
                     status={part.status}
+                    shortByCents={part.shortByCents}
                     today={today}
                     dueDate={part.lineItem.dueDate}
                     shortReasons={reasons.get(part.accountId) ? [reasons.get(part.accountId)!] : []}

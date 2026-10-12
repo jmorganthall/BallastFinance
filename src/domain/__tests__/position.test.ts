@@ -699,6 +699,15 @@ describe('invariants over randomised households (D35)', () => {
           expect(a.parts.some((x) => x.status === 'short')).toBe(false)
           expect(a.transferChange?.reason === 'keep_up' || a.oneTimeMove !== null).toBe(true)
         }
+        // 7. What a part is missing today (D41) is above zero exactly when it
+        // is Short, and is never more than its tick: "+ $Y to make up" never
+        // shows on a part that is not Short, and never asks for more than
+        // the account must hold for it today.
+        for (const x of a.parts) {
+          expect(x.shortByCents > 0).toBe(x.status === 'short')
+          expect(x.shortByCents).toBe(x.status === 'short' ? x.tickCents - x.countedCents : 0)
+          expect(x.shortByCents).toBeLessThanOrEqual(x.tickCents)
+        }
         for (const x of a.parts) {
           // 3. Counting never invents money and never over-fills a part.
           expect(x.countedCents).toBeGreaterThanOrEqual(0)
@@ -801,6 +810,9 @@ describe('invariants over randomised households (D35)', () => {
             ? 'on_track'
             : (['short', 'on_track', 'ready_to_spend'] as const).find((st) => statuses.includes(st))
         expect(plan.status).toBe(expected)
+        // ... and what it is missing is its Short parts' shortfalls added up (D41).
+        expect(plan.shortByCents).toBe(plan.parts.reduce((t, x) => t + x.shortByCents, 0))
+        expect(plan.shortByCents > 0).toBe(plan.status === 'short')
       }
       if (p.allCaughtUp) {
         for (const a of p.accounts.filter((x) => x.parts.length > 0)) expect(a.status).toBe('on_track')
@@ -810,13 +822,28 @@ describe('invariants over randomised households (D35)', () => {
   })
 })
 
-describe('barOf (D40)', () => {
+describe('barOf (D40, D41)', () => {
   it('puts the tick where the account must hold the money today', () => {
     expect(barOf({ totalCents: 10000, countedCents: 2500, tickCents: 6000 })).toEqual({
       fillPercent: 25,
       tickPercent: 60,
+      savedPercent: 25,
       fullyFunded: false,
     })
     expect(barOf({ totalCents: 10000, countedCents: 10000, tickCents: 10000 }).fullyFunded).toBe(true)
+  })
+
+  it('draws a fill a few cents short of its tick below it, not on it (D41 (6))', () => {
+    // The screenshot: $207.70 of $300 with the tick a few cents higher.
+    const bar = barOf({ totalCents: 30000, countedCents: 20770, tickCents: 20800 })
+    expect(bar.fillPercent).toBeLessThan(bar.tickPercent)
+    expect(bar.fillPercent).toBeCloseTo(69.2333, 3)
+  })
+
+  it('prints a percentage rounded down, 100 only when every cent is there (D41 (3))', () => {
+    expect(barOf({ totalCents: 30000, countedCents: 20770, tickCents: 0 }).savedPercent).toBe(69)
+    expect(barOf({ totalCents: 30000, countedCents: 29999, tickCents: 0 }).savedPercent).toBe(99)
+    expect(barOf({ totalCents: 30000, countedCents: 30000, tickCents: 0 }).savedPercent).toBe(100)
+    expect(barOf({ totalCents: 0, countedCents: 0, tickCents: 0 }).savedPercent).toBe(100)
   })
 })
