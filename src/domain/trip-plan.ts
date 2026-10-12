@@ -435,6 +435,8 @@ export function busynessSources(crowdLevels: readonly CrowdLevel[], given?: Busy
 
 export interface CrowdPullSummary {
   park: TripPark
+  /** The park's name; a level for park "other" is the whole resort (a crowd calendar's own figure), never "somewhere else". */
+  label: string
   days: number
   from: CivilDate
   to: CivilDate
@@ -451,6 +453,7 @@ export function crowdPullSummary(levels: readonly ParsedCrowdLevel[]): CrowdPull
     const dates = mine.map((l) => l.date).sort()
     out.push({
       park,
+      label: park === 'other' ? 'Whole resort' : PARK_LABELS[park],
       days: mine.length,
       from: dates[0]!,
       to: dates[dates.length - 1]!,

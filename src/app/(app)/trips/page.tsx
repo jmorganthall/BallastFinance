@@ -172,7 +172,7 @@ export default async function TripsPage({
             <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
               {crowdPullSummary(pendingCrowds.levels).map((s) => (
                 <li key={s.park}>
-                  {PARK_LABELS[s.park]}: {s.days} days, {shortDate(s.from)} to {shortDate(s.to)}, how busy {s.lowest} to {s.highest}
+                  {s.label}: {s.days} days, {shortDate(s.from)} to {shortDate(s.to)}, how busy {s.lowest} to {s.highest}
                 </li>
               ))}
               {pendingCrowds.notes.map((n) => (

@@ -302,10 +302,13 @@ describe('how busy', () => {
       { date: '2027-06-13', park: 'epcot', level: 4 },
       { date: '2027-06-12', park: 'epcot', level: 7 },
       { date: '2027-06-12', park: 'magic_kingdom', level: 8 },
+      { date: '2027-06-12', park: 'other', level: 5 },
     ])
     expect(summary).toEqual([
-      { park: 'magic_kingdom', days: 1, from: '2027-06-12', to: '2027-06-12', lowest: 8, highest: 8 },
-      { park: 'epcot', days: 2, from: '2027-06-12', to: '2027-06-13', lowest: 4, highest: 7 },
+      { park: 'magic_kingdom', label: 'Magic Kingdom', days: 1, from: '2027-06-12', to: '2027-06-12', lowest: 8, highest: 8 },
+      { park: 'epcot', label: 'EPCOT', days: 2, from: '2027-06-12', to: '2027-06-13', lowest: 4, highest: 7 },
+      // A resort-wide figure (Thrill Data's) is the whole resort, not "somewhere else".
+      { park: 'other', label: 'Whole resort', days: 1, from: '2027-06-12', to: '2027-06-12', lowest: 5, highest: 5 },
     ])
   })
 
