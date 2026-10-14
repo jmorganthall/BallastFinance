@@ -629,6 +629,8 @@ function simulateMonths(args: {
   extraPerMonthCents: Cents
   /** Stop after this many months, still open. Absent: run to payoff or the cap. */
   horizonMonths?: number
+  /** Told each month as it is worked out, for the debt's own page (D49 (11)). */
+  onMonth?: (month: PayoffMonth) => void
 }): {
   paidOffAfterMonths: number | null
   interestCents: Cents
@@ -726,6 +728,13 @@ function simulateMonths(args: {
       left -= take
     }
     standard -= Math.min(standard, left)
+    args.onMonth?.({
+      on: paymentOn,
+      interestCents: charged,
+      chargedBackCents: backCharged,
+      paidCents: payment,
+      balanceAfterCents: standard + tranches.reduce((sum, t) => sum + t.balance, 0),
+    })
 
     if (standard + tranches.reduce((sum, t) => sum + t.balance, 0) <= 0) {
       return { paidOffAfterMonths: month, interestCents: interest, chargedBack }
@@ -767,4 +776,127 @@ export function interestOverNextYearCents(debt: Debt, today: CivilDate, _leadWee
 export function shareOfLargest(values: readonly (Cents | null)[]): (number | null)[] {
   const largest = Math.max(0, ...values.filter((v): v is Cents => v !== null))
   return values.map((v) => (v === null ? null : largest === 0 ? 0 : v / largest))
+}
+
+/** One month of a debt's payoff, as `projectPayoff` works it out. */
+export interface PayoffMonth {
+  /** The day this month's payment lands. */
+  on: CivilDate
+  /** Interest charged this month, any charged back included. */
+  interestCents: Cents
+  /** Interest a deal that ended unpaid charged back this month (D49 (9)). */
+  chargedBackCents: Cents
+  paidCents: Cents
+  balanceAfterCents: Cents
+}
+
+/**
+ * The payoff month by month, on the payment set up now plus any extra: the
+ * very months `projectPayoff` counts (D49 (11)), for the balance line and
+ * the interest-against-paydown bars on a debt's page. Stops at payoff; a
+ * debt its payment never pays off has no months, and its page says so.
+ */
+export function payoffSchedule(args: {
+  debt: Debt
+  today: CivilDate
+  extraPerMonthCents?: Cents
+}): PayoffMonth[] {
+  const months: PayoffMonth[] = []
+  if (args.debt.balanceCents <= 0) return months
+  simulateMonths({
+    debt: args.debt,
+    today: args.today,
+    extraPerMonthCents: args.extraPerMonthCents ?? 0,
+    onMonth: (month) => months.push(month),
+  })
+  return months
+}
+
+/**
+ * What paying more would do (D49 (11)): `extraPerMonthCents` on top of the
+ * payment every month, or `onceCents` off the balance today. Each against
+ * the payoff on the payment set up now.
+ */
+export function debtWhatIf(args: {
+  debt: Debt
+  today: CivilDate
+  extraPerMonthCents?: Cents
+  onceCents?: Cents
+}): {
+  now: Projection
+  then: Projection
+  /** The months after paying more, for the what-if line. */
+  thenMonths: PayoffMonth[]
+  monthsSooner: number | null
+  interestSavedCents: Cents | null
+} {
+  const now = projectPayoff({ debt: args.debt, today: args.today })
+  const once = Math.min(args.onceCents ?? 0, args.debt.balanceCents)
+  const after = { ...args.debt, balanceCents: args.debt.balanceCents - once }
+  const extra = args.extraPerMonthCents ?? 0
+  const then = projectPayoff({ debt: after, today: args.today, extraPerMonthCents: extra })
+  const bothPaid = now.months !== null && then.months !== null
+  return {
+    now,
+    then,
+    thenMonths: payoffSchedule({ debt: after, today: args.today, extraPerMonthCents: extra }),
+    monthsSooner: bothPaid ? now.months! - then.months! : null,
+    interestSavedCents: bothPaid ? now.totalInterestCents - then.totalInterestCents : null,
+  }
+}
+
+/** One thing that happened to a debt, for its page's history (D49 (11)). */
+export type DebtHistoryEntry =
+  | { on: CivilDate; kind: 'stated'; amountCents: Cents }
+  | { on: CivilDate; kind: 'paid' | 'paid_todo'; amountCents: Cents }
+  | { on: CivilDate; kind: 'terms'; changed: string[] }
+
+const TERM_WORDS: Record<string, string> = {
+  name: 'name',
+  category: 'kind',
+  apr_basis_points: 'interest rate',
+  min_payment_rule: 'minimum payment',
+  promo_rules: 'deal',
+  credit_limit_cents: 'credit limit',
+  payment_day: 'payment day',
+  planned_payment_cents: 'monthly payment',
+  asset_id: 'home or vehicle it is secured on',
+}
+
+/** Which terms a `debt_updated` event changed, in plain words. */
+export function debtTermsChanged(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
+  return Object.keys(TERM_WORDS).filter(
+    (key) => key in after && JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null),
+  ).map((key) => TERM_WORDS[key]!)
+}
+
+/** A bar on a debt's page: one month's payment, or one year's, split in two (D49 (11)). */
+export interface PaymentSplit {
+  /** "2027-03" for a month, "2031" for a year. */
+  period: string
+  paidCents: Cents
+  /** What came off the balance: the payment less its interest, never below zero. */
+  paydownCents: Cents
+  interestCents: Cents
+  chargedBackCents: Cents
+}
+
+/**
+ * Each payment split into what paid the balance down and what was interest.
+ * Months up to three years of them; past that, years, so a mortgage's bars
+ * stay readable.
+ */
+export function paymentSplits(months: readonly PayoffMonth[]): PaymentSplit[] {
+  const byYear = months.length > 36
+  const groups = new Map<string, PaymentSplit>()
+  for (const m of months) {
+    const period = byYear ? m.on.slice(0, 4) : m.on.slice(0, 7)
+    const g = groups.get(period) ?? { period, paidCents: 0, paydownCents: 0, interestCents: 0, chargedBackCents: 0 }
+    g.paidCents += m.paidCents
+    g.interestCents += m.interestCents
+    g.chargedBackCents += m.chargedBackCents
+    g.paydownCents = Math.max(0, g.paidCents - g.interestCents)
+    groups.set(period, g)
+  }
+  return [...groups.values()]
 }

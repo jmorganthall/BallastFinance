@@ -11,6 +11,7 @@
  * rather than the table scrolling sideways, so the row stays tappable.
  */
 
+import Link from 'next/link'
 import { useState, type ReactNode } from 'react'
 import type { DebtFormValues } from '@/domain/debt-form'
 import type { DebtStatus } from '@/domain/debt-status'
@@ -172,7 +173,9 @@ function Row({
       >
         <td className={`${td} text-[var(--color-ink-soft)]`}>{row.rank}</td>
         <td className={`${td} break-words`}>
-          <span className="font-medium">{row.name}</span>
+          <Link href={`/debts/${row.id}`} className="font-medium underline-offset-4 hover:underline">
+            {row.name}
+          </Link>
           <span className={`block text-xs ${row.stale ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-soft)]'}`}>
             {row.kind}
             {' · '}

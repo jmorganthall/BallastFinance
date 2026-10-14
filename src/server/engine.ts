@@ -38,6 +38,8 @@ import { randomUUID } from 'node:crypto'
 import {
   apportion,
   debtStatuses,
+  debtTermsChanged,
+  type DebtHistoryEntry,
   type DebtStatuses,
   likelyDebtBalance,
   type DebtPaymentMade,
@@ -2562,6 +2564,7 @@ export class Engine {
             promo_rules: before.promoRules,
             credit_limit_cents: before.creditLimitCents ?? null,
             payment_day: before.paymentDay ?? null,
+            planned_payment_cents: before.plannedPaymentCents ?? null,
           },
           after: {
             name: after.name,
@@ -2571,6 +2574,7 @@ export class Engine {
             promo_rules: after.promoRules,
             credit_limit_cents: after.creditLimitCents ?? null,
             payment_day: after.paymentDay ?? null,
+            planned_payment_cents: after.plannedPaymentCents ?? null,
           },
         },
       })
@@ -2683,6 +2687,70 @@ export class Engine {
 
   async promoLeadWeeks(): Promise<number> {
     return this.getSetting<number>('promo_lead_weeks', DEFAULT_PROMO_LEAD_WEEKS)
+  }
+
+  /**
+   * What has happened to one debt, oldest first (D49 (11)): each balance a
+   * person stated, each payment marked done (on the form or a to-do), each
+   * change to its terms. Read from the event log; nothing is stored for it.
+   */
+  async debtHistory(debtId: Id): Promise<DebtHistoryEntry[]> {
+    const issued = alias(events, 'issued')
+    const [own, todoPayments] = await Promise.all([
+      this.db
+        .select({ kind: events.kind, on: events.occurredAt, payload: events.payload })
+        .from(events)
+        .where(
+          and(
+            eq(events.householdId, this.householdId),
+            inArray(events.kind, ['debt_balance_updated', 'payment_confirmed', 'debt_updated']),
+            sql`${events.payload}->>'debt_id' = ${debtId}`,
+          ),
+        )
+        .orderBy(events.recordedAt, events.id),
+      this.db
+        .select({ on: events.occurredAt, recordedAt: events.recordedAt, confirmed: events.payload, issued: issued.payload })
+        .from(events)
+        .innerJoin(
+          issued,
+          and(
+            eq(issued.householdId, events.householdId),
+            eq(issued.kind, 'instruction_issued'),
+            sql`${issued.payload}->>'instruction_id' = ${events.payload}->>'instruction_id'`,
+            sql`${issued.payload}->>'type' = 'debt_payment'`,
+            sql`${issued.payload}->>'target_id' = ${debtId}`,
+          ),
+        )
+        .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_confirmed')))
+        .orderBy(events.recordedAt, events.id),
+    ])
+
+    const entries: DebtHistoryEntry[] = []
+    for (const row of own) {
+      const on = row.on as CivilDate
+      if (row.kind === 'debt_balance_updated') {
+        entries.push({ on, kind: 'stated', amountCents: (row.payload as { balance_cents: Cents }).balance_cents })
+      } else if (row.kind === 'payment_confirmed') {
+        entries.push({ on, kind: 'paid', amountCents: (row.payload as { amount_cents: Cents }).amount_cents })
+      } else {
+        const p = row.payload as { before: Record<string, unknown>; after: Record<string, unknown> }
+        const changed = debtTermsChanged(p.before, p.after)
+        if (changed.length > 0) entries.push({ on, kind: 'terms', changed })
+      }
+    }
+    const counted = new Set<string>()
+    for (const row of todoPayments) {
+      const confirmed = row.confirmed as { instruction_id: Id; actual_amount_cents: Cents | null }
+      if (counted.has(confirmed.instruction_id)) continue
+      counted.add(confirmed.instruction_id)
+      entries.push({
+        on: row.on as CivilDate,
+        kind: 'paid_todo',
+        amountCents: confirmed.actual_amount_cents ?? (row.issued as { amount_cents: Cents }).amount_cents,
+      })
+    }
+    // Two lists merged by day; within a day, the order each was recorded.
+    return entries.sort((a, b) => compareDates(a.on, b.on))
   }
 
   /** Each open debt's status, its words' figures and its to-dos (PRD D49 (4)-(6)). */
