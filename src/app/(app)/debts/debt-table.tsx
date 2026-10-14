@@ -13,8 +13,11 @@
 
 import { useState, type ReactNode } from 'react'
 import type { DebtFormValues } from '@/domain/debt-form'
+import type { DebtStatus } from '@/domain/debt-status'
+import type { CivilDate } from '@/domain/dates'
+import type { SentencePart } from '@/domain/instructions'
 import { formatCents } from '@/domain/money'
-import { Hint, humanDate } from '@/components/ui'
+import { Hint, humanDate, Pill, When } from '@/components/ui'
 import {
   confirmDebtPaymentAction,
   createDebtAction,
@@ -37,6 +40,10 @@ export interface DebtRow {
   asOf: string
   ageDays: number
   stale: boolean
+  /** The debt's status and its words (D49 (5)), from the one place they are worked out. */
+  status: DebtStatus
+  statusLabel: string
+  statusLine: SentencePart[]
   /** It has a payment day, so payments are assumed between statements. */
   hasPaymentDay: boolean
   /** "20.49%", already formatted: what it really costs right now. */
@@ -63,7 +70,7 @@ const th = 'px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide te
 const td = 'px-2 py-3 align-top'
 const COLUMNS = 6
 
-export function DebtTable({ rows }: { rows: DebtRow[] }) {
+export function DebtTable({ rows, today }: { rows: DebtRow[]; today: CivilDate }) {
   const [open, setOpen] = useState<Open>(null)
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT)
   const isOpen = (id: string) => open !== null && open.kind !== 'add' && open.id === id
@@ -104,7 +111,7 @@ export function DebtTable({ rows }: { rows: DebtRow[] }) {
             </tr>
           ) : null}
           {sorted.map((row) => (
-            <Row key={row.id} row={row} open={isOpen(row.id) ? (open as { kind: 'edit' | 'remove' }).kind : null} setOpen={setOpen} />
+            <Row key={row.id} row={row} today={today} open={isOpen(row.id) ? (open as { kind: 'edit' | 'remove' }).kind : null} setOpen={setOpen} />
           ))}
         </tbody>
         <tfoot>
@@ -133,10 +140,12 @@ export function DebtTable({ rows }: { rows: DebtRow[] }) {
 
 function Row({
   row,
+  today,
   open,
   setOpen,
 }: {
   row: DebtRow
+  today: CivilDate
   open: 'edit' | 'remove' | null
   setOpen: (open: Open) => void
 }) {
@@ -153,7 +162,9 @@ function Row({
 
   return (
     <>
-      <tr className={`border-t border-[var(--color-line)] ${open ? 'bg-[var(--color-surface)]' : ''}`}>
+      <tr
+        className={`border-t border-[var(--color-line)] ${open ? 'bg-[var(--color-surface)]' : row.stale ? 'bg-[var(--color-accent-soft)]' : ''}`}
+      >
         <td className={`${td} text-[var(--color-ink-soft)]`}>{row.rank}</td>
         <td className={`${td} break-words`}>
           <span className="font-medium">{row.name}</span>
@@ -163,6 +174,20 @@ function Row({
             {row.ageDays === 0 ? 'checked today' : `as of ${humanDate(row.asOf)}`}
             {row.stale ? ` (${row.ageDays} days ago)` : ''}
           </span>
+          {row.status !== 'on_track' ? (
+            <span className="mt-2 block text-xs">
+              <Pill tone={row.status === 'short' ? 'behind' : 'caution'}>{row.statusLabel}</Pill>
+              <span className="mt-1 block text-[var(--color-ink-soft)]">
+                {row.statusLine.map((part, i) =>
+                  part.date ? (
+                    <When key={i} date={part.date.on} today={today} />
+                  ) : (
+                    <span key={i}>{part.text}</span>
+                  ),
+                )}
+              </span>
+            </span>
+          ) : null}
           <span className="-ml-2 mt-1 block sm:hidden">{editButton}</span>
         </td>
         <td className={`${td} whitespace-nowrap text-right font-medium tabular`}>

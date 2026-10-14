@@ -44,11 +44,12 @@ describe('how fresh a balance is', () => {
   })
 
   it('turns stale the day after the statement-cycle allowance, not before', () => {
-    expect(BALANCE_STALE_AFTER_DAYS).toBe(31)
-    const onTheLine = debt({ id: 'a', name: 'x', balanceAsOf: '2026-08-19' }) // 31 days
-    const over = debt({ id: 'b', name: 'y', balanceAsOf: '2026-08-18' }) // 32 days
+    // PRD D49 (4): more than 30 days.
+    expect(BALANCE_STALE_AFTER_DAYS).toBe(30)
+    const onTheLine = debt({ id: 'a', name: 'x', balanceAsOf: '2026-08-20' }) // 30 days
+    const over = debt({ id: 'b', name: 'y', balanceAsOf: '2026-08-19' }) // 31 days
     expect(balanceFreshness(onTheLine, TODAY).stale).toBe(false)
-    expect(balanceFreshness(over, TODAY)).toEqual({ ageDays: 32, stale: true })
+    expect(balanceFreshness(over, TODAY)).toEqual({ ageDays: 31, stale: true })
   })
 
   it('never nags about a paid-off debt', () => {

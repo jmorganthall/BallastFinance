@@ -393,9 +393,40 @@ export async function confirmBalancesAction(formData: FormData): Promise<void> {
 
 export async function confirmInstructionAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  await engine.confirmInstruction({ instructionId: String(formData.get('instruction_id')) })
+  const { parseAmountOrNull } = await import('@/domain')
+  // A pay-a-debt to-do carries a box for what was actually paid (D49 (1));
+  // blank or absent means the amount asked.
+  const raw = formData.get('amount')
+  const actual = typeof raw === 'string' && raw.trim() !== '' ? parseAmountOrNull(raw) : null
+  if (actual !== null && actual < 0) {
+    redirect(`/?error=${encodeURIComponent('Enter the amount you paid, like 150.')}`)
+  }
+  await engine.confirmInstruction({
+    instructionId: String(formData.get('instruction_id')),
+    actualAmountCents: actual ?? undefined,
+  })
   revalidatePath('/')
+  revalidatePath('/debts')
   revalidatePath('/check-in')
+}
+
+/**
+ * "Done" on "Raise the monthly payment on <debt>" (D49 (6)): what is paid
+ * each month now, recorded as the debt's planned payment, the way a transfer
+ * change is recorded for an account.
+ */
+export async function raiseDebtPaymentAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountOrNull } = await import('@/domain')
+  const debtId = String(formData.get('debt_id'))
+  const amountCents = parseAmountOrNull(formData.get('amount') as string)
+  if (amountCents === null || amountCents <= 0) {
+    redirect(`/?error=${encodeURIComponent('Enter what you pay each month now, like 478.75.')}`)
+  }
+  await engine.updateDebt(debtId, { plannedPaymentCents: amountCents })
+  revalidatePath('/')
+  revalidatePath('/debts')
+  revalidatePath('/allocate')
 }
 
 /**
@@ -641,7 +672,12 @@ export async function updateDebtBalanceAction(formData: FormData): Promise<void>
 
   await engine.updateDebtBalance({ debtId, balanceCents: balanceCents! })
   revalidatePath('/debts')
+  revalidatePath('/allocate')
   revalidatePath('/')
+  // From This week's "Check the balance" to-do, or the share-out's warning.
+  const back = formData.get('back')
+  if (back === 'home') redirect('/')
+  if (back === 'allocate') redirect('/allocate')
 }
 
 export async function setPriorityWeightAction(formData: FormData): Promise<void> {

@@ -481,9 +481,10 @@ export interface SentencePart {
    * Set on the piece that is a date (D38). `text` keeps the date itself, for
    * the digest and anything that joins the words; a screen says it as a
    * distance from today ("In 5 days", "due tomorrow") with the date on
-   * hover. `lead` opens the sentence; `due` follows "once,".
+   * hover. `lead` opens the sentence; `due` follows "once,"; `plain` is
+   * the bare distance ("in 14 months").
    */
-  date?: { on: CivilDate; as: 'lead' | 'due' }
+  date?: { on: CivilDate; as: 'lead' | 'due' | 'plain' }
 }
 
 export function instructionSentenceParts(

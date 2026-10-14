@@ -99,7 +99,7 @@ describe('what is short', () => {
     expect(short).toEqual([
       expect.objectContaining({ kind: 'debt', targetId: 'promo', shortCents: 440000 }),
     ])
-    expect(short[0]!.reason).toContain('0% deal ends')
+    expect(short[0]!.reason).toContain('The 0% ends')
     expect(short[0]!.reason).toContain('$4,400.00')
   })
 

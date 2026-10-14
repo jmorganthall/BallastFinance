@@ -83,9 +83,10 @@ export class DebtDataError extends Error {}
 /**
  * How long a balance may go unchecked before the screen says so. Every score
  * and projection here is only as good as the balance it starts from, and a
- * statement cycle is a month, so a balance older than one is a guess.
+ * statement cycle is a month, so a balance older than one is a guess. PRD
+ * D49 (4): more than 30 days asks, on This week, to be checked.
  */
-export const BALANCE_STALE_AFTER_DAYS = 31
+export const BALANCE_STALE_AFTER_DAYS = 30
 
 /** Days since the balance was last confirmed or read off a statement. */
 export function balanceAgeDays(debt: Pick<Debt, 'balanceAsOf'>, today: CivilDate): number {

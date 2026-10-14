@@ -29,8 +29,7 @@ import { formatCents, type Cents } from './money'
 import type { Id } from './types'
 import type { AccountPosition } from './position'
 import { promoCliff, type Debt } from './debt'
-
-const percent = (basisPoints: number) => (basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
+import { debtStatusLine, debtStatuses } from './debt-status'
 
 export interface Shortfall {
   kind: 'plan' | 'debt'
@@ -59,12 +58,18 @@ export function findShortfalls(args: {
   for (const debt of args.debts) {
     const cliff = promoCliff(debt, args.today)
     if (!cliff || cliff.shortCents <= 0) continue
+    // The debt's own status line (D49 (5)): the same words as Debts and This week.
+    const view = debtStatuses({ debts: [debt], today: args.today }).debts[0]
     debts.push({
       kind: 'debt',
       targetId: debt.id,
       label: debt.name,
       shortCents: cliff.shortCents,
-      reason: `Its ${percent(cliff.promoRateBasisPoints)}% deal ends ${cliff.untilDate}, and the monthly payments leave ${formatCents(cliff.shortCents)} of the ${formatCents(cliff.amountCents)} still there at the full rate.`,
+      reason: view
+        ? debtStatusLine(view)
+            .map((part) => part.text)
+            .join('')
+        : `Its deal leaves ${formatCents(cliff.shortCents)} at the full rate.`,
     })
   }
   debts.sort((a, b) => b.shortCents - a.shortCents)

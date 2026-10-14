@@ -13,7 +13,7 @@ import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import { setPriorityWeightAction } from '@/server/actions'
-import { balanceFreshness, debtFormValuesOf, parseAmountToCents, projectPayoff } from '@/domain'
+import { debtFormValuesOf, debtStatusLabel, debtStatusLine, parseAmountToCents, projectPayoff } from '@/domain'
 import { PayoffImpact } from '@/components/payoff-impact'
 import { DebtTable, type DebtRow } from './debt-table'
 
@@ -37,11 +37,13 @@ export default async function DebtsPage({
   const weight = w !== undefined && Number.isFinite(Number(w)) ? Number(w) : standingWeight
   const isPreview = Math.abs(weight - standingWeight) > 0.001
 
-  const [ladder, warnings, today] = await Promise.all([
+  const [ladder, debtState, today] = await Promise.all([
     engine.debtLadder(weight),
-    engine.promoWarnings(),
+    engine.debtStatuses(),
     Promise.resolve(engine.today()),
   ])
+  // Every debt's status, words and staleness come from the one place (D49 (4)-(5)).
+  const viewOf = new Map(debtState.debts.map((view) => [view.debt.id, view]))
 
   let optimisation = null
   let amountCents: number | null = null
@@ -57,15 +59,13 @@ export default async function DebtsPage({
   // A balance older than a statement cycle is a guess, and every number on this
   // screen is built on it. Said gently: the debt is still here, it just needs
   // a fresh look.
-  const stale = ladder
-    .map((rung) => ({ rung, freshness: balanceFreshness(rung.debt, today) }))
-    .filter((entry) => entry.freshness.stale)
+  const stale = debtState.debts.filter((view) => view.balanceStale)
 
   // Everything the table shows, worked out here: the table only renders.
   const rate = (basisPoints: number) => `${(basisPoints / 100).toFixed(2)}%`
   const rows: DebtRow[] = ladder.map((rung) => {
     const projection = projectPayoff({ debt: rung.debt, today })
-    const freshness = balanceFreshness(rung.debt, today)
+    const view = viewOf.get(rung.debt.id)
     return {
       id: rung.debt.id,
       rank: rung.rank,
@@ -78,8 +78,11 @@ export default async function DebtsPage({
           : null,
       hasPaymentDay: rung.debt.paymentDay != null,
       asOf: rung.debt.balanceAsOf,
-      ageDays: freshness.ageDays,
-      stale: freshness.stale,
+      ageDays: view?.balanceAgeDays ?? 0,
+      stale: view?.balanceStale ?? false,
+      status: view?.status ?? 'on_track',
+      statusLabel: view ? debtStatusLabel(view) : 'On track',
+      statusLine: view ? debtStatusLine(view) : [],
       effectiveRate: rate(rung.effectiveAprBasisPoints),
       effectiveAprBasisPoints: rung.effectiveAprBasisPoints,
       listedRate:
@@ -125,30 +128,16 @@ export default async function DebtsPage({
             date it was last checked.
           </p>
           <ul className="mt-2 space-y-1 text-sm">
-            {stale.map(({ rung, freshness }) => (
-              <li key={rung.debt.id}>
-                <strong>{rung.debt.name}</strong> — last checked {humanDate(rung.debt.balanceAsOf)},{' '}
-                {freshness.ageDays} days ago.
+            {stale.map((view) => (
+              <li key={view.debt.id}>
+                <strong>{view.debt.name}</strong> — last checked {humanDate(view.debt.balanceAsOf)},{' '}
+                {view.balanceAgeDays} days ago.
               </li>
             ))}
           </ul>
         </Card>
       ) : null}
 
-      {warnings.length > 0 ? (
-        <Card className="mb-4 bg-[var(--color-behind-soft)]">
-          <h2 className="font-semibold text-[var(--color-behind)]">A deal is about to end</h2>
-          <ul className="mt-2 space-y-1 text-sm">
-            {warnings.map((warning) => (
-              <li key={warning.debt.id}>
-                <strong>{warning.debt.name}</strong> stops being cheap on {warning.untilDate}. It
-                needs <Money cents={warning.monthlyToClearCents} /> a month from here to clear in
-                time.
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ) : null}
 
       {ladder.length === 0 ? (
         <>
@@ -156,7 +145,7 @@ export default async function DebtsPage({
             <p>Add one below and Ballast will work out the payoff order.</p>
           </Empty>
           <div className="mt-4">
-            <DebtTable rows={rows} />
+            <DebtTable rows={rows} today={today} />
           </div>
         </>
       ) : (
@@ -201,7 +190,7 @@ export default async function DebtsPage({
             ) : null}
           </Card>
 
-          <DebtTable rows={rows} />
+          <DebtTable rows={rows} today={today} />
 
           <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             Where should a lump sum go?

@@ -13,7 +13,7 @@ import { requireEngine } from '@/server/session'
 import { debtTopUps } from '@/server/engine'
 import { Card, Money, PageHeader } from '@/components/ui'
 import { DebtShare } from '@/components/debt-share'
-import { runAllocationAction } from '@/server/actions'
+import { runAllocationAction, updateDebtBalanceAction } from '@/server/actions'
 import { formatCents, parseAmountToCents } from '@/domain'
 
 export const dynamic = 'force-dynamic'
@@ -31,7 +31,10 @@ export default async function AllocatePage({
   // been asked for, everything short is ticked -- covering a hole before
   // sharing out is the sensible default -- and after that the ticks are
   // whatever the person left.
-  const shortfalls = await engine.shortfalls()
+  const [shortfalls, debtState] = await Promise.all([engine.shortfalls(), engine.debtStatuses()])
+  // A share-out splits real money by every debt's balance (D49 (7)): an old
+  // one is said plainly, and going on uses it as it is.
+  const staleDebts = debtState.debts.filter((view) => view.balanceStale)
   const keyOf = (s: { kind: string; targetId: string }) => `${s.kind}:${s.targetId}`
   const ticked = new Set(
     floor === undefined
@@ -84,6 +87,44 @@ export default async function AllocatePage({
             This is the extra sitting in <strong>{source.name}</strong>. Whatever is shared out
             below will also go on your to-do list as a move out of that account.
           </p>
+        </Card>
+      ) : null}
+
+      {staleDebts.length > 0 ? (
+        <Card className="mb-4 bg-[var(--color-caution-soft)]">
+          <p className="text-sm font-medium">
+            {staleDebts.length === 1 ? 'One debt balance has' : `${staleDebts.length} debt balances have`} not
+            been checked for over a month.
+          </p>
+          <p className="mt-1 text-sm">
+            The share-out decides which debts get money from these balances. Update them from a
+            statement if you can; if you go on, Ballast uses them as they are.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {staleDebts.map((view) => (
+              <li key={view.debt.id}>
+                <form action={updateDebtBalanceAction} className="flex items-end gap-2">
+                  <input type="hidden" name="debt_id" value={view.debt.id} />
+                  <input type="hidden" name="back" value="allocate" />
+                  <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+                    {view.debt.name}, last checked {view.balanceAgeDays} days ago
+                    <input
+                      name="balance"
+                      inputMode="decimal"
+                      defaultValue={formatCents(view.debt.balanceCents).replace('$', '').replace(/,/g, '')}
+                      className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
+                    />
+                  </label>
+                  <button
+                    type="submit"
+                    className="min-h-11 rounded-lg border border-[var(--color-line)] bg-[var(--color-card)] px-3 text-sm"
+                  >
+                    Update
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
         </Card>
       ) : null}
 
