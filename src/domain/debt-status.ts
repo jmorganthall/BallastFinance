@@ -20,7 +20,14 @@
  * back "All caught up" (PRD §6).
  */
 
-import { balanceFreshness, DEFAULT_PROMO_LEAD_WEEKS, monthlyPaymentCents, promoCliff, type Debt } from './debt'
+import {
+  balanceFreshness,
+  chargedBackInterestCents,
+  DEFAULT_PROMO_LEAD_WEEKS,
+  monthlyPaymentCents,
+  promoCliff,
+  type Debt,
+} from './debt'
 import type { CivilDate } from './dates'
 import type { SentencePart } from './instructions'
 import { formatCents, type Cents } from './money'
@@ -43,6 +50,11 @@ export interface DebtDealMiss {
   paymentNowCents: Cents
   /** The monthly payment that clears the deal balance in time, rounded up. */
   clearPerMonthCents: Cents
+  /**
+   * The interest the deal charges back to its start when it ends unpaid
+   * (D49 (9)), about; null when its terms charge nothing back.
+   */
+  chargedBackCents: Cents | null
 }
 
 export interface DebtView {
@@ -63,6 +75,18 @@ export type DebtTodo =
       toCents: Cents
       untilDate: CivilDate
       blocking: true
+    }
+  | {
+      /**
+       * A deal entered before Ballast asked whether its interest is charged
+       * back (D49 (9)): taken as yes until a person checks the card's terms.
+       * Asked once; housekeeping.
+       */
+      kind: 'check_deal_terms'
+      debtId: Id
+      debtName: string
+      untilDate: CivilDate
+      blocking: false
     }
   | {
       kind: 'update_debt_balance'
@@ -103,6 +127,7 @@ export function debtStatuses(args: {
           paymentNowCents: monthlyPaymentCents(debt),
           clearPerMonthCents:
             cliff.monthsLeft <= 0 ? cliff.amountCents : Math.ceil(cliff.amountCents / cliff.monthsLeft),
+          chargedBackCents: chargedBackInterestCents(debt, args.today),
         }
       }
       const status: DebtStatus =
@@ -121,6 +146,20 @@ export function debtStatuses(args: {
         toCents: view.miss.clearPerMonthCents,
         untilDate: view.miss.untilDate,
         blocking: true,
+      })
+    }
+  }
+  for (const view of views) {
+    const unasked = view.debt.promoRules.find(
+      (rule) => rule.chargedBack === undefined && rule.untilDate > args.today,
+    )
+    if (unasked) {
+      todos.push({
+        kind: 'check_deal_terms',
+        debtId: view.debt.id,
+        debtName: view.debt.name,
+        untilDate: unasked.untilDate,
+        blocking: false,
       })
     }
   }
@@ -161,7 +200,11 @@ export function debtStatusLine(view: DebtView): SentencePart[] {
   return [
     t(`${deal} ends `),
     { text: miss.untilDate, date: { on: miss.untilDate, as: 'plain' } },
-    t(` with ${formatCents(miss.owedAtEndCents)} still owed, charged ${percent(view.debt.aprBasisPoints)} from then. `),
+    t(
+      miss.chargedBackCents !== null
+        ? ` with ${formatCents(miss.owedAtEndCents)} still owed, which brings back about ${formatCents(miss.chargedBackCents)} of interest. `
+        : ` with ${formatCents(miss.owedAtEndCents)} still owed, charged ${percent(view.debt.aprBasisPoints)} from then. `,
+    ),
     t(`Pay ${formatCents(miss.clearPerMonthCents)} a month to clear it in time.`),
   ]
 }
@@ -178,6 +221,13 @@ export function debtTodoSentenceParts(todo: DebtTodo): SentencePart[] {
       t(', so its deal is cleared before it ends '),
       { text: todo.untilDate, date: { on: todo.untilDate, as: 'plain' } },
       t('.'),
+    ]
+  }
+  if (todo.kind === 'check_deal_terms') {
+    return [
+      t('Check the terms of the deal on '),
+      target,
+      t(': if it is not paid off by the time it ends, is the interest charged back to when it started?'),
     ]
   }
   return [

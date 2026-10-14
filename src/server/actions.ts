@@ -411,6 +411,26 @@ export async function confirmInstructionAction(formData: FormData): Promise<void
 }
 
 /**
+ * The answer to "is the interest charged back?" for a debt's deals (D49
+ * (9)), from This week's one-time to-do: recorded on its deals as a term.
+ */
+export async function setDealChargedBackAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const debtId = String(formData.get('debt_id'))
+  const answer = formData.get('charged_back')
+  if (answer !== 'yes' && answer !== 'no') redirect('/')
+  const debt = (await engine.listDebts()).find((d) => d.id === debtId)
+  if (!debt) redirect('/')
+  await engine.updateDebt(debtId, {
+    promoRules: debt!.promoRules.map((rule) =>
+      rule.chargedBack === undefined ? { ...rule, chargedBack: answer === 'yes' } : rule,
+    ),
+  })
+  revalidatePath('/')
+  revalidatePath('/debts')
+}
+
+/**
  * "Done" on "Raise the monthly payment on <debt>" (D49 (6)): what is paid
  * each month now, recorded as the debt's planned payment, the way a transfer
  * change is recorded for an account.

@@ -94,7 +94,7 @@ describe('the add-a-debt form, parsed', () => {
 
       const result = parseDebtForm(filled({ has_promo: true, promo_rate: '', promo_until: '2027-03-01' }))
       expect(result.ok && result.input.promoRules).toEqual([
-        { rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-03-01' },
+        { rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-03-01', chargedBack: true },
       ])
     })
 
@@ -193,5 +193,30 @@ describe('the payment day (D49 (3))', () => {
       expect(result.ok).toBe(false)
       expect(!result.ok && result.problems.map((p) => p.field)).toEqual(['payment_day'])
     }
+  })
+})
+
+describe('more about the deal (D49 (9))', () => {
+  const base = {
+    ...EMPTY_DEBT_FORM,
+    name: 'Store card',
+    balance: '900',
+    apr: '26.99',
+    min_amount: '25',
+    has_promo: true,
+    promo_rate: '0',
+    promo_until: '2027-06-30',
+  }
+  it('a new deal is taken as charged back unless the person says otherwise', () => {
+    const yes = parseDebtForm(base)
+    expect(yes.ok && yes.input.promoRules[0]).toMatchObject({ chargedBack: true })
+    const no = parseDebtForm({ ...base, promo_charged_back: 'no', promo_started: '2026-06-30' })
+    expect(no.ok && no.input.promoRules[0]).toMatchObject({ chargedBack: false, startDate: '2026-06-30' })
+    const unsure = parseDebtForm({ ...base, promo_charged_back: '' })
+    expect(unsure.ok && 'chargedBack' in unsure.input.promoRules[0]!).toBe(false)
+  })
+  it('a deal must start before it ends', () => {
+    const late = parseDebtForm({ ...base, promo_started: '2027-07-01' })
+    expect(!late.ok && late.problems.map((p) => p.field)).toEqual(['promo_started'])
   })
 })

@@ -325,6 +325,48 @@ export function DebtForm({
             to work out whether you can clear the balance before the deal ends — and to start
             pushing this debt up the list in time if you cannot.
           </p>
+          {/* The fine print of the deal (D49 (9)): asked once, kept out of the way. */}
+          <details
+            className="rounded-lg border border-[var(--color-line)] p-3"
+            open={Boolean(problemFor('promo_started')) || undefined}
+          >
+            <summary className="cursor-pointer text-sm font-medium">More about this deal</summary>
+            <div className="mt-3 space-y-3">
+              <Field
+                label="If it is not paid off by the end, is the interest charged back?"
+                problem={problemFor('promo_charged_back')}
+                hint="Most store cards and some balance transfers charge interest back to the day the deal started."
+              >
+                {(a) => (
+                  <select
+                    {...a}
+                    name="promo_charged_back"
+                    value={values.promo_charged_back}
+                    onChange={(e) => set('promo_charged_back', e.target.value)}
+                  >
+                    <option value="yes">Yes, back to when it started</option>
+                    <option value="no">No, only on what is left</option>
+                    <option value="">Not sure yet (Ballast assumes yes)</option>
+                  </select>
+                )}
+              </Field>
+              <Field
+                label="When the deal started (optional)"
+                problem={problemFor('promo_started')}
+                hint="Leave it blank and Ballast counts from the day you entered this debt."
+              >
+                {(a) => (
+                  <input
+                    {...a}
+                    name="promo_started"
+                    type="date"
+                    value={values.promo_started}
+                    onChange={(e) => set('promo_started', e.target.value)}
+                  />
+                )}
+              </Field>
+            </div>
+          </details>
         </>
       ) : null}
 

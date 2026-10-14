@@ -233,6 +233,17 @@ principles, and they are non-negotiable.
   `BALANCE_STALE_AFTER_DAYS` (30) is an `update_debt_balance` to-do:
   housekeeping, never blocking. "Done" on a pay-a-debt to-do carries a box
   for what was actually paid.
+- **A missed deal can charge its interest back** (PRD D49 (9)-(10)).
+  `PromoRule.chargedBack` (absent: nobody has said, taken as yes, and a
+  one-time `check_deal_terms` to-do asks) and `PromoRule.startDate` (absent:
+  `debts.entered_on`, migration 0020) live in the `promo_rules` JSON. In
+  `simulateMonths` a deal rolls off before the first payment that lands
+  after its end -- the cliff's count of payments, so the projection and
+  `promoCliff` agree -- and, unpaid and charged back, adds the full rate on
+  each month's deal balance since its start (`chargedBackInterestCents`).
+  "Interest left to pay" on Debts is `projectPayoff`'s total, with a bar
+  against the costliest (`shareOfLargest`). The fine print sits in a
+  collapsed "More about this deal" on the debt's form.
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
   picture. An `individual` account can only be renamed, funded, or
@@ -422,7 +433,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 739 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 750 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

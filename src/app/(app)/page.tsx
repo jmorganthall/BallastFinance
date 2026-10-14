@@ -42,6 +42,7 @@ import {
   confirmTransferAction,
   endInstructionAction,
   raiseDebtPaymentAction,
+  setDealChargedBackAction,
   updateDebtBalanceAction,
   toggleTaskAction,
   wakeCloseOutAction,
@@ -142,6 +143,35 @@ function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate 
  * Marking it done records the figure in the box.
  */
 function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
+  if (todo.kind === 'check_deal_terms') {
+    return (
+      <Card className="border-dashed">
+        <Parts parts={debtTodoSentenceParts(todo)} today={today} />
+        <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+          Most store cards and some balance transfers do this. Until you say, Ballast assumes it is.
+        </p>
+        <form action={setDealChargedBackAction} className="mt-3 flex gap-2">
+          <input type="hidden" name="debt_id" value={todo.debtId} />
+          <button
+            type="submit"
+            name="charged_back"
+            value="yes"
+            className="flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+          >
+            Yes, it is charged back
+          </button>
+          <button
+            type="submit"
+            name="charged_back"
+            value="no"
+            className="flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+          >
+            No, only what is left
+          </button>
+        </form>
+      </Card>
+    )
+  }
   const raise = todo.kind === 'raise_debt_payment'
   return (
     <Card className={todo.blocking ? '' : 'border-dashed'}>

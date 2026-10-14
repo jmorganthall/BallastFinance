@@ -30,6 +30,15 @@ export interface PromoRule {
   appliesTo: 'full' | 'amount'
   amountCents?: Cents
   untilDate: CivilDate
+  /**
+   * Interest is charged back to the deal's start if the deal balance is not
+   * paid in full by `untilDate` (PRD D49 (9)). Absent means nobody has said
+   * yet: taken as yes, and the debt asks once to be checked against the
+   * card's terms.
+   */
+  chargedBack?: boolean
+  /** When the deal started, for interest charged back. Absent: the day the debt was entered. */
+  startDate?: CivilDate
 }
 
 export interface Debt {
@@ -56,6 +65,8 @@ export interface Debt {
    * payment is assumed between stated balances.
    */
   paymentDay?: number | null
+  /** The day the debt was entered in Ballast: where interest charged back starts when a deal has no start date. */
+  enteredOn?: CivilDate
   /**
    * The last balance a person stated, as of `balanceAsOf`, when the engine
    * read it. `balanceCents` is the likely balance today worked out from it
@@ -618,7 +629,12 @@ function simulateMonths(args: {
   extraPerMonthCents: Cents
   /** Stop after this many months, still open. Absent: run to payoff or the cap. */
   horizonMonths?: number
-}): { paidOffAfterMonths: number | null; interestCents: Cents } {
+}): {
+  paidOffAfterMonths: number | null
+  interestCents: Cents
+  /** Each deal that ended unpaid and charged its interest back, and how much. */
+  chargedBack: { untilDate: CivilDate; cents: Cents }[]
+} {
   const { debt, extraPerMonthCents: extra } = args
   const limit = args.horizonMonths ?? MAX_MONTHS
 
@@ -628,32 +644,61 @@ function simulateMonths(args: {
     .filter((rule) => compareDates(rule.untilDate, args.today) > 0)
     .sort((a, b) => compareDates(a.untilDate, b.untilDate))
   let standard = debt.balanceCents
-  const tranches: { balance: Cents; rateBasisPoints: number; untilDate: CivilDate }[] = []
+  const tranches: {
+    balance: Cents
+    rateBasisPoints: number
+    untilDate: CivilDate
+    chargedBack: boolean
+    /** Interest at the full rate on the deal balance, month by month since the deal started (D49 (9)). */
+    backInterest: Cents
+  }[] = []
+  const fullMonth = (cents: Cents) => Math.round((cents * debt.aprBasisPoints) / BASIS_POINTS / 12)
   for (const rule of deals) {
     if (standard <= 0) break
     const amount = rule.appliesTo === 'full' ? standard : Math.min(rule.amountCents ?? 0, standard)
     if (amount <= 0) continue
-    tranches.push({ balance: amount, rateBasisPoints: rule.rateBasisPoints, untilDate: rule.untilDate })
+    // The months before today, at the balance known now: Ballast has no
+    // earlier one, so the figure is "about".
+    const started = rule.startDate ?? debt.enteredOn ?? args.today
+    tranches.push({
+      balance: amount,
+      rateBasisPoints: rule.rateBasisPoints,
+      untilDate: rule.untilDate,
+      chargedBack: rule.chargedBack !== false,
+      backInterest: monthsBetween(started, args.today) * fullMonth(amount),
+    })
     standard -= amount
   }
 
   let interest = 0
+  const chargedBack: { untilDate: CivilDate; cents: Cents }[] = []
   for (let month = 1; month <= limit; month += 1) {
-    // The month being charged runs from this date; a deal that has ended by
-    // then has rolled into the full-rate balance.
-    const monthStart = addMonths(args.today, month - 1)
+    // This month's payment lands on this date. A deal that ends before it
+    // has rolled into the full-rate balance -- with the interest charged
+    // back to its start, when it was not paid in full and its terms say so.
+    // The same count of payments as the cliff's (months left x payment,
+    // PRD §6), so the two never disagree about whether a deal is cleared.
+    const paymentOn = addMonths(args.today, month)
+    let backCharged = 0
     for (let i = tranches.length - 1; i >= 0; i -= 1) {
-      if (compareDates(tranches[i]!.untilDate, monthStart) <= 0) {
-        standard += tranches[i]!.balance
+      const t = tranches[i]!
+      if (compareDates(t.untilDate, paymentOn) < 0) {
+        if (t.chargedBack && t.balance > 0) {
+          standard += t.backInterest
+          backCharged += t.backInterest
+          chargedBack.push({ untilDate: t.untilDate, cents: t.backInterest })
+        }
+        standard += t.balance
         tranches.splice(i, 1)
       }
     }
 
-    let charged = 0
+    let charged = backCharged
     for (const t of tranches) {
       const c = Math.round((t.balance * t.rateBasisPoints) / BASIS_POINTS / 12)
       t.balance += c
       charged += c
+      t.backInterest += fullMonth(t.balance)
     }
     const cs = Math.round((standard * debt.aprBasisPoints) / BASIS_POINTS / 12)
     standard += cs
@@ -666,9 +711,11 @@ function simulateMonths(args: {
     // A payment that does not cover the interest never clears the balance.
     // Except at pocket change, where the last payment takes the lot: a debt
     // that got there shrank from real money, so it is paid off.
-    if (payment <= charged && extra === 0) {
-      if (total <= POCKET_CHANGE_CENTS) return { paidOffAfterMonths: month, interestCents: interest }
-      return { paidOffAfterMonths: null, interestCents: interest }
+    // Interest charged back is a one-off, not a month's cost, so it is no
+    // sign the payment cannot keep up.
+    if (payment <= charged - backCharged && extra === 0) {
+      if (total <= POCKET_CHANGE_CENTS) return { paidOffAfterMonths: month, interestCents: interest, chargedBack }
+      return { paidOffAfterMonths: null, interestCents: interest, chargedBack }
     }
 
     // Deal balances first, then the full-rate balance.
@@ -681,15 +728,43 @@ function simulateMonths(args: {
     standard -= Math.min(standard, left)
 
     if (standard + tranches.reduce((sum, t) => sum + t.balance, 0) <= 0) {
-      return { paidOffAfterMonths: month, interestCents: interest }
+      return { paidOffAfterMonths: month, interestCents: interest, chargedBack }
     }
   }
 
-  return { paidOffAfterMonths: null, interestCents: interest }
+  return { paidOffAfterMonths: null, interestCents: interest, chargedBack }
+}
+
+/**
+ * The interest a deal will charge back when it ends unpaid (PRD D49 (9)), on
+ * the payments set up now: the full rate on the deal balance month by month
+ * from the deal's start (or the day the debt was entered) to its end. About,
+ * because months before today are taken at the balance known now. Null when
+ * the soonest deal will be cleared in time, or its terms charge nothing back.
+ */
+export function chargedBackInterestCents(debt: Debt, today: CivilDate): Cents | null {
+  if (debt.balanceCents <= 0) return null
+  const run = simulateMonths({ debt, today, extraPerMonthCents: 0 })
+  const soonest = debt.promoRules
+    .filter((rule) => compareDates(rule.untilDate, today) > 0)
+    .sort((a, b) => compareDates(a.untilDate, b.untilDate))[0]
+  if (!soonest) return null
+  return run.chargedBack.find((c) => c.untilDate === soonest.untilDate)?.cents ?? null
 }
 
 /** Interest this debt will accrue over the next 12 months if left at minimums. */
 export function interestOverNextYearCents(debt: Debt, today: CivilDate, _leadWeeks?: number): Cents {
   if (debt.balanceCents <= 0) return 0
   return simulateMonths({ debt, today, extraPerMonthCents: 0, horizonMonths: 12 }).interestCents
+}
+
+/**
+ * Each figure as a share of the largest, 0-1, for a bar drawn beside it on
+ * Debts ("Interest left to pay", D49 (10)): which debt costs the most is read
+ * at a glance. Null stays null (a debt never paid off at its payment has no
+ * figure to compare).
+ */
+export function shareOfLargest(values: readonly (Cents | null)[]): (number | null)[] {
+  const largest = Math.max(0, ...values.filter((v): v is Cents => v !== null))
+  return values.map((v) => (v === null ? null : largest === 0 ? 0 : v / largest))
 }

@@ -13,7 +13,14 @@ import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import { setPriorityWeightAction } from '@/server/actions'
-import { debtFormValuesOf, debtStatusLabel, debtStatusLine, parseAmountToCents, projectPayoff } from '@/domain'
+import {
+  debtFormValuesOf,
+  debtStatusLabel,
+  debtStatusLine,
+  parseAmountToCents,
+  projectPayoff,
+  shareOfLargest,
+} from '@/domain'
 import { PayoffImpact } from '@/components/payoff-impact'
 import { DebtTable, type DebtRow } from './debt-table'
 
@@ -90,11 +97,19 @@ export default async function DebtsPage({
       minimumCents: rung.minimumPaymentCents,
       paymentCents: rung.paymentPerMonthCents,
       payoffDate: projection.payoffDate,
+      interestLeftCents: projection.payoffDate === null ? null : projection.totalInterestCents,
+      interestLeftShare: null,
       cumulativeCostCents: rung.cumulativeCostCents,
       cumulativeFreedCents: rung.cumulativeFreedPerMonthCents,
       breakEvenMonths: rung.breakEvenMonths,
       initial: debtFormValuesOf(rung.debt),
     }
+  })
+
+  // Each debt's interest left as a share of the costliest, for its bar.
+  const shares = shareOfLargest(rows.map((row) => row.interestLeftCents))
+  rows.forEach((row, i) => {
+    row.interestLeftShare = shares[i] ?? null
   })
 
   return (

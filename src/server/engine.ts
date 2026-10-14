@@ -2472,6 +2472,7 @@ export class Engine {
         creditLimitCents: input.creditLimitCents ?? null,
         plannedPaymentCents: input.plannedPaymentCents ?? null,
         paymentDay: input.paymentDay ?? null,
+        enteredOn: this.today(),
         state: 'open',
       })
       .returning()
@@ -4897,6 +4898,7 @@ function toDebt(r: typeof debtsTable.$inferSelect): Debt {
     creditLimitCents: r.creditLimitCents,
     plannedPaymentCents: r.plannedPaymentCents,
     paymentDay: r.paymentDay,
+    enteredOn: r.enteredOn as CivilDate,
     fixedPayment: r.fixedPayment,
     state: r.state,
     assetId: r.assetId,

@@ -388,6 +388,11 @@ export const debts = pgTable(
      * Null: no payment is assumed between stated balances.
      */
     paymentDay: smallint('payment_day'),
+    /**
+     * The day the debt was entered in Ballast (PRD D49 (9)): where interest a
+     * deal charges back is counted from when the deal has no start date.
+     */
+    enteredOn: date('entered_on').notNull().default(sql`current_date`),
     fixedPayment: boolean('fixed_payment').notNull().default(false),
     state: debtStateEnum('state').notNull().default('open'),
     /** The home or vehicle this debt is secured on (PRD §15). Removing the asset unlinks it. */

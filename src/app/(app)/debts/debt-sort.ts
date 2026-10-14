@@ -6,7 +6,7 @@
  * never disappears.
  */
 
-export type SortKey = 'rank' | 'name' | 'balance' | 'rate' | 'payment' | 'payoff'
+export type SortKey = 'rank' | 'name' | 'balance' | 'rate' | 'payment' | 'payoff' | 'interest'
 export type SortDirection = 'asc' | 'desc'
 export interface Sort {
   key: SortKey
@@ -22,6 +22,8 @@ export interface SortableDebtRow {
   paymentCents: number
   /** A CivilDate, or null for "never, at this rate". */
   payoffDate: string | null
+  /** Interest from today to payoff at the payment set up now; null when it is never paid off. */
+  interestLeftCents: number | null
 }
 
 export const DEFAULT_SORT: Sort = { key: 'rank', direction: 'asc' }
@@ -39,6 +41,13 @@ const COMPARE: Record<SortKey, (a: SortableDebtRow, b: SortableDebtRow) => numbe
     if (b.payoffDate === null) return -1
     // CivilDate strings (YYYY-MM-DD) order correctly as text.
     return a.payoffDate < b.payoffDate ? -1 : 1
+  },
+  // "Never paid off" costs more than any figure, so it sorts last ascending.
+  interest: (a, b) => {
+    if (a.interestLeftCents === b.interestLeftCents) return 0
+    if (a.interestLeftCents === null) return 1
+    if (b.interestLeftCents === null) return -1
+    return a.interestLeftCents - b.interestLeftCents
   },
 }
 
