@@ -37,7 +37,8 @@ import {
 import { randomUUID } from 'node:crypto'
 import {
   apportion,
-  balanceAfterPayments,
+  likelyDebtBalance,
+  type DebtPaymentMade,
   canWriteAccount,
   closeOutPrompts,
   dueState,
@@ -2322,14 +2323,21 @@ export class Engine {
     return this.debtsAsOfNow(this.db)
   }
 
-  private async debtsAsOfNow(db: Db | Tx): Promise<Debt[]> {
+  private async debtsAsOfNow(db: Db | Tx, extra?: { debtId: Id; payment: DebtPaymentMade }): Promise<Debt[]> {
     const [rows, paid] = await Promise.all([
       db.select().from(debtsTable).where(eq(debtsTable.householdId, this.householdId)),
       this.debtPaymentsSinceStated(db),
     ])
-    return rows.map((row) =>
-      toDebt({ ...row, balanceCents: balanceAfterPayments(row.balanceCents, paid.get(row.id) ?? []) }),
-    )
+    const today = this.today()
+    return rows.map((row) => {
+      const stated = toDebt(row)
+      const payments = [...(paid.get(row.id) ?? []), ...(extra?.debtId === row.id ? [extra.payment] : [])]
+      return {
+        ...stated,
+        balanceCents: likelyDebtBalance({ debt: stated, payments, today }),
+        statedBalanceCents: stated.balanceCents,
+      }
+    })
   }
 
   /**
@@ -2340,11 +2348,11 @@ export class Engine {
    * the statement a payment falls is compared in the database, where the
    * timestamps keep their full precision.
    */
-  private async debtPaymentsSinceStated(db: Db | Tx): Promise<Map<Id, Cents[]>> {
+  private async debtPaymentsSinceStated(db: Db | Tx): Promise<Map<Id, DebtPaymentMade[]>> {
     const issued = alias(events, 'issued')
     const [formPayments, todoPayments] = await Promise.all([
       db
-        .select({ debtId: debtsTable.id, payload: events.payload })
+        .select({ debtId: debtsTable.id, on: events.occurredAt, payload: events.payload })
         .from(events)
         .innerJoin(
           debtsTable,
@@ -2356,7 +2364,7 @@ export class Engine {
         )
         .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'payment_confirmed'))),
       db
-        .select({ debtId: debtsTable.id, confirmed: events.payload, issued: issued.payload })
+        .select({ debtId: debtsTable.id, on: events.occurredAt, confirmed: events.payload, issued: issued.payload })
         .from(events)
         .innerJoin(
           issued,
@@ -2379,10 +2387,16 @@ export class Engine {
         .orderBy(events.recordedAt, events.id),
     ])
 
-    const paid = new Map<Id, Cents[]>()
-    const add = (debtId: Id, cents: Cents) => paid.set(debtId, [...(paid.get(debtId) ?? []), cents])
+    const paid = new Map<Id, DebtPaymentMade[]>()
+    const add = (debtId: Id, payment: DebtPaymentMade) => paid.set(debtId, [...(paid.get(debtId) ?? []), payment])
+    // The payment form records the regular payment; a to-do asks for money
+    // on top of it (D49 (3)).
     for (const row of formPayments) {
-      add(row.debtId, (row.payload as { amount_cents: Cents }).amount_cents)
+      add(row.debtId, {
+        on: row.on as CivilDate,
+        amountCents: (row.payload as { amount_cents: Cents }).amount_cents,
+        regular: true,
+      })
     }
     // An instruction is one payment however many times "Done" was pressed.
     const counted = new Set<Id>()
@@ -2390,7 +2404,11 @@ export class Engine {
       const confirmed = row.confirmed as { instruction_id: Id; actual_amount_cents: Cents | null }
       if (counted.has(confirmed.instruction_id)) continue
       counted.add(confirmed.instruction_id)
-      add(row.debtId, confirmed.actual_amount_cents ?? (row.issued as { amount_cents: Cents }).amount_cents)
+      add(row.debtId, {
+        on: row.on as CivilDate,
+        amountCents: confirmed.actual_amount_cents ?? (row.issued as { amount_cents: Cents }).amount_cents,
+        regular: false,
+      })
     }
     return paid
   }
@@ -2423,12 +2441,15 @@ export class Engine {
     plannedPaymentCents?: Cents | null
     /** When the balance was last known to be right. Defaults to today. */
     balanceAsOf?: CivilDate
+    /** The day of the month the regular payment goes out (D49 (3)). */
+    paymentDay?: number | null
   }): Promise<Debt> {
     validateDebtInputs({
       balanceCents: input.balanceCents,
       aprBasisPoints: input.aprBasisPoints,
       minPaymentRule: input.minPaymentRule,
       plannedPaymentCents: input.plannedPaymentCents,
+      paymentDay: input.paymentDay,
     })
     validateDebtRates({
       aprBasisPoints: input.aprBasisPoints,
@@ -2448,6 +2469,7 @@ export class Engine {
         minPaymentRule: input.minPaymentRule,
         creditLimitCents: input.creditLimitCents ?? null,
         plannedPaymentCents: input.plannedPaymentCents ?? null,
+        paymentDay: input.paymentDay ?? null,
         state: 'open',
       })
       .returning()
@@ -2467,7 +2489,14 @@ export class Engine {
     patch: Partial<
       Pick<
         Debt,
-        'name' | 'category' | 'aprBasisPoints' | 'minPaymentRule' | 'promoRules' | 'creditLimitCents' | 'plannedPaymentCents'
+        | 'name'
+        | 'category'
+        | 'aprBasisPoints'
+        | 'minPaymentRule'
+        | 'promoRules'
+        | 'creditLimitCents'
+        | 'plannedPaymentCents'
+        | 'paymentDay'
       >
     >,
   ): Promise<void> {
@@ -2487,6 +2516,7 @@ export class Engine {
         creditLimitCents: patch.creditLimitCents === undefined ? before.creditLimitCents : patch.creditLimitCents,
         plannedPaymentCents:
           patch.plannedPaymentCents === undefined ? before.plannedPaymentCents : patch.plannedPaymentCents,
+        paymentDay: patch.paymentDay === undefined ? before.paymentDay : patch.paymentDay,
       }
       if (!after.name) throw new EngineError('A debt needs a name')
 
@@ -2495,6 +2525,7 @@ export class Engine {
         aprBasisPoints: after.aprBasisPoints,
         minPaymentRule: after.minPaymentRule,
         plannedPaymentCents: after.plannedPaymentCents,
+        paymentDay: after.paymentDay,
       })
       validateDebtRates({ aprBasisPoints: after.aprBasisPoints, promoRules: after.promoRules })
 
@@ -2508,6 +2539,7 @@ export class Engine {
           promoRules: after.promoRules,
           creditLimitCents: after.creditLimitCents ?? null,
           plannedPaymentCents: after.plannedPaymentCents ?? null,
+          paymentDay: after.paymentDay ?? null,
         })
         .where(eq(debtsTable.id, debtId))
 
@@ -2526,6 +2558,7 @@ export class Engine {
             min_payment_rule: before.minPaymentRule,
             promo_rules: before.promoRules,
             credit_limit_cents: before.creditLimitCents ?? null,
+            payment_day: before.paymentDay ?? null,
           },
           after: {
             name: after.name,
@@ -2534,6 +2567,7 @@ export class Engine {
             min_payment_rule: after.minPaymentRule,
             promo_rules: after.promoRules,
             credit_limit_cents: after.creditLimitCents ?? null,
+            payment_day: after.paymentDay ?? null,
           },
         },
       })
@@ -2591,7 +2625,8 @@ export class Engine {
       // The payment is the fact; the balance it leaves is worked out from it
       // (D49 (2)) and noted beside it for the history. It does not say when
       // the balance was last checked: only a statement does (D49 (4)).
-      const before = (await this.debtsAsOfNow(tx)).find((d) => d.id === input.debtId)!
+      const payment: DebtPaymentMade = { on: today, amountCents: input.amountCents, regular: true }
+      const after = (await this.debtsAsOfNow(tx, { debtId: input.debtId, payment })).find((d) => d.id === input.debtId)!
       await tx.insert(events).values({
         householdId: this.householdId,
         kind: 'payment_confirmed',
@@ -2601,7 +2636,7 @@ export class Engine {
         payload: {
           debt_id: input.debtId,
           amount_cents: input.amountCents,
-          balance_after_cents: balanceAfterPayments(before.balanceCents, [input.amountCents]),
+          balance_after_cents: after.balanceCents,
         },
       })
       await this.settleDebtIfCleared(tx, input.debtId)
@@ -4853,6 +4888,7 @@ function toDebt(r: typeof debtsTable.$inferSelect): Debt {
     minPaymentRule: r.minPaymentRule as MinPaymentRule,
     creditLimitCents: r.creditLimitCents,
     plannedPaymentCents: r.plannedPaymentCents,
+    paymentDay: r.paymentDay,
     fixedPayment: r.fixedPayment,
     state: r.state,
     assetId: r.assetId,

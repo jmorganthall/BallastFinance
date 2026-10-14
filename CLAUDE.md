@@ -212,7 +212,14 @@ principles, and they are non-negotiable.
   amount, else the amount asked; one per instruction). The comparison runs in
   SQL so the timestamps keep their precision. A payment never moves
   `balance_as_of`: only a statement says when the balance was last checked.
-  Never write a payment into the row.
+  Never write a payment into the row. With a `payment_day` (D49 (3),
+  migration 0019) the balance a screen reads is `likelyDebtBalance`: each
+  payment day since the statement charges a month's interest at the rate in
+  force and takes the regular payment (planned, else the minimum), the way an
+  account assumes its confirmed transfer runs. A payment on the form is the
+  regular one and replaces that month's assumed payment; a to-do's payment is
+  a share-out's extra and comes off on top. `Debt.statedBalanceCents` carries
+  the stated figure beside it ("likely" on Debts).
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
   picture. An `individual` account can only be renamed, funded, or
@@ -402,7 +409,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 720 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 730 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

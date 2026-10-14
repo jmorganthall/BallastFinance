@@ -249,21 +249,37 @@ export function DebtForm({
         </div>
       )}
 
-      <Field label="What you actually pay each month (optional)" problem={problemFor('monthly_payment')}>
-        {(a) => (
-          <input
-            {...a}
-            name="monthly_payment"
-            inputMode="decimal"
-            value={values.monthly_payment}
-            onChange={(e) => set('monthly_payment', e.target.value)}
-            placeholder="Leave blank if it is just the minimum"
-          />
-        )}
-      </Field>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1fr]">
+        <Field label="What you actually pay each month (optional)" problem={problemFor('monthly_payment')}>
+          {(a) => (
+            <input
+              {...a}
+              name="monthly_payment"
+              inputMode="decimal"
+              value={values.monthly_payment}
+              onChange={(e) => set('monthly_payment', e.target.value)}
+              placeholder="Leave blank if it is just the minimum"
+            />
+          )}
+        </Field>
+        <Field label="Day it goes out (optional)" problem={problemFor('payment_day')}>
+          {(a) => (
+            <input
+              {...a}
+              name="payment_day"
+              inputMode="numeric"
+              value={values.payment_day}
+              onChange={(e) => set('payment_day', e.target.value)}
+              placeholder="13"
+            />
+          )}
+        </Field>
+      </div>
       <p className="-mt-2 text-xs text-[var(--color-ink-soft)]">
         If you pay more than the minimum, this is what decides whether a deal-rate balance is on
-        track to be cleared before the rate ends, and when it is paid off.
+        track to be cleared before the rate ends, and when it is paid off. With a day, Ballast
+        assumes the payment goes out each month and keeps the balance current between
+        statements.
       </p>
 
       <label className="flex min-h-11 items-center gap-3 text-sm font-medium">

@@ -72,6 +72,11 @@ export default async function DebtsPage({
       name: rung.debt.name,
       kind: KIND[rung.debt.category] ?? rung.debt.category,
       balanceCents: rung.debt.balanceCents,
+      statedBalanceCents:
+        rung.debt.statedBalanceCents !== undefined && rung.debt.statedBalanceCents !== rung.debt.balanceCents
+          ? rung.debt.statedBalanceCents
+          : null,
+      hasPaymentDay: rung.debt.paymentDay != null,
       asOf: rung.debt.balanceAsOf,
       ageDays: freshness.ageDays,
       stale: freshness.stale,

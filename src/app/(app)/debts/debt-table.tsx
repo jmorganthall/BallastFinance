@@ -14,7 +14,7 @@
 import { useState, type ReactNode } from 'react'
 import type { DebtFormValues } from '@/domain/debt-form'
 import { formatCents } from '@/domain/money'
-import { humanDate } from '@/components/ui'
+import { Hint, humanDate } from '@/components/ui'
 import {
   confirmDebtPaymentAction,
   createDebtAction,
@@ -30,10 +30,15 @@ export interface DebtRow {
   rank: number
   name: string
   kind: string
+  /** The likely balance today (D49 (2)-(3)). */
   balanceCents: number
+  /** The balance last stated, when payments made or assumed since make the likely one differ. */
+  statedBalanceCents: number | null
   asOf: string
   ageDays: number
   stale: boolean
+  /** It has a payment day, so payments are assumed between statements. */
+  hasPaymentDay: boolean
   /** "20.49%", already formatted: what it really costs right now. */
   effectiveRate: string
   /** The same rate as a number, so the Rate column can be sorted. */
@@ -160,7 +165,18 @@ function Row({
           </span>
           <span className="-ml-2 mt-1 block sm:hidden">{editButton}</span>
         </td>
-        <td className={`${td} whitespace-nowrap text-right font-medium tabular`}>{formatCents(row.balanceCents)}</td>
+        <td className={`${td} whitespace-nowrap text-right font-medium tabular`}>
+          {formatCents(row.balanceCents)}
+          {row.statedBalanceCents !== null ? (
+            <span className="block text-xs font-normal text-[var(--color-ink-soft)]">
+              <Hint
+                detail={`The statement said ${formatCents(row.statedBalanceCents)} on ${humanDate(row.asOf)}. This is that, less the payments made since${row.hasPaymentDay ? ' and the ones due on its payment day, with the interest in between' : ''}.`}
+              >
+                likely
+              </Hint>
+            </span>
+          ) : null}
+        </td>
         <td className={`${td} hidden text-right tabular sm:table-cell`}>
           {row.effectiveRate}
           {row.listedRate ? (
