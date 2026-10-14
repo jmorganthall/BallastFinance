@@ -11,6 +11,7 @@
  */
 
 import { and, count, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { db as defaultDb, type Db } from '@/db/client'
 import {
   assets as assetsTable,
@@ -36,6 +37,7 @@ import {
 import { randomUUID } from 'node:crypto'
 import {
   apportion,
+  balanceAfterPayments,
   canWriteAccount,
   closeOutPrompts,
   dueState,
@@ -1848,16 +1850,33 @@ export class Engine {
     instructionId: Id
     actualAmountCents?: Cents
   }): Promise<void> {
-    await this.db.insert(events).values({
-      householdId: this.householdId,
-      kind: 'instruction_confirmed',
-      occurredAt: this.today(),
-      actorUserId: this.actorUserId,
-      source: 'manual',
-      payload: {
-        instruction_id: input.instructionId,
-        actual_amount_cents: input.actualAmountCents ?? null,
-      },
+    await this.db.transaction(async (tx) => {
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'instruction_confirmed',
+        occurredAt: this.today(),
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: {
+          instruction_id: input.instructionId,
+          actual_amount_cents: input.actualAmountCents ?? null,
+        },
+      })
+      // "Done" on a pay-a-debt to-do is the payment itself (D49 (1)): the
+      // debt's balance reads it from here, and one that reaches nothing is
+      // paid off.
+      const [issued] = await tx
+        .select({ payload: events.payload })
+        .from(events)
+        .where(
+          and(
+            eq(events.householdId, this.householdId),
+            eq(events.kind, 'instruction_issued'),
+            sql`${events.payload}->>'instruction_id' = ${input.instructionId}`,
+            sql`${events.payload}->>'type' = 'debt_payment'`,
+          ),
+        )
+      if (issued) await this.settleDebtIfCleared(tx, (issued.payload as { target_id: Id }).target_id)
     })
   }
 
@@ -2295,12 +2314,101 @@ export class Engine {
 
   // ---------------------------------------------------------------- debts
 
+  /**
+   * Every debt, at its balance today (PRD D49 (2)): the last balance a person
+   * stated, less the payments marked done since it was recorded.
+   */
   async listDebts(): Promise<Debt[]> {
-    const rows = await this.db
-      .select()
-      .from(debtsTable)
-      .where(eq(debtsTable.householdId, this.householdId))
-    return rows.map(toDebt)
+    return this.debtsAsOfNow(this.db)
+  }
+
+  private async debtsAsOfNow(db: Db | Tx): Promise<Debt[]> {
+    const [rows, paid] = await Promise.all([
+      db.select().from(debtsTable).where(eq(debtsTable.householdId, this.householdId)),
+      this.debtPaymentsSinceStated(db),
+    ])
+    return rows.map((row) =>
+      toDebt({ ...row, balanceCents: balanceAfterPayments(row.balanceCents, paid.get(row.id) ?? []) }),
+    )
+  }
+
+  /**
+   * The payments marked done after each debt's stated balance was recorded
+   * (D49 (1)): one from the payment form, or "Done" on a "Pay $X toward"
+   * to-do, at the amount the person said they paid. The two are the same
+   * fact, so a payment is either one or the other, never both. Which side of
+   * the statement a payment falls is compared in the database, where the
+   * timestamps keep their full precision.
+   */
+  private async debtPaymentsSinceStated(db: Db | Tx): Promise<Map<Id, Cents[]>> {
+    const issued = alias(events, 'issued')
+    const [formPayments, todoPayments] = await Promise.all([
+      db
+        .select({ debtId: debtsTable.id, payload: events.payload })
+        .from(events)
+        .innerJoin(
+          debtsTable,
+          and(
+            eq(debtsTable.householdId, events.householdId),
+            sql`${debtsTable.id}::text = ${events.payload}->>'debt_id'`,
+            sql`${events.recordedAt} > ${debtsTable.balanceRecordedAt}`,
+          ),
+        )
+        .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'payment_confirmed'))),
+      db
+        .select({ debtId: debtsTable.id, confirmed: events.payload, issued: issued.payload })
+        .from(events)
+        .innerJoin(
+          issued,
+          and(
+            eq(issued.householdId, events.householdId),
+            eq(issued.kind, 'instruction_issued'),
+            sql`${issued.payload}->>'instruction_id' = ${events.payload}->>'instruction_id'`,
+            sql`${issued.payload}->>'type' = 'debt_payment'`,
+          ),
+        )
+        .innerJoin(
+          debtsTable,
+          and(
+            eq(debtsTable.householdId, events.householdId),
+            sql`${debtsTable.id}::text = ${issued.payload}->>'target_id'`,
+            sql`${events.recordedAt} > ${debtsTable.balanceRecordedAt}`,
+          ),
+        )
+        .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_confirmed')))
+        .orderBy(events.recordedAt, events.id),
+    ])
+
+    const paid = new Map<Id, Cents[]>()
+    const add = (debtId: Id, cents: Cents) => paid.set(debtId, [...(paid.get(debtId) ?? []), cents])
+    for (const row of formPayments) {
+      add(row.debtId, (row.payload as { amount_cents: Cents }).amount_cents)
+    }
+    // An instruction is one payment however many times "Done" was pressed.
+    const counted = new Set<Id>()
+    for (const row of todoPayments) {
+      const confirmed = row.confirmed as { instruction_id: Id; actual_amount_cents: Cents | null }
+      if (counted.has(confirmed.instruction_id)) continue
+      counted.add(confirmed.instruction_id)
+      add(row.debtId, confirmed.actual_amount_cents ?? (row.issued as { amount_cents: Cents }).amount_cents)
+    }
+    return paid
+  }
+
+  /**
+   * A debt that a payment has just taken to nothing is paid off: the zero is
+   * stated on the row, from now, so it is the balance from here on.
+   */
+  private async settleDebtIfCleared(tx: Tx, debtId: Id): Promise<Cents | null> {
+    const debt = (await this.debtsAsOfNow(tx)).find((d) => d.id === debtId)
+    if (!debt) return null
+    if (debt.state === 'open' && debt.balanceCents === 0) {
+      await tx
+        .update(debtsTable)
+        .set({ balanceCents: 0, balanceAsOf: this.today(), balanceRecordedAt: sql`now()`, state: 'paid_off' })
+        .where(eq(debtsTable.id, debtId))
+    }
+    return debt.balanceCents
   }
 
   async createDebt(input: {
@@ -2475,21 +2583,15 @@ export class Engine {
     const today = this.today()
     await this.db.transaction(async (tx) => {
       const [row] = await tx
-        .select()
+        .select({ id: debtsTable.id })
         .from(debtsTable)
         .where(and(eq(debtsTable.id, input.debtId), eq(debtsTable.householdId, this.householdId)))
       if (!row) throw new EngineError('No such debt in this household')
 
-      const balanceCents = Math.max(0, row.balanceCents - input.amountCents)
-      await tx
-        .update(debtsTable)
-        .set({
-          balanceCents,
-          balanceAsOf: today,
-          state: balanceCents === 0 ? 'paid_off' : 'open',
-        })
-        .where(eq(debtsTable.id, input.debtId))
-
+      // The payment is the fact; the balance it leaves is worked out from it
+      // (D49 (2)) and noted beside it for the history. It does not say when
+      // the balance was last checked: only a statement does (D49 (4)).
+      const before = (await this.debtsAsOfNow(tx)).find((d) => d.id === input.debtId)!
       await tx.insert(events).values({
         householdId: this.householdId,
         kind: 'payment_confirmed',
@@ -2499,9 +2601,10 @@ export class Engine {
         payload: {
           debt_id: input.debtId,
           amount_cents: input.amountCents,
-          balance_after_cents: balanceCents,
+          balance_after_cents: balanceAfterPayments(before.balanceCents, [input.amountCents]),
         },
       })
+      await this.settleDebtIfCleared(tx, input.debtId)
     })
   }
 
@@ -2520,6 +2623,7 @@ export class Engine {
         .set({
           balanceCents: input.balanceCents,
           balanceAsOf: today,
+          balanceRecordedAt: sql`now()`,
           state: input.balanceCents === 0 ? 'paid_off' : 'open',
         })
         .where(eq(debtsTable.id, input.debtId))
