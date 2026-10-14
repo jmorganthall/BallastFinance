@@ -37,6 +37,8 @@ import {
 import { randomUUID } from 'node:crypto'
 import {
   apportion,
+  debtStatuses,
+  type DebtStatuses,
   likelyDebtBalance,
   type DebtPaymentMade,
   canWriteAccount,
@@ -2680,6 +2682,12 @@ export class Engine {
 
   async promoLeadWeeks(): Promise<number> {
     return this.getSetting<number>('promo_lead_weeks', DEFAULT_PROMO_LEAD_WEEKS)
+  }
+
+  /** Each open debt's status, its words' figures and its to-dos (PRD D49 (4)-(6)). */
+  async debtStatuses(): Promise<DebtStatuses> {
+    const [debts, promoLeadWeeks] = await Promise.all([this.listDebts(), this.promoLeadWeeks()])
+    return debtStatuses({ debts, today: this.today(), promoLeadWeeks })
   }
 
   /** The payoff order, with the running trade-off at each rung (PRD §7). */

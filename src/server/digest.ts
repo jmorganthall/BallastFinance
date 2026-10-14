@@ -11,7 +11,11 @@ import type { Db } from '@/db/client'
 import type { NotificationPayload } from '@/server/notifications'
 import {
   awakeCloseOuts,
+  debtStatusLabel,
+  debtStatusLine,
+  debtTodoSentence,
   derivedTodoSentence,
+  householdCaughtUp,
   formatCents,
   instructionSentence,
   isTransferDay,
@@ -74,21 +78,26 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   const today = engine.today()
 
   // A snoozed "did this get spent?" stays out of the digest until it wakes (D38).
-  const [position, outstanding, closeOuts, transferWeekday] = await Promise.all([
+  const [position, outstanding, closeOuts, transferWeekday, debtState] = await Promise.all([
     engine.position(),
     engine.outstandingInstructions(),
     engine.closeOutPrompts().then(awakeCloseOuts),
     engine.transferWeekday(),
+    engine.debtStatuses(),
   ])
+  // The headline is the household's (D35, D49): every account covers its
+  // dates and no debt misses its deal.
+  const caughtUp = householdCaughtUp(position, debtState)
+  const debtsNeeding = debtState.debts.filter((d) => d.status !== 'on_track')
 
   const shown = position.accounts.filter((a) => a.parts.length > 0 || a.bank !== null)
   const lines: string[] = [`## This week — ${today}`, '']
 
-  if (shown.length === 0) {
+  if (shown.length === 0 && debtsNeeding.length === 0) {
     lines.push('Nothing to move this week.')
   } else {
     lines.push(
-      position.allCaughtUp
+      caughtUp
         ? `**All caught up.** On autopilot, every account covers everything due${position.coveredThrough ? ` through ${position.coveredThrough}` : ''}.`
         : '**Not caught up yet.** The to-dos below are what it takes.',
       '',
@@ -116,6 +125,14 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
     }
   }
 
+  for (const view of debtsNeeding) {
+    lines.push(
+      `- **${view.debt.name}**: ${debtStatusLabel(view)} — ${debtStatusLine(view)
+        .map((p) => p.text)
+        .join('')}`,
+    )
+  }
+
   if (closeOuts.length > 0) {
     lines.push('', '## Did these get spent?', '')
     for (const prompt of closeOuts) {
@@ -127,9 +144,10 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
 
   const dueNow = outstanding.filter((i) => i.dueNow)
   const comingUp = outstanding.filter((i) => !i.dueNow)
-  if (position.todos.length > 0 || dueNow.length > 0) {
+  if (position.todos.length > 0 || debtState.todos.length > 0 || dueNow.length > 0) {
     lines.push('', '## Still to do', '')
     for (const todo of position.todos) lines.push(`- ${derivedTodoSentence(todo)}`)
+    for (const todo of debtState.todos) lines.push(`- ${debtTodoSentence(todo)}`)
     for (const instruction of dueNow) {
       lines.push(
         `- ${instructionSentence(instruction, transferWeekday)}${instruction.note ? ` (${instruction.note})` : ''}`,
@@ -159,11 +177,12 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
     }
   }
 
-  const blocking = position.todos.filter((t) => t.blocking).length + dueNow.length
+  const blocking =
+    position.todos.filter((t) => t.blocking).length + debtState.todos.filter((t) => t.blocking).length + dueNow.length
   const summary =
-    shown.length === 0
+    shown.length === 0 && debtsNeeding.length === 0
       ? 'Ballast: nothing to move this week.'
-      : position.allCaughtUp
+      : caughtUp
         ? 'Ballast: all caught up.' +
           (closeOuts.length > 0 ? ` ${closeOuts.length} thing(s) need confirming.` : '')
         : `Ballast: ${blocking} thing(s) to do this week` +
@@ -177,7 +196,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
     body: lines.join('\n'),
     link: `${input.baseUrl}/`,
     detail: {
-      all_caught_up: position.allCaughtUp,
+      all_caught_up: caughtUp,
       bank_per_week_cents: position.bankPerWeekCents,
       accounts: shown.map((a) => ({
         id: a.account.id,
@@ -188,7 +207,15 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
         likely_holds_cents: a.money.totalCents,
         short_on: a.short?.on ?? null,
       })),
-      todo_count: position.todos.length + dueNow.length,
+      debts: debtsNeeding.map((view) => ({
+        id: view.debt.id,
+        name: view.debt.name,
+        status: view.status,
+        deal_ends_on: view.miss?.untilDate ?? null,
+        owed_at_end_cents: view.miss?.owedAtEndCents ?? null,
+        clear_per_month_cents: view.miss?.clearPerMonthCents ?? null,
+      })),
+      todo_count: position.todos.length + debtState.todos.length + dueNow.length,
       outstanding_count: outstanding.length,
       close_out_count: closeOuts.length,
     },

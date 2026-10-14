@@ -220,6 +220,19 @@ principles, and they are non-negotiable.
   regular one and replaces that month's assumed payment; a to-do's payment is
   a share-out's extra and comes off on top. `Debt.statedBalanceCents` carries
   the stated figure beside it ("likely" on Debts).
+- **One status per debt** (PRD D49 (4)-(7)). `debtStatuses` in
+  `src/domain/debt-status.ts`, read through `Engine.debtStatuses()`, is the
+  only place a debt's status, its words (`debtStatusLabel`,
+  `debtStatusLine`) and its to-dos are worked out; Debts, This week, the
+  digest, the share-out's warning and its "cover what is short" reasons all
+  read it. A deal the payments will not clear is "Misses its 0%" ("Misses its
+  deal" off 0%), calm amber, and red "Short" inside `promo_lead_weeks`; the
+  figures are `promoCliff`'s. Its to-do raises the monthly payment
+  (`raise_debt_payment`, Done records `plannedPaymentCents`) and blocks "All
+  caught up" (`householdCaughtUp`). A stated balance older than
+  `BALANCE_STALE_AFTER_DAYS` (30) is an `update_debt_balance` to-do:
+  housekeeping, never blocking. "Done" on a pay-a-debt to-do carries a box
+  for what was actually paid.
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
   picture. An `individual` account can only be renamed, funded, or
@@ -409,7 +422,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 730 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 739 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

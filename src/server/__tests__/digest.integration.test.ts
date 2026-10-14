@@ -157,6 +157,7 @@ describeDb('weekly digest', () => {
           short_on: null,
         },
       ],
+      debts: [],
       todo_count: 2,
       outstanding_count: 0,
       close_out_count: 0,
