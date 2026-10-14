@@ -438,6 +438,12 @@ export interface CalendarCell {
   daysOff: string[]
   holidays: string[]
   blackouts: string[]
+  /**
+   * No school that day (D48): a weekend or one of the household's days off
+   * school. A federal holiday counts only when the school calendar says so,
+   * because a school can stay open on one.
+   */
+  noSchool: boolean
 }
 
 export interface CalendarMonth {
@@ -517,6 +523,7 @@ export function calendarMonth(input: {
   const cells: CalendarCell[] = []
   for (let d = from; compareDates(d, to) <= 0; d = addDays(d, 1)) {
     const wd = weekdayOf(d)
+    const daysOff = input.daysOff.filter((o) => o.date === d).map((o) => o.label)
     cells.push({
       date: d,
       day: Number(d.slice(8, 10)),
@@ -526,9 +533,10 @@ export function calendarMonth(input: {
       weather: blendWeather({ ...split, date: d }),
       busyness: busynessFor({ ...input.busyness, date: d, park: 'other' }),
       earliestClose: earliestClose(input.hours, d),
-      daysOff: input.daysOff.filter((o) => o.date === d).map((o) => o.label),
+      daysOff,
       holidays: input.holidays.filter((h) => h.date === d).map((h) => h.name),
-      blackouts: input.blackouts.filter((b) => compareDates(b.from, d) <= 0 && compareDates(d, b.to) <= 0).map((b) => b.label),
+      blackouts: blackoutsOn(input.blackouts, d),
+      noSchool: wd === 0 || wd === 6 || daysOff.length > 0,
     })
   }
   const weeks: (CalendarCell | null)[][] = []
@@ -560,6 +568,60 @@ export function calendarMonth(input: {
     horizonsShown: WEATHER_HORIZONS.filter((h) => cells.some((c) => c.weather?.horizon === h)),
     busynessSourcesShown: (['typed', 'outlook', 'wait_history', 'crowd_level'] as BusynessSource[]).filter((s) => cells.some((c) => c.busyness?.source === s)),
   }
+}
+
+function blackoutsOn(blackouts: readonly BlackoutRange[], date: CivilDate): string[] {
+  return blackouts.filter((b) => compareDates(b.from, date) <= 0 && compareDates(date, b.to) <= 0).map((b) => b.label)
+}
+
+// ---------------------------------------------------------------- the year strip (D48)
+
+export interface YearStripDay {
+  date: CivilDate
+  /** How busy for the whole resort, as the month's cell reads it; null when nothing is known. */
+  level: number | null
+  cantGo: boolean
+  past: boolean
+}
+
+export interface YearStripMonth {
+  month: string
+  /** "Oct", or "Jan 27" where a new year starts. */
+  label: string
+  days: YearStripDay[]
+}
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** The first and last date of the twelve months from a month on: the year strip's stretch. */
+export function yearStripBounds(fromMonth: string): { from: CivilDate; to: CivilDate } {
+  return { from: monthBounds(fromMonth).from, to: monthBounds(shiftMonth(fromMonth, 11)).to }
+}
+
+/**
+ * The strip of twelve months above the calendar (D48): a sliver a day, how
+ * busy for the whole resort (the same busynessFor the month's cells read)
+ * and whether we can go. Until Explore's scoring exists (D42) this is what
+ * it shows; nothing about it is stored.
+ */
+export function yearStrip(input: { fromMonth: string; busyness: BusynessSources; blackouts: readonly BlackoutRange[]; today: CivilDate }): YearStripMonth[] {
+  const months: YearStripMonth[] = []
+  for (let i = 0; i < 12; i++) {
+    const month = shiftMonth(input.fromMonth, i)
+    const { from, to } = monthBounds(month)
+    const days: YearStripDay[] = []
+    for (let d = from; compareDates(d, to) <= 0; d = addDays(d, 1)) {
+      days.push({
+        date: d,
+        level: busynessFor({ ...input.busyness, date: d, park: 'other' })?.level ?? null,
+        cantGo: blackoutsOn(input.blackouts, d).length > 0,
+        past: compareDates(d, input.today) < 0,
+      })
+    }
+    const m = Number(month.slice(5, 7))
+    months.push({ month, label: i > 0 && m === 1 ? `Jan ${month.slice(2, 4)}` : SHORT_MONTHS[m - 1]!, days })
+  }
+  return months
 }
 
 /** The colour step for a level, 1 to 5: two levels a step on the green-to-red scale (--color-busy-1..5, D32), so it reads at a glance. */

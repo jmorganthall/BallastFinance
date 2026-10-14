@@ -4,8 +4,13 @@
  * Mobile-first (PRD §9): every flow has to be completable one-handed on a
  * phone, so the type scale, tap targets and spacing are sized for a thumb
  * first and a desktop layout is just a wider version of the same screens.
+ *
+ * `static`: every colour here is emitted whether or not a utility names it.
+ * The busy scale is read as var(--color-busy-${step}) from code, which
+ * Tailwind cannot see, so without it light mode lost steps 2-5 and drew
+ * those bars in nothing (dark mode sets them on :root and was unaffected).
  */
-@theme {
+@theme static {
   --color-ink: oklch(0.22 0.02 250);
   --color-ink-soft: oklch(0.48 0.02 250);
   --color-surface: oklch(0.99 0.004 250);
@@ -35,6 +40,16 @@
   --color-busy-3: oklch(0.605 0.124 80); /* #a87805 */
   --color-busy-4: oklch(0.54 0.142 50); /* #ad5002 */
   --color-busy-5: oklch(0.475 0.19 27); /* #ae0813 */
+  /*
+   * A day with no school, the calendar cell's background (PRD D48): a cool
+   * slate blue, apart from every step of the green-to-red busy scale. Text
+   * on it keeps 4.5:1 (ink-soft 5.3:1). The busy bar is drawn on a card-
+   * coloured track, so the scale's validated contrast against the card holds
+   * on a tinted day too (busy-1 is only 1.8:1 against the tint itself).
+   */
+  --color-noschool: oklch(0.93 0.04 265); /* #dbe8ff */
+  /* A day we cannot go: black diagonal stripes over the cell (D48). */
+  --color-cantgo: oklch(0 0 0 / 0.38);
 }
 
 /*
@@ -71,6 +86,9 @@
     --color-busy-3: oklch(0.6 0.124 80); /* #a77601 */
     --color-busy-4: oklch(0.685 0.15 50); /* #e17a39 */
     --color-busy-5: oklch(0.745 0.154 27); /* #ff8276 */
+    /* No school on a dark card: ink 10.6:1, ink-soft 4.6:1 on it. */
+    --color-noschool: oklch(0.33 0.06 265); /* #263454 */
+    --color-cantgo: oklch(0 0 0 / 0.55);
   }
 }
 
