@@ -244,6 +244,19 @@ principles, and they are non-negotiable.
   "Interest left to pay" on Debts is `projectPayoff`'s total, with a bar
   against the costliest (`shareOfLargest`). The fine print sits in a
   collapsed "More about this deal" on the debt's form.
+- **Each debt has its own page, `/debts/[id]`** (PRD D49 (11)), opened from
+  its name on Debts: its status and deal; the balance from today to payoff
+  with the deal's end marked (`payoffSchedule`, the projection's own months
+  through `simulateMonths`' `onMonth`); a what-if by GET (`debtWhatIf`,
+  extra a month or once, nothing stored); each payment split into paydown
+  and interest (`paymentSplits`, years past 36 months) with a table view;
+  and the history from the event log (`Engine.debtHistory`). The charts are
+  `src/components/debt-charts.tsx`, inline SVG like the plan chart, in
+  `--color-chart-paydown` / `--color-chart-interest`, a pair validated with
+  the dataviz skill's validator on both card surfaces (the dark values sit
+  in the dark lightness band, so they are not the accent and caution
+  tokens). `debt_updated` now records `planned_payment_cents` too, so a
+  raised payment shows in the history.
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
   picture. An `individual` account can only be renamed, funded, or
@@ -433,7 +446,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 750 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 756 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

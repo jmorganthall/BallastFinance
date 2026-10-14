@@ -165,4 +165,16 @@ describeDb('debt payments reach the balance', () => {
     expect(change!.payload).toMatchObject({ before: { payment_day: null }, after: { payment_day: 13 } })
     await expect(engine.updateDebt(debt.id, { paymentDay: 32 })).rejects.toThrow('1 to 31')
   })
+
+  it("a debt's history lists what was stated, paid and changed, oldest first (D49 (11))", async () => {
+    const shield = await balanceOf('Shield 0568')
+    const history = await engine.debtHistory(shield.id)
+    expect(history.map((e) => e.kind).sort()).toEqual(['paid', 'paid_todo', 'paid_todo', 'stated'])
+    expect(history).toContainEqual({ on: TODAY, kind: 'stated', amountCents: 600000 })
+    expect(history).toContainEqual({ on: TODAY, kind: 'paid', amountCents: 2500 })
+    expect(history).toContainEqual({ on: TODAY, kind: 'paid_todo', amountCents: 47500 })
+
+    const other = await balanceOf('Shield 9795')
+    expect(await engine.debtHistory(other.id)).toContainEqual({ on: TODAY, kind: 'terms', changed: ['payment day'] })
+  })
 })
