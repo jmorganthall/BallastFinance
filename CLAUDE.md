@@ -202,6 +202,17 @@ principles, and they are non-negotiable.
   balance in the box, through the ordinary `confirmBalancesAction` (with
   `back=home`). The to-do sentence marks the account the money goes to, and
   the screen sets it in bold and the accent colour.
+- **A debt's balance is the last one stated, less the payments since**
+  (PRD D49 (1)-(2)). `debts.balance_cents` / `balance_as_of` are the last
+  balance a person stated (a statement, the edit form, or the zero a payment
+  that clears it writes), and `balance_recorded_at` (migration 0018) is when.
+  `Engine.listDebts` takes off every payment recorded after that moment
+  (`balanceAfterPayments` in `src/domain/debt.ts`): a `payment_confirmed`
+  from the payment form, or "Done" on a `debt_payment` to-do (its actual
+  amount, else the amount asked; one per instruction). The comparison runs in
+  SQL so the timestamps keep their precision. A payment never moves
+  `balance_as_of`: only a statement says when the balance was last checked.
+  Never write a payment into the row.
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
   picture. An `individual` account can only be renamed, funded, or
@@ -391,7 +402,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 711 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 720 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

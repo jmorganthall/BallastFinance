@@ -362,6 +362,12 @@ export const debts = pgTable(
     category: debtCategoryEnum('category').notNull(),
     balanceCents: cents('balance_cents').notNull(),
     balanceAsOf: date('balance_as_of').notNull(),
+    /**
+     * When the stated balance above was recorded (PRD D49 (2)). The balance on
+     * the row is the last one a person stated; payments marked done after this
+     * moment come off it on every read, and are never written into it.
+     */
+    balanceRecordedAt: timestamp('balance_recorded_at', { withTimezone: true }).notNull().defaultNow(),
     /** Annual percentage rate in basis points: 2499 = 24.99%. Integers, no float drift. */
     aprBasisPoints: bigint('apr_basis_points', { mode: 'number' }).notNull(),
     /** [{rate_basis_points, applies_to: 'full'|'amount', amount_cents?, until_date}] */

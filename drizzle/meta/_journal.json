@@ -127,6 +127,13 @@
       "when": 1791745336769,
       "tag": "0017_close_out_snoozed",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791945534481,
+      "tag": "0018_debt_balance_recorded_at",
+      "breakpoints": true
     }
   ]
 }

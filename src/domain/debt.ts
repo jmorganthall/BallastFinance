@@ -94,6 +94,18 @@ export function balanceFreshness(
 }
 
 /**
+ * A debt's balance today (PRD D49 (2)): the last balance a person stated, less
+ * every payment marked done since, never below zero. Payments made before
+ * that statement are already in it, so only the later ones are passed here.
+ * The same shape as an account's money today, its last count plus the moves
+ * since (D34): the stated figure is the fact, the rest is worked out.
+ */
+export function balanceAfterPayments(statedCents: Cents, paymentsSinceCents: readonly Cents[]): Cents {
+  const paid = paymentsSinceCents.reduce((sum, cents) => sum + cents, 0)
+  return Math.max(0, statedCents - paid)
+}
+
+/**
  * A promo rate that is not actually cheaper than the rate it reverts to is a
  * data-entry mistake, and a costly one: it silently disables the whole
  * promo-cliff mechanism, which exists precisely to raise this debt's priority
