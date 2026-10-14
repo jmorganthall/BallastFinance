@@ -22,7 +22,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {/* Bottom padding on a phone clears the fixed tab bar plus the home indicator. */}
       <div className="flex min-h-dvh min-w-0 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
         <AppHeader viewer={viewer} />
-        <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-6">{children}</main>
+        {/* One column for reading; a page that marks itself data-wide (Trips, D48) takes the screen beside the sidebar. */}
+        <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-6 has-[[data-wide]]:max-w-[100rem]">{children}</main>
         <AppFooter />
       </div>
 

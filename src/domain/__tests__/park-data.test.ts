@@ -12,6 +12,8 @@ import {
   busynessFor,
   busynessStep,
   calendarMonth,
+  yearStrip,
+  yearStripBounds,
   clockOf,
   dataAge,
   earliestClose,
@@ -408,11 +410,45 @@ describe('the calendar', () => {
     expect(oct25).toMatchObject({ weather: { horizon: 'normal' }, busyness: { level: 3, source: 'typed', detail: '1 of 4 parks' } })
     // A day with nothing at all is still a cell.
     const oct20 = month.weeks[3]![2]!
-    expect(oct20).toEqual({ date: '2026-10-20', day: 20, weekend: false, past: false, today: false, weather: null, busyness: null, earliestClose: null, daysOff: [], holidays: [], blackouts: [] })
+    expect(oct20).toEqual({ date: '2026-10-20', day: 20, weekend: false, past: false, today: false, weather: null, busyness: null, earliestClose: null, daysOff: [], holidays: [], blackouts: [], noSchool: false })
+    // No school on a weekend or a day off school (D48); the day off makes Columbus Day count, not the holiday itself.
+    expect(oct3.noSchool).toBe(true)
+    expect(oct12.noSchool).toBe(true)
+    expect(oct7.noSchool).toBe(false)
     expect(month.hours).toHaveLength(2)
     expect(month.freshness).toEqual({ weather: '2026-09-26', hours: '2026-09-25', busyness: '2026-09-20' })
     expect(month.horizonsShown).toEqual(['forecast', 'subseasonal', 'normal'])
     expect(month.busynessSourcesShown).toEqual(['typed', 'outlook'])
+  })
+
+  it('a federal holiday alone is a school day (D48)', () => {
+    const month = calendarMonth({
+      month: '2026-10',
+      weather: [],
+      hours: [],
+      busyness: { crowdLevels: [] },
+      daysOff: [],
+      holidays: [{ date: '2026-10-12', name: 'Columbus Day' }],
+      blackouts: [],
+      today: '2026-10-03',
+    })
+    const oct12 = month.weeks.flat().find((c) => c?.date === '2026-10-12')!
+    expect(oct12).toMatchObject({ holidays: ['Columbus Day'], noSchool: false })
+  })
+
+  it('the year strip: twelve months from the month given, a sliver a day', () => {
+    const strip = yearStrip({
+      fromMonth: '2026-10',
+      busyness: { crowdLevels: [crowd('2026-10-12', 'other', 7, 'ropedrop', '2026-09-20'), crowd('2027-02-15', 'other', 9, 'typed', '2026-10-01')] },
+      blackouts: [{ from: '2027-02-14', to: '2027-02-16', label: 'Work trip' }],
+      today: '2026-10-05',
+    })
+    expect(strip.map((m) => m.label)).toEqual(['Oct', 'Nov', 'Dec', 'Jan 27', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'])
+    expect(strip.map((m) => m.days.length)).toEqual([31, 30, 31, 31, 28, 31, 30, 31, 30, 31, 31, 30])
+    expect(strip[0]!.days[3]).toEqual({ date: '2026-10-04', level: null, cantGo: false, past: true })
+    expect(strip[0]!.days[11]).toEqual({ date: '2026-10-12', level: 7, cantGo: false, past: false })
+    expect(strip[4]!.days[14]).toEqual({ date: '2027-02-15', level: 9, cantGo: true, past: false })
+    expect(yearStripBounds('2026-10')).toEqual({ from: '2026-10-01', to: '2027-09-30' })
   })
 
   it('month arithmetic and the age in words', () => {

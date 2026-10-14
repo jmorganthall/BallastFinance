@@ -299,6 +299,19 @@ principles, and they are non-negotiable.
   server-rendered with `?month=` and `?day=` links and colours busyness
   with the green-to-red scale `--color-busy-1..5` in `globals.css` (below);
   the number is printed too.
+- **The calendar reads at a glance** (PRD D48, rev 88). No legend and no
+  symbols: a cell's background (`--color-noschool`) is a day with no school
+  (`CalendarCell.noSchool`: a weekend or a day off school; a federal holiday
+  alone is a school day), black stripes (`--color-cantgo`) a day we cannot
+  go, the busy bar on a card-coloured track with its number, the high and
+  low faded unless forecast; the rest is in the tooltip and the tapped day's
+  detail (beside the month on a wide screen). Above it, `yearStrip` (the
+  next twelve months, a sliver a day, through `Engine.calendarYear`).
+  `/trips` and a trip's page mark themselves `data-wide`, which lifts the
+  shell's `max-w-2xl` (`has-[[data-wide]]` in `(app)/layout.tsx`); other
+  pages keep one column. The `@theme` block is `static` because colours
+  read as `var(--color-busy-${step})` from code are invisible to Tailwind's
+  scan, and light mode silently lost busy steps 2-5 without it.
 - **Which park, which day is a derivation, and "Use this plan" is the only
   write** (PRD D32, rev 45). `src/domain/park-day-plan.ts` documents the fit
   at its top: the busyness level (`MISSING_BUSYNESS` 5.5 when nothing is

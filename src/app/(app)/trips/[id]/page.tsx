@@ -198,7 +198,7 @@ export default async function TripPage({
 
   // The calendar (D29): the month in the URL, else the trip's own; the tapped day in the URL too.
   const month = monthParam && /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : trip.startDate.slice(0, 7)
-  const calendar = await engine.calendarMonth(month, trip.destination)
+  const [calendar, year] = await Promise.all([engine.calendarMonth(month, trip.destination), engine.calendarYear(trip.destination)])
   const tappedDay = dayParam && /^\d{4}-\d{2}-\d{2}$/.test(dayParam) ? dayParam : null
   const calendarHref = (m: string, d?: string) => `/trips/${trip.id}?month=${m}${d ? `&day=${d}` : ''}#when`
 
@@ -221,851 +221,856 @@ export default async function TripPage({
         <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">Saved.</p>
       ) : null}
 
-      {trip.packageId ? (
-        <Card className="mb-4 bg-[var(--color-ahead-soft)]">
-          <h2 className="font-semibold text-[var(--color-ahead)]">This is a plan now</h2>
-          <p className="mt-1 text-sm">
-            {chosen ? `"${chosen.name}"` : 'One way of doing it'} went to Plans
-            {trip.sentOn ? ` on ${humanDate(trip.sentOn)}` : ''}. Money changes are made on the plan from here; the
-            days, reservations and to-dos below still go on.
-          </p>
-          <p className="mt-2 text-sm">
-            <Link href={`/packages/${trip.packageId}`} className="font-medium text-[var(--color-accent)] underline underline-offset-4">
-              Open the plan
-            </Link>
-          </p>
-        </Card>
-      ) : trip.retiredAt ? (
-        <Card className="mb-4">
-          <p className="text-sm">Put away on {humanDate(trip.retiredAt)}. Nothing here changes any more.</p>
-        </Card>
-      ) : null}
-
-      {pending.drive && editable ? (
-        <Card className="mb-4 bg-[var(--color-accent-soft)]">
-          <h2 className="font-semibold">The drive, as the route service sees it</h2>
-          <p className="mt-1 text-sm">
-            About <strong>{pending.drive[0].toLocaleString('en-US')} miles</strong> and{' '}
-            <strong>{hoursAndMinutes(pending.drive[1])}</strong> each way from {trip.home?.label ?? 'home'}. Use it?
-            {pending.drive[1] > view.maxDriveMinutes ? ' That is more than a day at the wheel, so a hotel on the way will be added.' : ''}
-          </p>
-          <form action={useDriveAction} className="mt-3 flex gap-2">
-            <input type="hidden" name="trip_id" value={trip.id} />
-            <input type="hidden" name="miles" value={pending.drive[0]} />
-            <input type="hidden" name="minutes" value={pending.drive[1]} />
-            <button type="submit" className={primaryButton}>
-              Use this drive
-            </button>
-            <Link href={`/trips/${trip.id}`} className={secondaryButton + ' text-center'}>
-              Not now
-            </Link>
-          </form>
-        </Card>
-      ) : null}
-
-      {pending.gas && editable ? (
-        <Card className="mb-4 bg-[var(--color-accent-soft)]">
-          <h2 className="font-semibold">Gas this week</h2>
-          <p className="mt-1 text-sm">
-            The US average for regular is <strong><Money cents={pending.gas.centsPerGallon} /></strong> a gallon for the week of{' '}
-            {humanDate(pending.gas.observationDate)}. Use it?
-          </p>
-          <form action={useGasPriceAction} className="mt-3 flex gap-2">
-            <input type="hidden" name="trip_id" value={trip.id} />
-            <input type="hidden" name="dollars_per_gallon" value={dollarsForInput(pending.gas.centsPerGallon)} />
-            <input type="hidden" name="observation_date" value={pending.gas.observationDate} />
-            <button type="submit" className={primaryButton}>
-              Use this price
-            </button>
-            <Link href={`/trips/${trip.id}`} className={secondaryButton + ' text-center'}>
-              Not now
-            </Link>
-          </form>
-        </Card>
-      ) : null}
-
-      {plan.pendingPull && planning ? (
-        <Card className="mb-4 bg-[var(--color-accent-soft)]">
-          <h2 className="font-semibold">How busy, as {plan.pendingPull.label} sees it</h2>
-          <p className="mt-1 text-sm">
-            {plan.pendingPull.levels.length} park-days read for {plan.pendingPull.months.join(', ')}, fetched{' '}
-            {humanDate(plan.pendingPull.fetchedOn)}. Keep them? A level you typed yourself is always shown over these.
-          </p>
-          <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
-            {crowdPullSummary(plan.pendingPull.levels).map((s) => (
-              <li key={s.park}>
-                {s.label}: {s.days} days, {shortDate(s.from)} to {shortDate(s.to)}, how busy {s.lowest} to {s.highest}
-              </li>
-            ))}
-            {plan.pendingPull.notes.map((n) => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
-          <div className="mt-3 flex gap-2">
-            <form action={keepCrowdPullAction} className="flex-1">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <button type="submit" className={primaryButton}>
-                Keep these
-              </button>
-            </form>
-            <form action={discardCrowdPullAction} className="flex-1">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <button type="submit" className={secondaryButton}>
-                Not now
-              </button>
-            </form>
-          </div>
-        </Card>
-      ) : null}
-
-      {plan.pendingDvcPull && planning ? (
-        <Card className="mb-4 bg-[var(--color-accent-soft)]">
-          <h2 className="font-semibold">What {plan.pendingDvcPull.label} had on {humanDate(plan.pendingDvcPull.seenOn)}</h2>
-          <p className="mt-1 text-sm">
-            {plan.pendingDvcPull.listings.length} {plan.pendingDvcPull.listings.length === 1 ? 'room' : 'rooms'} with a check-in from{' '}
-            {shortDate(plan.pendingDvcPull.from)} to {shortDate(plan.pendingDvcPull.to)}. Keep them as a note beside where you stay? The
-            lodging figure in the price tag stays what you typed.
-            {plan.pendingDvcPull.source.startsWith('read:') ? ' The reader read this page, so check a figure before you lean on it.' : ''}
-          </p>
-          <ul className="mt-2 max-h-64 divide-y divide-[var(--color-line)] overflow-y-auto">
-            {plan.pendingDvcPull.listings.map((l) => (
-              <ListingRow key={`${l.resort}|${l.room}|${l.checkIn}|${l.nights}`} listing={l} />
-            ))}
-          </ul>
-          <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
-            {plan.pendingDvcPull.notes.map((n) => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
-          <div className="mt-3 flex gap-2">
-            <form action={keepDvcPullAction} className="flex-1">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <button type="submit" className={primaryButton}>
-                Keep these
-              </button>
-            </form>
-            <form action={discardDvcPullAction} className="flex-1">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <button type="submit" className={secondaryButton}>
-                Not now
-              </button>
-            </form>
-          </div>
-        </Card>
-      ) : null}
-
-      <Card className="mb-4">
-        <p className="text-sm">
-          <strong>{trip.travelers.map((t) => t.name).join(', ')}</strong>
-          {heads.children > 0 || heads.infants > 0 ? (
-            <span className="text-[var(--color-ink-soft)]">
-              {' '}
-              — {heads.adults} {heads.adults === 1 ? 'adult' : 'adults'}
-              {heads.children > 0 ? `, ${heads.children} ${heads.children === 1 ? 'child' : 'children'}` : ''}
-              {heads.infants > 0 ? `, ${heads.infants} under 3` : ''}
-            </span>
-          ) : null}
-        </p>
-        <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-          {trip.car ? `Car: ${trip.car.mpg} mpg, ${trip.car.seats} seats.` : 'No car on this trip.'}{' '}
-          {trip.home
-            ? homeIsLocated(trip.home)
-              ? `Home: ${trip.home.label}.`
-              : `Home: ${trip.home.label}, not found on the map yet, so the drive cannot be looked up.`
-            : 'No home set, so the drive cannot be looked up.'}
-        </p>
-        {editable ? (
-          <details className="mt-3">
-            <summary className="cursor-pointer text-sm font-medium">Change the trip</summary>
-            <form action={updateTripAction} className="mt-3 space-y-3">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <label className="block text-sm font-medium">
-                What to call it
-                <input name="name" required defaultValue={trip.name} className={input} />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block text-sm font-medium">
-                  First day
-                  <input name="start_date" type="date" required defaultValue={trip.startDate} className={input} />
-                </label>
-                <label className="block text-sm font-medium">
-                  Last day
-                  <input name="end_date" type="date" required defaultValue={trip.endDate} className={input} />
-                </label>
-              </div>
-              <TravelerFields initial={trip.travelers} />
-              <div className="grid grid-cols-2 gap-3">
-                <label className="block text-sm font-medium">
-                  Car, miles per gallon
-                  <input name="car_mpg" inputMode="numeric" defaultValue={trip.car?.mpg ?? ''} className={input} />
-                </label>
-                <label className="block text-sm font-medium">
-                  Seats
-                  <input name="car_seats" inputMode="numeric" defaultValue={trip.car?.seats ?? ''} className={input} />
-                </label>
-              </div>
-              <p className="text-xs text-[var(--color-ink-soft)]">
-                Changing who is going or the dates re-counts every part. Figures you typed stay as you typed them; days
-                that are still in the trip keep their plans.
-              </p>
-              <button type="submit" className={secondaryButton}>
-                Save the trip
-              </button>
-            </form>
-            <form action={retireTripAction} className="mt-3">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <button type="submit" className={quietButton}>
-                Put this trip away
-              </button>
-            </form>
-          </details>
+      <div className="grid items-start gap-x-4 xl:grid-cols-2">
+        {trip.packageId ? (
+          <Card className="mb-4 bg-[var(--color-ahead-soft)]">
+            <h2 className="font-semibold text-[var(--color-ahead)]">This is a plan now</h2>
+            <p className="mt-1 text-sm">
+              {chosen ? `"${chosen.name}"` : 'One way of doing it'} went to Plans
+              {trip.sentOn ? ` on ${humanDate(trip.sentOn)}` : ''}. Money changes are made on the plan from here; the
+              days, reservations and to-dos below still go on.
+            </p>
+            <p className="mt-2 text-sm">
+              <Link href={`/packages/${trip.packageId}`} className="font-medium text-[var(--color-accent)] underline underline-offset-4">
+                Open the plan
+              </Link>
+            </p>
+          </Card>
+        ) : trip.retiredAt ? (
+          <Card className="mb-4">
+            <p className="text-sm">Put away on {humanDate(trip.retiredAt)}. Nothing here changes any more.</p>
+          </Card>
         ) : null}
-      </Card>
 
-      {/* ------------------------------------------------------------ When */}
-      <Section
-        id="when"
-        title="When"
-        headline={
-          currentWeek?.crowd.average !== null && currentWeek?.crowd.average !== undefined
-            ? `This week: how busy ${currentWeek.crowd.average} on average, ${currentWeek.crowd.worst} at worst`
-            : 'No crowd calendar yet for these dates'
-        }
-      >
-        {refreshed ? <p className="mb-3 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
-        <h3 className="font-semibold">Look at the year</h3>
-        <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
-          How hot, how busy, how late the parks stay open, when school is out. Tap a day to start the trip there.
-        </p>
-        <ParkCalendar
-          calendar={calendar}
-          today={today}
-          selected={tappedDay}
-          monthHref={(m) => calendarHref(m)}
-          dayHref={(d) => calendarHref(month, d)}
-          refresh={
-            <form action={refreshParkDataAction}>
+        {pending.drive && editable ? (
+          <Card className="mb-4 bg-[var(--color-accent-soft)]">
+            <h2 className="font-semibold">The drive, as the route service sees it</h2>
+            <p className="mt-1 text-sm">
+              About <strong>{pending.drive[0].toLocaleString('en-US')} miles</strong> and{' '}
+              <strong>{hoursAndMinutes(pending.drive[1])}</strong> each way from {trip.home?.label ?? 'home'}. Use it?
+              {pending.drive[1] > view.maxDriveMinutes ? ' That is more than a day at the wheel, so a hotel on the way will be added.' : ''}
+            </p>
+            <form action={useDriveAction} className="mt-3 flex gap-2">
               <input type="hidden" name="trip_id" value={trip.id} />
-              <input type="hidden" name="month" value={month} />
-              <button type="submit" className={smallButton}>
-                Refresh park data
+              <input type="hidden" name="miles" value={pending.drive[0]} />
+              <input type="hidden" name="minutes" value={pending.drive[1]} />
+              <button type="submit" className={primaryButton}>
+                Use this drive
               </button>
+              <Link href={`/trips/${trip.id}`} className={secondaryButton + ' text-center'}>
+                Not now
+              </Link>
             </form>
+          </Card>
+        ) : null}
+
+        {pending.gas && editable ? (
+          <Card className="mb-4 bg-[var(--color-accent-soft)]">
+            <h2 className="font-semibold">Gas this week</h2>
+            <p className="mt-1 text-sm">
+              The US average for regular is <strong><Money cents={pending.gas.centsPerGallon} /></strong> a gallon for the week of{' '}
+              {humanDate(pending.gas.observationDate)}. Use it?
+            </p>
+            <form action={useGasPriceAction} className="mt-3 flex gap-2">
+              <input type="hidden" name="trip_id" value={trip.id} />
+              <input type="hidden" name="dollars_per_gallon" value={dollarsForInput(pending.gas.centsPerGallon)} />
+              <input type="hidden" name="observation_date" value={pending.gas.observationDate} />
+              <button type="submit" className={primaryButton}>
+                Use this price
+              </button>
+              <Link href={`/trips/${trip.id}`} className={secondaryButton + ' text-center'}>
+                Not now
+              </Link>
+            </form>
+          </Card>
+        ) : null}
+
+        {plan.pendingPull && planning ? (
+          <Card className="mb-4 bg-[var(--color-accent-soft)]">
+            <h2 className="font-semibold">How busy, as {plan.pendingPull.label} sees it</h2>
+            <p className="mt-1 text-sm">
+              {plan.pendingPull.levels.length} park-days read for {plan.pendingPull.months.join(', ')}, fetched{' '}
+              {humanDate(plan.pendingPull.fetchedOn)}. Keep them? A level you typed yourself is always shown over these.
+            </p>
+            <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
+              {crowdPullSummary(plan.pendingPull.levels).map((s) => (
+                <li key={s.park}>
+                  {s.label}: {s.days} days, {shortDate(s.from)} to {shortDate(s.to)}, how busy {s.lowest} to {s.highest}
+                </li>
+              ))}
+              {plan.pendingPull.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              <form action={keepCrowdPullAction} className="flex-1">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <button type="submit" className={primaryButton}>
+                  Keep these
+                </button>
+              </form>
+              <form action={discardCrowdPullAction} className="flex-1">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <button type="submit" className={secondaryButton}>
+                  Not now
+                </button>
+              </form>
+            </div>
+          </Card>
+        ) : null}
+
+        {plan.pendingDvcPull && planning ? (
+          <Card className="mb-4 bg-[var(--color-accent-soft)]">
+            <h2 className="font-semibold">What {plan.pendingDvcPull.label} had on {humanDate(plan.pendingDvcPull.seenOn)}</h2>
+            <p className="mt-1 text-sm">
+              {plan.pendingDvcPull.listings.length} {plan.pendingDvcPull.listings.length === 1 ? 'room' : 'rooms'} with a check-in from{' '}
+              {shortDate(plan.pendingDvcPull.from)} to {shortDate(plan.pendingDvcPull.to)}. Keep them as a note beside where you stay? The
+              lodging figure in the price tag stays what you typed.
+              {plan.pendingDvcPull.source.startsWith('read:') ? ' The reader read this page, so check a figure before you lean on it.' : ''}
+            </p>
+            <ul className="mt-2 max-h-64 divide-y divide-[var(--color-line)] overflow-y-auto">
+              {plan.pendingDvcPull.listings.map((l) => (
+                <ListingRow key={`${l.resort}|${l.room}|${l.checkIn}|${l.nights}`} listing={l} />
+              ))}
+            </ul>
+            <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
+              {plan.pendingDvcPull.notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+            <div className="mt-3 flex gap-2">
+              <form action={keepDvcPullAction} className="flex-1">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <button type="submit" className={primaryButton}>
+                  Keep these
+                </button>
+              </form>
+              <form action={discardDvcPullAction} className="flex-1">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <button type="submit" className={secondaryButton}>
+                  Not now
+                </button>
+              </form>
+            </div>
+          </Card>
+        ) : null}
+
+        <Card className="mb-4">
+          <p className="text-sm">
+            <strong>{trip.travelers.map((t) => t.name).join(', ')}</strong>
+            {heads.children > 0 || heads.infants > 0 ? (
+              <span className="text-[var(--color-ink-soft)]">
+                {' '}
+                — {heads.adults} {heads.adults === 1 ? 'adult' : 'adults'}
+                {heads.children > 0 ? `, ${heads.children} ${heads.children === 1 ? 'child' : 'children'}` : ''}
+                {heads.infants > 0 ? `, ${heads.infants} under 3` : ''}
+              </span>
+            ) : null}
+          </p>
+          <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+            {trip.car ? `Car: ${trip.car.mpg} mpg, ${trip.car.seats} seats.` : 'No car on this trip.'}{' '}
+            {trip.home
+              ? homeIsLocated(trip.home)
+                ? `Home: ${trip.home.label}.`
+                : `Home: ${trip.home.label}, not found on the map yet, so the drive cannot be looked up.`
+              : 'No home set, so the drive cannot be looked up.'}
+          </p>
+          {editable ? (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-sm font-medium">Change the trip</summary>
+              <form action={updateTripAction} className="mt-3 space-y-3">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <label className="block text-sm font-medium">
+                  What to call it
+                  <input name="name" required defaultValue={trip.name} className={input} />
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-sm font-medium">
+                    First day
+                    <input name="start_date" type="date" required defaultValue={trip.startDate} className={input} />
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Last day
+                    <input name="end_date" type="date" required defaultValue={trip.endDate} className={input} />
+                  </label>
+                </div>
+                <TravelerFields initial={trip.travelers} />
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-sm font-medium">
+                    Car, miles per gallon
+                    <input name="car_mpg" inputMode="numeric" defaultValue={trip.car?.mpg ?? ''} className={input} />
+                  </label>
+                  <label className="block text-sm font-medium">
+                    Seats
+                    <input name="car_seats" inputMode="numeric" defaultValue={trip.car?.seats ?? ''} className={input} />
+                  </label>
+                </div>
+                <p className="text-xs text-[var(--color-ink-soft)]">
+                  Changing who is going or the dates re-counts every part. Figures you typed stay as you typed them; days
+                  that are still in the trip keep their plans.
+                </p>
+                <button type="submit" className={secondaryButton}>
+                  Save the trip
+                </button>
+              </form>
+              <form action={retireTripAction} className="mt-3">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <button type="submit" className={quietButton}>
+                  Put this trip away
+                </button>
+              </form>
+            </details>
+          ) : null}
+        </Card>
+      </div>
+
+      {/* Wide screens: the calendar and the money across the page, the rest side by side (D48). */}
+      <div data-wide="" className="grid items-start gap-x-4 xl:grid-cols-2">
+        {/* ------------------------------------------------------------ When */}
+        <Section
+          id="when"
+          wide
+          title="When"
+          headline={
+            currentWeek?.crowd.average !== null && currentWeek?.crowd.average !== undefined
+              ? `This week: how busy ${currentWeek.crowd.average} on average, ${currentWeek.crowd.worst} at worst`
+              : 'No crowd calendar yet for these dates'
           }
         >
-          {tappedDay && editable ? (
-            <form action={useDatesAction} className="flex items-center gap-2">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <input type="hidden" name="start_date" value={tappedDay} />
-              <input type="hidden" name="end_date" value={addDays(tappedDay, nights)} />
-              <button type="submit" className={smallButton}>
-                Use these dates
-              </button>
-              <span className="text-xs text-[var(--color-ink-soft)]">
-                {shortDate(tappedDay)} – {shortDate(addDays(tappedDay, nights))}, {nights} {nights === 1 ? 'night' : 'nights'}
-              </span>
-            </form>
-          ) : null}
-        </ParkCalendar>
-        <h3 className="mt-4 font-semibold">Best weeks</h3>
-        <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
-          The ten best dates from {shortDate(plan.bestWeeks.horizonFrom)} to {shortDate(plan.bestWeeks.horizonTo)},{' '}
-          {plan.bestWeeks.horizonTo.slice(0, 4)}: every {nights}-night window, and every long weekend a holiday or a day
-          off school makes. Quiet first, then cheap, then no school missed.
-          {plan.bestWeeks.excludedByBlackout > 0 ? ` ${plan.bestWeeks.excludedByBlackout} left out for weeks you cannot go.` : ''}
-          {plan.bestWeeks.daysOffKnown ? '' : ' No school calendar yet, so every weekday counts as school; add one under Trips.'}
-        </p>
-        {plan.bestWeeks.top.length === 0 ? (
-          <p className="mb-4 text-sm text-[var(--color-ink-soft)]">Every window ahead runs into a week you cannot go.</p>
-        ) : (
-          <ol className="mb-4 divide-y divide-[var(--color-line)]">
-            {plan.bestWeeks.top.map((c, i) => (
-              <li key={`${c.startDate}|${c.endDate}`} className={`flex items-start justify-between gap-3 py-2 ${c.current ? 'bg-[var(--color-accent-soft)]' : ''}`}>
-                <div className="min-w-0 text-sm">
-                  <span className="font-medium">
-                    {i + 1}. {shortDate(c.startDate)} – {shortDate(c.endDate)}, {c.endDate.slice(0, 4)}
-                  </span>
-                  <span className="text-[var(--color-ink-soft)]">
-                    {' '}
-                    · {weekdayName(c.startDate)}, {c.nights} {c.nights === 1 ? 'night' : 'nights'}
-                  </span>
-                  <span className="block text-xs text-[var(--color-ink-soft)]">{c.reasons.join(' · ')}</span>
-                </div>
-                <div className="shrink-0 text-right">
-                  <Money cents={c.priceCents} className="block text-sm" />
-                  {editable && !c.current ? (
-                    <form action={useDatesAction} className="mt-1">
-                      <input type="hidden" name="trip_id" value={trip.id} />
-                      <input type="hidden" name="start_date" value={c.startDate} />
-                      <input type="hidden" name="end_date" value={c.endDate} />
-                      <button type="submit" className={smallButton}>
-                        Use these dates
-                      </button>
-                    </form>
-                  ) : c.current ? (
-                    <span className="text-xs text-[var(--color-ink-soft)]">this trip</span>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
-        <h3 className="font-semibold">A few weeks either side</h3>
-        <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
-          The same trip a few weeks either side: how busy the parks are on{' '}
-          {parkDays > 0 ? 'the park days' : 'each day'}, what it costs, and what it runs into. How busy is 1 (quiet)
-          to 10 (packed).
-        </p>
-        <div className="-mx-4 overflow-x-auto px-4">
-          <table className="w-full min-w-[36rem] text-sm">
-            <thead>
-              <tr className="text-left text-xs text-[var(--color-ink-soft)]">
-                <th className="py-1 pr-2 font-medium">Week</th>
-                <th className="py-1 pr-2 font-medium">How busy</th>
-                <th className="py-1 pr-2 font-medium">Price</th>
-                <th className="py-1 pr-2 font-medium">Getting there</th>
-                <th className="py-1 pr-2 font-medium">Runs into</th>
-                <th className="py-1 font-medium"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--color-line)]">
-              {plan.weeks.map((w) => (
-                <tr key={w.startDate} className={w.current ? 'bg-[var(--color-accent-soft)]' : ''}>
-                  <td className="py-2 pr-2 align-top">
-                    {shortDate(w.startDate)} – {shortDate(w.endDate)}
-                    <span className="block text-xs text-[var(--color-ink-soft)]">
-                      {weekdayName(w.startDate)}s{w.current ? ' · this trip' : w.past ? ' · already gone' : ''}
-                    </span>
-                  </td>
-                  <td className="py-2 pr-2 align-top">
-                    {w.crowd.average === null ? (
-                      <span className="text-[var(--color-ink-soft)]">no data</span>
-                    ) : (
-                      <>
-                        <strong>{w.crowd.average}</strong> <span className="text-xs text-[var(--color-ink-soft)]">avg</span>, {w.crowd.worst}{' '}
-                        <span className="text-xs text-[var(--color-ink-soft)]">worst</span>
-                        {w.crowd.daysWithData < w.crowd.parkDays ? (
-                          <span className="block text-xs text-[var(--color-caution)]">
-                            {w.crowd.daysWithData} of {w.crowd.parkDays} days known
-                          </span>
-                        ) : null}
-                      </>
-                    )}
-                  </td>
-                  <td className="py-2 pr-2 align-top">
-                    <Money cents={w.price.totalCents} />
-                  </td>
-                  <td className="py-2 pr-2 align-top">
-                    <Money cents={w.travelCents} />
-                  </td>
-                  <td className="py-2 pr-2 align-top">
-                    {w.blackouts.length > 0 ? <Pill tone="behind">{w.blackouts.join(', ')}</Pill> : <span className="text-[var(--color-ink-soft)]">—</span>}
-                  </td>
-                  <td className="py-2 align-top">
-                    {editable && !w.current && !w.past ? (
-                      <form action={useWeekAction}>
-                        <input type="hidden" name="trip_id" value={trip.id} />
-                        <input type="hidden" name="start_date" value={w.startDate} />
-                        <button type="submit" className={smallButton}>
-                          Use this week
-                        </button>
-                      </form>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
-          &ldquo;Use this week&rdquo; and &ldquo;Use these dates&rdquo; move the whole trip, days and unconfirmed reservations
-          with it; a long weekend of another length sets the first and last day afresh. Weeks you cannot go, the school
-          calendar and how the best weeks are picked are set under Trips.
-        </p>
-      </Section>
-
-      {/* ------------------------------------------------------------ How */}
-      <Section
-        id="how"
-        title="How"
-        headline={
-          view.variants.length === 0
-            ? 'No way of doing it priced yet'
-            : `${view.variants.length} ${view.variants.length === 1 ? 'way' : 'ways'} priced${followed ? ` · to-dos follow "${followed.name}"` : ''}`
-        }
-      >
-        {view.variants.length === 0 ? (
-          <p className="text-sm text-[var(--color-ink-soft)]">
-            None yet. Add one below: drive or fly, where to stay, how many park days. Each gets its own price tag under Money.
-          </p>
-        ) : (
-          <ul className="divide-y divide-[var(--color-line)]">
-            {view.variants.map((variant) => {
-              const c = variant.choices
-              const isChosen = variant.id === trip.chosenVariantId
-              return (
-                <li key={variant.id} className="py-3 first:pt-0 last:pb-0">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="font-semibold">{variant.name}</h3>
-                      <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
-                        {CHOICE_WORDS.travel[c.travel]} · {CHOICE_WORDS.lodging[c.lodging]} · {CHOICE_WORDS.lightningLane[c.lightningLane]} ·{' '}
-                        {CHOICE_WORDS.dining[c.dining]} · {c.parkDays} park {c.parkDays === 1 ? 'day' : 'days'}
-                        {c.promotion ? ` · ${c.promotion.name}` : ''}
-                      </p>
-                    </div>
-                    <div className="shrink-0 text-right">
-                      <Money cents={variant.price.totalCents} className="font-semibold" />
-                      {isChosen ? (
-                        <div className="mt-1">
-                          <Pill tone="ahead">This is the plan</Pill>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                  {editable ? (
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-xs text-[var(--color-accent)]">Change the choices</summary>
-                      <form action={updateVariantAction} className="mt-2 space-y-2">
-                        <input type="hidden" name="trip_id" value={trip.id} />
-                        <input type="hidden" name="variant_id" value={variant.id} />
-                        <ChoiceFields choices={c} name={variant.name} maxParkDays={nights + 1} />
-                        <p className="text-xs text-[var(--color-ink-soft)]">
-                          The parts are re-listed for the new choices. Figures you typed stay; parts you added stay.
-                        </p>
-                        <button type="submit" className={secondaryButton}>
-                          Save the choices
-                        </button>
-                      </form>
-                      <form action={removeVariantAction} className="mt-3">
-                        <input type="hidden" name="trip_id" value={trip.id} />
-                        <input type="hidden" name="variant_id" value={variant.id} />
-                        <button type="submit" className={quietButton}>
-                          Take this way off
-                        </button>
-                      </form>
-                    </details>
-                  ) : null}
-                </li>
-              )
-            })}
-          </ul>
-        )}
-        {editable ? (
-          <details className="mt-4">
-            <summary className="cursor-pointer text-sm font-medium">Another way to do it</summary>
-            <form action={addVariantAction} className="mt-2 space-y-2">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <ChoiceFields maxParkDays={nights + 1} />
-              <button type="submit" className={primaryButton}>
-                Price it
-              </button>
-            </form>
-          </details>
-        ) : null}
-      </Section>
-
-      {/* ------------------------------------------------------------ What to book, and when */}
-      <Section
-        id="to-do"
-        title="What to book, and when"
-        headline={
-          openTasks.length === 0
-            ? plan.tasks.length === 0
-              ? 'Nothing yet'
-              : 'All done'
-            : [
-                buckets.overdue.length > 0 ? `${buckets.overdue.length} overdue` : null,
-                buckets.this_month.length > 0 ? `${buckets.this_month.length} this month` : null,
-                buckets.later.length > 0 ? `${buckets.later.length} later` : null,
-              ]
-                .filter(Boolean)
-                .join(', ')
-        }
-      >
-        <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
-          When Disney opens each thing, and when the money is due, for the way the plan follows
-          {followed ? ` ("${followed.name}")` : ''}. Edit a to-do and it is yours; a rebuild leaves it alone.
-        </p>
-        {(['overdue', 'this_month', 'later', 'done'] as const).map((bucket) => {
-          const tasks = buckets[bucket]
-          if (tasks.length === 0) return null
-          const title = { overdue: 'Overdue', this_month: 'This month', later: 'Later', done: 'Done' }[bucket]
-          return (
-            <div key={bucket} className="mb-4 last:mb-0">
-              <h3 className={subTitle}>{title}</h3>
-              <ul className="mt-1 divide-y divide-[var(--color-line)]">
-                {tasks.map((task) => (
-                  <TaskRow key={task.id} task={task} tripId={trip.id} editable={planning} lineName={lineName(task.lineId)} lines={followed?.lines ?? []} overdue={bucket === 'overdue'} />
-                ))}
-              </ul>
-            </div>
-          )
-        })}
-        {planning ? (
-          <div className="mt-4 space-y-3">
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">Add a to-do</summary>
-              <form action={addTaskAction} className="mt-2 space-y-2">
+          {refreshed ? <p className="mb-3 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
+          <h3 className="font-semibold">Look at the year</h3>
+          <ParkCalendar
+            calendar={calendar}
+            year={year}
+            today={today}
+            selected={tappedDay}
+            monthHref={(m) => calendarHref(m)}
+            dayHref={(d) => calendarHref(month, d)}
+            refresh={
+              <form action={refreshParkDataAction}>
                 <input type="hidden" name="trip_id" value={trip.id} />
-                <label className="block text-xs text-[var(--color-ink-soft)]">
-                  What
-                  <input name="label" required placeholder="Book the airport parking" className={input} />
-                </label>
-                <div className="grid grid-cols-2 gap-2">
+                <input type="hidden" name="month" value={month} />
+                <button type="submit" className={smallButton}>
+                  Refresh park data
+                </button>
+              </form>
+            }
+          >
+            {tappedDay && editable ? (
+              <form action={useDatesAction} className="flex items-center gap-2">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <input type="hidden" name="start_date" value={tappedDay} />
+                <input type="hidden" name="end_date" value={addDays(tappedDay, nights)} />
+                <button type="submit" className={smallButton}>
+                  Use these dates
+                </button>
+                <span className="text-xs text-[var(--color-ink-soft)]">
+                  {shortDate(tappedDay)} – {shortDate(addDays(tappedDay, nights))}, {nights} {nights === 1 ? 'night' : 'nights'}
+                </span>
+              </form>
+            ) : null}
+          </ParkCalendar>
+          <h3 className="mt-4 font-semibold">Best weeks</h3>
+          <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+            The ten best dates from {shortDate(plan.bestWeeks.horizonFrom)} to {shortDate(plan.bestWeeks.horizonTo)},{' '}
+            {plan.bestWeeks.horizonTo.slice(0, 4)}: every {nights}-night window, and every long weekend a holiday or a day
+            off school makes. Quiet first, then cheap, then no school missed.
+            {plan.bestWeeks.excludedByBlackout > 0 ? ` ${plan.bestWeeks.excludedByBlackout} left out for weeks you cannot go.` : ''}
+            {plan.bestWeeks.daysOffKnown ? '' : ' No school calendar yet, so every weekday counts as school; add one under Trips.'}
+          </p>
+          {plan.bestWeeks.top.length === 0 ? (
+            <p className="mb-4 text-sm text-[var(--color-ink-soft)]">Every window ahead runs into a week you cannot go.</p>
+          ) : (
+            <ol className="mb-4 divide-y divide-[var(--color-line)]">
+              {plan.bestWeeks.top.map((c, i) => (
+                <li key={`${c.startDate}|${c.endDate}`} className={`flex items-start justify-between gap-3 py-2 ${c.current ? 'bg-[var(--color-accent-soft)]' : ''}`}>
+                  <div className="min-w-0 text-sm">
+                    <span className="font-medium">
+                      {i + 1}. {shortDate(c.startDate)} – {shortDate(c.endDate)}, {c.endDate.slice(0, 4)}
+                    </span>
+                    <span className="text-[var(--color-ink-soft)]">
+                      {' '}
+                      · {weekdayName(c.startDate)}, {c.nights} {c.nights === 1 ? 'night' : 'nights'}
+                    </span>
+                    <span className="block text-xs text-[var(--color-ink-soft)]">{c.reasons.join(' · ')}</span>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <Money cents={c.priceCents} className="block text-sm" />
+                    {editable && !c.current ? (
+                      <form action={useDatesAction} className="mt-1">
+                        <input type="hidden" name="trip_id" value={trip.id} />
+                        <input type="hidden" name="start_date" value={c.startDate} />
+                        <input type="hidden" name="end_date" value={c.endDate} />
+                        <button type="submit" className={smallButton}>
+                          Use these dates
+                        </button>
+                      </form>
+                    ) : c.current ? (
+                      <span className="text-xs text-[var(--color-ink-soft)]">this trip</span>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+          <h3 className="font-semibold">A few weeks either side</h3>
+          <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+            The same trip a few weeks either side: how busy the parks are on{' '}
+            {parkDays > 0 ? 'the park days' : 'each day'}, what it costs, and what it runs into. How busy is 1 (quiet)
+            to 10 (packed).
+          </p>
+          <div className="-mx-4 overflow-x-auto px-4">
+            <table className="w-full min-w-[36rem] text-sm">
+              <thead>
+                <tr className="text-left text-xs text-[var(--color-ink-soft)]">
+                  <th className="py-1 pr-2 font-medium">Week</th>
+                  <th className="py-1 pr-2 font-medium">How busy</th>
+                  <th className="py-1 pr-2 font-medium">Price</th>
+                  <th className="py-1 pr-2 font-medium">Getting there</th>
+                  <th className="py-1 pr-2 font-medium">Runs into</th>
+                  <th className="py-1 font-medium"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-line)]">
+                {plan.weeks.map((w) => (
+                  <tr key={w.startDate} className={w.current ? 'bg-[var(--color-accent-soft)]' : ''}>
+                    <td className="py-2 pr-2 align-top">
+                      {shortDate(w.startDate)} – {shortDate(w.endDate)}
+                      <span className="block text-xs text-[var(--color-ink-soft)]">
+                        {weekdayName(w.startDate)}s{w.current ? ' · this trip' : w.past ? ' · already gone' : ''}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-2 align-top">
+                      {w.crowd.average === null ? (
+                        <span className="text-[var(--color-ink-soft)]">no data</span>
+                      ) : (
+                        <>
+                          <strong>{w.crowd.average}</strong> <span className="text-xs text-[var(--color-ink-soft)]">avg</span>, {w.crowd.worst}{' '}
+                          <span className="text-xs text-[var(--color-ink-soft)]">worst</span>
+                          {w.crowd.daysWithData < w.crowd.parkDays ? (
+                            <span className="block text-xs text-[var(--color-caution)]">
+                              {w.crowd.daysWithData} of {w.crowd.parkDays} days known
+                            </span>
+                          ) : null}
+                        </>
+                      )}
+                    </td>
+                    <td className="py-2 pr-2 align-top">
+                      <Money cents={w.price.totalCents} />
+                    </td>
+                    <td className="py-2 pr-2 align-top">
+                      <Money cents={w.travelCents} />
+                    </td>
+                    <td className="py-2 pr-2 align-top">
+                      {w.blackouts.length > 0 ? <Pill tone="behind">{w.blackouts.join(', ')}</Pill> : <span className="text-[var(--color-ink-soft)]">—</span>}
+                    </td>
+                    <td className="py-2 align-top">
+                      {editable && !w.current && !w.past ? (
+                        <form action={useWeekAction}>
+                          <input type="hidden" name="trip_id" value={trip.id} />
+                          <input type="hidden" name="start_date" value={w.startDate} />
+                          <button type="submit" className={smallButton}>
+                            Use this week
+                          </button>
+                        </form>
+                      ) : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+            &ldquo;Use this week&rdquo; and &ldquo;Use these dates&rdquo; move the whole trip, days and unconfirmed reservations
+            with it; a long weekend of another length sets the first and last day afresh. Weeks you cannot go, the school
+            calendar and how the best weeks are picked are set under Trips.
+          </p>
+        </Section>
+
+        {/* ------------------------------------------------------------ How */}
+        <Section
+          id="how"
+          title="How"
+          headline={
+            view.variants.length === 0
+              ? 'No way of doing it priced yet'
+              : `${view.variants.length} ${view.variants.length === 1 ? 'way' : 'ways'} priced${followed ? ` · to-dos follow "${followed.name}"` : ''}`
+          }
+        >
+          {view.variants.length === 0 ? (
+            <p className="text-sm text-[var(--color-ink-soft)]">
+              None yet. Add one below: drive or fly, where to stay, how many park days. Each gets its own price tag under Money.
+            </p>
+          ) : (
+            <ul className="divide-y divide-[var(--color-line)]">
+              {view.variants.map((variant) => {
+                const c = variant.choices
+                const isChosen = variant.id === trip.chosenVariantId
+                return (
+                  <li key={variant.id} className="py-3 first:pt-0 last:pb-0">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="font-semibold">{variant.name}</h3>
+                        <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
+                          {CHOICE_WORDS.travel[c.travel]} · {CHOICE_WORDS.lodging[c.lodging]} · {CHOICE_WORDS.lightningLane[c.lightningLane]} ·{' '}
+                          {CHOICE_WORDS.dining[c.dining]} · {c.parkDays} park {c.parkDays === 1 ? 'day' : 'days'}
+                          {c.promotion ? ` · ${c.promotion.name}` : ''}
+                        </p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <Money cents={variant.price.totalCents} className="font-semibold" />
+                        {isChosen ? (
+                          <div className="mt-1">
+                            <Pill tone="ahead">This is the plan</Pill>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                    {editable ? (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs text-[var(--color-accent)]">Change the choices</summary>
+                        <form action={updateVariantAction} className="mt-2 space-y-2">
+                          <input type="hidden" name="trip_id" value={trip.id} />
+                          <input type="hidden" name="variant_id" value={variant.id} />
+                          <ChoiceFields choices={c} name={variant.name} maxParkDays={nights + 1} />
+                          <p className="text-xs text-[var(--color-ink-soft)]">
+                            The parts are re-listed for the new choices. Figures you typed stay; parts you added stay.
+                          </p>
+                          <button type="submit" className={secondaryButton}>
+                            Save the choices
+                          </button>
+                        </form>
+                        <form action={removeVariantAction} className="mt-3">
+                          <input type="hidden" name="trip_id" value={trip.id} />
+                          <input type="hidden" name="variant_id" value={variant.id} />
+                          <button type="submit" className={quietButton}>
+                            Take this way off
+                          </button>
+                        </form>
+                      </details>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+          {editable ? (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm font-medium">Another way to do it</summary>
+              <form action={addVariantAction} className="mt-2 space-y-2">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <ChoiceFields maxParkDays={nights + 1} />
+                <button type="submit" className={primaryButton}>
+                  Price it
+                </button>
+              </form>
+            </details>
+          ) : null}
+        </Section>
+
+        {/* ------------------------------------------------------------ What to book, and when */}
+        <Section
+          id="to-do"
+          title="What to book, and when"
+          headline={
+            openTasks.length === 0
+              ? plan.tasks.length === 0
+                ? 'Nothing yet'
+                : 'All done'
+              : [
+                  buckets.overdue.length > 0 ? `${buckets.overdue.length} overdue` : null,
+                  buckets.this_month.length > 0 ? `${buckets.this_month.length} this month` : null,
+                  buckets.later.length > 0 ? `${buckets.later.length} later` : null,
+                ]
+                  .filter(Boolean)
+                  .join(', ')
+          }
+        >
+          <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+            When Disney opens each thing, and when the money is due, for the way the plan follows
+            {followed ? ` ("${followed.name}")` : ''}. Edit a to-do and it is yours; a rebuild leaves it alone.
+          </p>
+          {(['overdue', 'this_month', 'later', 'done'] as const).map((bucket) => {
+            const tasks = buckets[bucket]
+            if (tasks.length === 0) return null
+            const title = { overdue: 'Overdue', this_month: 'This month', later: 'Later', done: 'Done' }[bucket]
+            return (
+              <div key={bucket} className="mb-4 last:mb-0">
+                <h3 className={subTitle}>{title}</h3>
+                <ul className="mt-1 divide-y divide-[var(--color-line)]">
+                  {tasks.map((task) => (
+                    <TaskRow key={task.id} task={task} tripId={trip.id} editable={planning} lineName={lineName(task.lineId)} lines={followed?.lines ?? []} overdue={bucket === 'overdue'} />
+                  ))}
+                </ul>
+              </div>
+            )
+          })}
+          {planning ? (
+            <div className="mt-4 space-y-3">
+              <details>
+                <summary className="cursor-pointer text-sm font-medium">Add a to-do</summary>
+                <form action={addTaskAction} className="mt-2 space-y-2">
+                  <input type="hidden" name="trip_id" value={trip.id} />
                   <label className="block text-xs text-[var(--color-ink-soft)]">
-                    Kind
-                    <select name="kind" defaultValue="do" className={input}>
-                      {TASK_KINDS.map((k) => (
-                        <option key={k} value={k}>
-                          {TASK_KIND_LABELS[k]}
-                        </option>
-                      ))}
-                    </select>
+                    What
+                    <input name="label" required placeholder="Book the airport parking" className={input} />
                   </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
-                    By
-                    <input name="due_on" type="date" required defaultValue={trip.startDate} className={input} />
-                  </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
-                    Link (optional)
-                    <input name="link" type="url" placeholder="https://" className={input} />
-                  </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
-                    Part of the trip
-                    <select name="line_id" defaultValue="" className={input}>
-                      <option value="">None</option>
-                      {(followed?.lines ?? []).map((l) => (
-                        <option key={l.id} value={l.id}>
-                          {l.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                      Kind
+                      <select name="kind" defaultValue="do" className={input}>
+                        {TASK_KINDS.map((k) => (
+                          <option key={k} value={k}>
+                            {TASK_KIND_LABELS[k]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                      By
+                      <input name="due_on" type="date" required defaultValue={trip.startDate} className={input} />
+                    </label>
+                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                      Link (optional)
+                      <input name="link" type="url" placeholder="https://" className={input} />
+                    </label>
+                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                      Part of the trip
+                      <select name="line_id" defaultValue="" className={input}>
+                        <option value="">None</option>
+                        {(followed?.lines ?? []).map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <button type="submit" className={secondaryButton}>
+                    Add it
+                  </button>
+                </form>
+              </details>
+              <form action={rebuildTimelineAction}>
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <button type="submit" className={secondaryButton}>
+                  Rebuild the timeline
+                </button>
+                <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                  Re-dates the to-dos the app made from the trip&apos;s dates and choices, and the packing list under Trips.
+                  Anything you edited or ticked stays as it is.
+                </p>
+              </form>
+            </div>
+          ) : null}
+        </Section>
+
+        {/* ------------------------------------------------------------ The days */}
+        <Section
+          id="days"
+          title="The days"
+          headline={`${plan.dayViews.length} ${plan.dayViews.length === 1 ? 'day' : 'days'}, ${parkDays} in the parks`}
+        >
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
+              Which park, rope drop or a lie-in, and what is booked that day. How busy comes from a public crowd calendar
+              (1 quiet to 10 packed), fetched only when you ask, shown before it is kept, and never over a level you typed.
+              A level over {CROWD_STALE_AFTER_DAYS} days old is marked.
+            </p>
+            {planning ? (
+              <form action={checkCrowdsAction} className="shrink-0">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <button type="submit" className={smallButton}>
+                  Check how busy
+                </button>
+              </form>
+            ) : null}
+          </div>
+          <ParkDayPlanCard plan={plan.parkDayPlan} tripId={trip.id} editable={planning} />
+          <div className="grid gap-3 md:grid-cols-2">
+            {plan.dayViews.map((d) => (
+              <DayCard
+                key={d.date}
+                day={d}
+                tripId={trip.id}
+                today={today}
+                editable={planning}
+                proposal={plan.parkDayPlan.assignments.find((a) => a.date === d.date) ?? null}
+              />
+            ))}
+          </div>
+        </Section>
+
+        {/* ------------------------------------------------------------ Reservations */}
+        <Section
+          id="reservations"
+          title="Reservations"
+          headline={
+            plan.reservations.length === 0
+              ? 'Nothing booked yet'
+              : `${plan.reservations.length} booked${withConfirmation > 0 ? `, ${withConfirmation} with a confirmation` : ''}${
+                  plan.money.uncountedCents > 0 ? ` · ${formatCents(plan.money.uncountedCents)} not in any part of the trip` : ''
+                }`
+          }
+        >
+          {plan.reservations.length === 0 ? (
+            <p className="text-sm text-[var(--color-ink-soft)]">Tables, Lightning Lanes, flights, the room: each with its confirmation number, by date.</p>
+          ) : (
+            <ul className="divide-y divide-[var(--color-line)]">
+              {plan.reservations.map((r) => (
+                <ReservationRow key={r.id} reservation={r} tripId={trip.id} editable={planning} lines={followed?.lines ?? []} lineName={lineName(r.lineId)} />
+              ))}
+            </ul>
+          )}
+          {plan.money.countedIn.length > 0 || plan.money.uncountedCents > 0 ? (
+            <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
+              {plan.money.countedIn.map((c) => (
+                <span key={c.lineId} className="block">
+                  <Money cents={c.cents} /> counted in {lineName(c.lineId) ?? 'a part of the trip'}.
+                </span>
+              ))}
+              {plan.money.uncountedCents > 0 ? (
+                <span className="block text-[var(--color-caution)]">
+                  <Money cents={plan.money.uncountedCents} /> of reservations is not counted in any part of the trip. Pick the part each is
+                  counted in, or add a part under Money.
+                </span>
+              ) : null}
+            </p>
+          ) : null}
+          {planning ? (
+            <details className="mt-4">
+              <summary className="cursor-pointer text-sm font-medium">Add a reservation</summary>
+              <form action={addReservationAction} className="mt-2 space-y-2">
+                <input type="hidden" name="trip_id" value={trip.id} />
+                <ReservationFields tripStart={trip.startDate} lines={followed?.lines ?? []} />
                 <button type="submit" className={secondaryButton}>
                   Add it
                 </button>
               </form>
             </details>
-            <form action={rebuildTimelineAction}>
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <button type="submit" className={secondaryButton}>
-                Rebuild the timeline
-              </button>
-              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-                Re-dates the to-dos the app made from the trip&apos;s dates and choices, and the packing list under Trips.
-                Anything you edited or ticked stays as it is.
-              </p>
-            </form>
-          </div>
-        ) : null}
-      </Section>
-
-      {/* ------------------------------------------------------------ The days */}
-      <Section
-        id="days"
-        title="The days"
-        headline={`${plan.dayViews.length} ${plan.dayViews.length === 1 ? 'day' : 'days'}, ${parkDays} in the parks`}
-      >
-        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-          <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
-            Which park, rope drop or a lie-in, and what is booked that day. How busy comes from a public crowd calendar
-            (1 quiet to 10 packed), fetched only when you ask, shown before it is kept, and never over a level you typed.
-            A level over {CROWD_STALE_AFTER_DAYS} days old is marked.
-          </p>
-          {planning ? (
-            <form action={checkCrowdsAction} className="shrink-0">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <button type="submit" className={smallButton}>
-                Check how busy
-              </button>
-            </form>
           ) : null}
-        </div>
-        <ParkDayPlanCard plan={plan.parkDayPlan} tripId={trip.id} editable={planning} />
-        <div className="grid gap-3 md:grid-cols-2">
-          {plan.dayViews.map((d) => (
-            <DayCard
-              key={d.date}
-              day={d}
-              tripId={trip.id}
-              today={today}
-              editable={planning}
-              proposal={plan.parkDayPlan.assignments.find((a) => a.date === d.date) ?? null}
-            />
-          ))}
-        </div>
-      </Section>
+        </Section>
 
-      {/* ------------------------------------------------------------ Reservations */}
-      <Section
-        id="reservations"
-        title="Reservations"
-        headline={
-          plan.reservations.length === 0
-            ? 'Nothing booked yet'
-            : `${plan.reservations.length} booked${withConfirmation > 0 ? `, ${withConfirmation} with a confirmation` : ''}${
-                plan.money.uncountedCents > 0 ? ` · ${formatCents(plan.money.uncountedCents)} not in any part of the trip` : ''
-              }`
-        }
-      >
-        {plan.reservations.length === 0 ? (
-          <p className="text-sm text-[var(--color-ink-soft)]">Tables, Lightning Lanes, flights, the room: each with its confirmation number, by date.</p>
-        ) : (
-          <ul className="divide-y divide-[var(--color-line)]">
-            {plan.reservations.map((r) => (
-              <ReservationRow key={r.id} reservation={r} tripId={trip.id} editable={planning} lines={followed?.lines ?? []} lineName={lineName(r.lineId)} />
-            ))}
-          </ul>
-        )}
-        {plan.money.countedIn.length > 0 || plan.money.uncountedCents > 0 ? (
-          <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
-            {plan.money.countedIn.map((c) => (
-              <span key={c.lineId} className="block">
-                <Money cents={c.cents} /> counted in {lineName(c.lineId) ?? 'a part of the trip'}.
-              </span>
-            ))}
-            {plan.money.uncountedCents > 0 ? (
-              <span className="block text-[var(--color-caution)]">
-                <Money cents={plan.money.uncountedCents} /> of reservations is not counted in any part of the trip. Pick the part each is
-                counted in, or add a part under Money.
-              </span>
-            ) : null}
-          </p>
-        ) : null}
-        {planning ? (
-          <details className="mt-4">
-            <summary className="cursor-pointer text-sm font-medium">Add a reservation</summary>
-            <form action={addReservationAction} className="mt-2 space-y-2">
-              <input type="hidden" name="trip_id" value={trip.id} />
-              <ReservationFields tripStart={trip.startDate} lines={followed?.lines ?? []} />
-              <button type="submit" className={secondaryButton}>
-                Add it
-              </button>
-            </form>
-          </details>
-        ) : null}
-      </Section>
-
-      {/* ------------------------------------------------------------ Money */}
-      <Section
-        id="money"
-        title="Money"
-        headline={followedPrice !== null && followed ? `${formatCents(followedPrice)} for "${followed.name}"` : 'Nothing priced yet'}
-      >
-        {editable ? (
-          <div className="mb-4 rounded-xl bg-[var(--color-surface)] p-3">
-            <h3 className="font-semibold">Looking things up</h3>
-            <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
-              The two money figures the app can fetch, from public services with no account: the drive, and this
-              week&apos;s gas price. Nothing Disney sells can be looked up. A figure you type yourself is never overwritten.
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <div>
-                <p className="text-sm">
-                  <strong>The drive.</strong>{' '}
-                  {view.drive
-                    ? `${view.drive.miles.toLocaleString('en-US')} miles, ${hoursAndMinutes(view.drive.minutes)} each way (looked up ${humanDate(view.drive.fetchedOn)}).`
-                    : 'Not looked up yet.'}
-                </p>
-                <form action={checkDriveAction} className="mt-2">
-                  <input type="hidden" name="trip_id" value={trip.id} />
-                  <button type="submit" className={secondaryButton} disabled={!homeIsLocated(trip.home)}>
-                    Check the drive
-                  </button>
-                </form>
-              </div>
-              <div>
-                <p className="text-sm">
-                  <strong>Gas.</strong>{' '}
-                  {view.gasPrice ? (
-                    <>
-                      <Money cents={view.gasPrice.centsPerGallon} /> a gallon, week of {humanDate(view.gasPrice.observationDate)}.
-                    </>
-                  ) : (
-                    'No price yet.'
-                  )}
-                </p>
-                <form action={checkGasPriceAction} className="mt-2">
-                  <input type="hidden" name="trip_id" value={trip.id} />
-                  <button type="submit" className={secondaryButton}>
-                    Check gas price
-                  </button>
-                </form>
-                <form action={useGasPriceAction} className="mt-2 flex items-end gap-2">
-                  <input type="hidden" name="trip_id" value={trip.id} />
-                  <label className="min-w-0 flex-1 text-xs text-[var(--color-ink-soft)]">
-                    Or type a price a gallon
-                    <input name="dollars_per_gallon" inputMode="decimal" placeholder="3.05" className={input} />
-                  </label>
-                  <button type="submit" className={smallButton}>
-                    Use it
-                  </button>
-                </form>
+        {/* ------------------------------------------------------------ Money */}
+        <Section
+          id="money"
+          wide
+          title="Money"
+          headline={followedPrice !== null && followed ? `${formatCents(followedPrice)} for "${followed.name}"` : 'Nothing priced yet'}
+        >
+          {editable ? (
+            <div className="mb-4 rounded-xl bg-[var(--color-surface)] p-3">
+              <h3 className="font-semibold">Looking things up</h3>
+              <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
+                The two money figures the app can fetch, from public services with no account: the drive, and this
+                week&apos;s gas price. Nothing Disney sells can be looked up. A figure you type yourself is never overwritten.
+              </p>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-sm">
+                    <strong>The drive.</strong>{' '}
+                    {view.drive
+                      ? `${view.drive.miles.toLocaleString('en-US')} miles, ${hoursAndMinutes(view.drive.minutes)} each way (looked up ${humanDate(view.drive.fetchedOn)}).`
+                      : 'Not looked up yet.'}
+                  </p>
+                  <form action={checkDriveAction} className="mt-2">
+                    <input type="hidden" name="trip_id" value={trip.id} />
+                    <button type="submit" className={secondaryButton} disabled={!homeIsLocated(trip.home)}>
+                      Check the drive
+                    </button>
+                  </form>
+                </div>
+                <div>
+                  <p className="text-sm">
+                    <strong>Gas.</strong>{' '}
+                    {view.gasPrice ? (
+                      <>
+                        <Money cents={view.gasPrice.centsPerGallon} /> a gallon, week of {humanDate(view.gasPrice.observationDate)}.
+                      </>
+                    ) : (
+                      'No price yet.'
+                    )}
+                  </p>
+                  <form action={checkGasPriceAction} className="mt-2">
+                    <input type="hidden" name="trip_id" value={trip.id} />
+                    <button type="submit" className={secondaryButton}>
+                      Check gas price
+                    </button>
+                  </form>
+                  <form action={useGasPriceAction} className="mt-2 flex items-end gap-2">
+                    <input type="hidden" name="trip_id" value={trip.id} />
+                    <label className="min-w-0 flex-1 text-xs text-[var(--color-ink-soft)]">
+                      Or type a price a gallon
+                      <input name="dollars_per_gallon" inputMode="decimal" placeholder="3.05" className={input} />
+                    </label>
+                    <button type="submit" className={smallButton}>
+                      Use it
+                    </button>
+                  </form>
+                </div>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {view.variants.length === 0 ? (
-          <p className="text-sm text-[var(--color-ink-soft)]">Price a way of doing it under How, and its price tag appears here.</p>
-        ) : null}
-        <div className="grid gap-4 md:grid-cols-2">
-          {view.variants.map((variant) => {
-            const isChosen = variant.id === trip.chosenVariantId
-            const grouped = TRIP_LINE_CATEGORIES.map((category) => ({
-              category,
-              lines: variant.lines.filter((l) => l.category === category),
-            })).filter((g) => g.lines.length > 0)
-            const unpriced = variant.lines.filter((l) => l.category !== 'promotion' && lineTotalCents(l) === 0).length
-            return (
-              <Card key={variant.id} className={isChosen ? 'border-[var(--color-ahead)]' : ''}>
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="font-semibold">{variant.name}</h3>
-                  {isChosen ? <Pill tone="ahead">This is the plan</Pill> : null}
-                </div>
-
-                <p className="mt-3 text-3xl font-semibold tracking-tight">
-                  <Money cents={variant.price.totalCents} />
-                </p>
-                <p className="text-xs text-[var(--color-ink-soft)]">
-                  <Money cents={variant.price.partsCents} /> of parts
-                  {variant.price.promotionCents < 0 ? (
-                    <>
-                      , <Money cents={variant.price.promotionCents} /> off
-                    </>
-                  ) : null}
-                  , plus a <Hint detail="A percent of everything else, rounded up to the dollar, for what the list forgot. Set under Our usual figures."><span>cushion</span></Hint> of{' '}
-                  <Money cents={variant.price.cushionCents} />.
-                  {unpriced > 0 ? ` ${unpriced} ${unpriced === 1 ? 'part still needs' : 'parts still need'} a figure.` : ''}
-                </p>
-                <p className="mt-2 text-sm">
-                  <Hint detail="The earliest due date among parts worth more than the cushion you keep back before sharing anything out (under Settings). Small parts and deals do not set it.">
-                    First money due
-                  </Hint>
-                  : <strong>{humanDate(variant.firstMoneyDue)}</strong>
-                </p>
-
-                {editable ? (
-                  <form action={sendToPlansAction} className="mt-3 space-y-2">
-                    <input type="hidden" name="trip_id" value={trip.id} />
-                    <input type="hidden" name="variant_id" value={variant.id} />
-                    <label className="block text-xs text-[var(--color-ink-soft)]">
-                      Saves into
-                      <select name="reserve_account" required className={input} defaultValue="">
-                        <option value="" disabled>
-                          Pick an account
-                        </option>
-                        {accounts
-                          .filter((a) => a.writable && a.active)
-                          .map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.name}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <button type="submit" className={primaryButton}>
-                      Add to Plans
-                    </button>
-                    <p className="text-xs text-[var(--color-ink-soft)]">
-                      Makes a draft plan you can look over and start saving for. A part with its own account keeps it.
-                    </p>
-                  </form>
-                ) : null}
-
-                <details className="mt-4" open={view.variants.length === 1}>
-                  <summary className="cursor-pointer text-sm font-medium">What&apos;s in it</summary>
-                  <div className="mt-2 space-y-4">
-                    {grouped.map((group) => (
-                      <div key={group.category}>
-                        <h4 className={subTitle}>{CATEGORY_LABELS[group.category]}</h4>
-                        <ul className="mt-1 divide-y divide-[var(--color-line)]">
-                          {group.lines.map((line) => (
-                            <LineRow key={line.id} line={line} tripId={trip.id} today={today} editable={editable} accounts={accounts} />
-                          ))}
-                        </ul>
-                        {group.category === 'lodging' && variant.choices.lodging === 'dvc_rental' && planning ? (
-                          <div className="mt-2 rounded-xl bg-[var(--color-surface)] p-3">
-                            <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
-                              What a DVC broker had for these dates, two days either side: a note beside the figure above, never
-                              the figure itself. Read from the broker&apos;s public page when you press the button.
-                            </p>
-                            {plan.dvcListings.length > 0 ? (
-                              <ul className="mt-2 divide-y divide-[var(--color-line)]">
-                                {plan.dvcListings.map((l) => (
-                                  <ListingRow key={`${l.source}|${l.resort}|${l.room}|${l.checkIn}|${l.nights}`} listing={l} />
-                                ))}
-                              </ul>
-                            ) : (
-                              <p className="mt-2 text-sm text-[var(--color-ink-soft)]">Nothing read yet.</p>
-                            )}
-                            <form action={checkDvcListingsAction} className="mt-2">
-                              <input type="hidden" name="trip_id" value={trip.id} />
-                              <button type="submit" className={secondaryButton}>
-                                Check what DVC brokers have
-                              </button>
-                            </form>
-                          </div>
-                        ) : null}
-                      </div>
-                    ))}
-                    {editable ? (
-                      <details>
-                        <summary className="cursor-pointer text-sm font-medium">Add a part</summary>
-                        <form action={addTripLineAction} className="mt-2 space-y-2">
-                          <input type="hidden" name="trip_id" value={trip.id} />
-                          <input type="hidden" name="variant_id" value={variant.id} />
-                          <label className="block text-xs text-[var(--color-ink-soft)]">
-                            What
-                            <input name="label" required placeholder="Stroller rental" className={input} />
-                          </label>
-                          <div className="grid grid-cols-2 gap-2">
-                            <label className="block text-xs text-[var(--color-ink-soft)]">
-                              Part of
-                              <select name="category" className={input} defaultValue="souvenirs">
-                                {TRIP_LINE_CATEGORIES.map((category) => (
-                                  <option key={category} value={category}>
-                                    {CATEGORY_LABELS[category]}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="block text-xs text-[var(--color-ink-soft)]">
-                              Due
-                              <input name="due_date" type="date" required defaultValue={trip.startDate} className={input} />
-                            </label>
-                            <label className="block text-xs text-[var(--color-ink-soft)]">
-                              Each
-                              <input name="unit_amount" required inputMode="decimal" placeholder="60" className={input} />
-                            </label>
-                            <label className="block text-xs text-[var(--color-ink-soft)]">
-                              How many
-                              <input name="quantity" inputMode="numeric" defaultValue={1} className={input} />
-                            </label>
-                          </div>
-                          <button type="submit" className={secondaryButton}>
-                            Add it
-                          </button>
-                        </form>
-                      </details>
-                    ) : null}
+          {view.variants.length === 0 ? (
+            <p className="text-sm text-[var(--color-ink-soft)]">Price a way of doing it under How, and its price tag appears here.</p>
+          ) : null}
+          <div className="grid gap-4 md:grid-cols-2">
+            {view.variants.map((variant) => {
+              const isChosen = variant.id === trip.chosenVariantId
+              const grouped = TRIP_LINE_CATEGORIES.map((category) => ({
+                category,
+                lines: variant.lines.filter((l) => l.category === category),
+              })).filter((g) => g.lines.length > 0)
+              const unpriced = variant.lines.filter((l) => l.category !== 'promotion' && lineTotalCents(l) === 0).length
+              return (
+                <Card key={variant.id} className={isChosen ? 'border-[var(--color-ahead)]' : ''}>
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="font-semibold">{variant.name}</h3>
+                    {isChosen ? <Pill tone="ahead">This is the plan</Pill> : null}
                   </div>
-                </details>
-              </Card>
-            )
-          })}
-        </div>
-      </Section>
+
+                  <p className="mt-3 text-3xl font-semibold tracking-tight">
+                    <Money cents={variant.price.totalCents} />
+                  </p>
+                  <p className="text-xs text-[var(--color-ink-soft)]">
+                    <Money cents={variant.price.partsCents} /> of parts
+                    {variant.price.promotionCents < 0 ? (
+                      <>
+                        , <Money cents={variant.price.promotionCents} /> off
+                      </>
+                    ) : null}
+                    , plus a <Hint detail="A percent of everything else, rounded up to the dollar, for what the list forgot. Set under Our usual figures."><span>cushion</span></Hint> of{' '}
+                    <Money cents={variant.price.cushionCents} />.
+                    {unpriced > 0 ? ` ${unpriced} ${unpriced === 1 ? 'part still needs' : 'parts still need'} a figure.` : ''}
+                  </p>
+                  <p className="mt-2 text-sm">
+                    <Hint detail="The earliest due date among parts worth more than the cushion you keep back before sharing anything out (under Settings). Small parts and deals do not set it.">
+                      First money due
+                    </Hint>
+                    : <strong>{humanDate(variant.firstMoneyDue)}</strong>
+                  </p>
+
+                  {editable ? (
+                    <form action={sendToPlansAction} className="mt-3 space-y-2">
+                      <input type="hidden" name="trip_id" value={trip.id} />
+                      <input type="hidden" name="variant_id" value={variant.id} />
+                      <label className="block text-xs text-[var(--color-ink-soft)]">
+                        Saves into
+                        <select name="reserve_account" required className={input} defaultValue="">
+                          <option value="" disabled>
+                            Pick an account
+                          </option>
+                          {accounts
+                            .filter((a) => a.writable && a.active)
+                            .map((a) => (
+                              <option key={a.id} value={a.id}>
+                                {a.name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <button type="submit" className={primaryButton}>
+                        Add to Plans
+                      </button>
+                      <p className="text-xs text-[var(--color-ink-soft)]">
+                        Makes a draft plan you can look over and start saving for. A part with its own account keeps it.
+                      </p>
+                    </form>
+                  ) : null}
+
+                  <details className="mt-4" open={view.variants.length === 1}>
+                    <summary className="cursor-pointer text-sm font-medium">What&apos;s in it</summary>
+                    <div className="mt-2 space-y-4">
+                      {grouped.map((group) => (
+                        <div key={group.category}>
+                          <h4 className={subTitle}>{CATEGORY_LABELS[group.category]}</h4>
+                          <ul className="mt-1 divide-y divide-[var(--color-line)]">
+                            {group.lines.map((line) => (
+                              <LineRow key={line.id} line={line} tripId={trip.id} today={today} editable={editable} accounts={accounts} />
+                            ))}
+                          </ul>
+                          {group.category === 'lodging' && variant.choices.lodging === 'dvc_rental' && planning ? (
+                            <div className="mt-2 rounded-xl bg-[var(--color-surface)] p-3">
+                              <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
+                                What a DVC broker had for these dates, two days either side: a note beside the figure above, never
+                                the figure itself. Read from the broker&apos;s public page when you press the button.
+                              </p>
+                              {plan.dvcListings.length > 0 ? (
+                                <ul className="mt-2 divide-y divide-[var(--color-line)]">
+                                  {plan.dvcListings.map((l) => (
+                                    <ListingRow key={`${l.source}|${l.resort}|${l.room}|${l.checkIn}|${l.nights}`} listing={l} />
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="mt-2 text-sm text-[var(--color-ink-soft)]">Nothing read yet.</p>
+                              )}
+                              <form action={checkDvcListingsAction} className="mt-2">
+                                <input type="hidden" name="trip_id" value={trip.id} />
+                                <button type="submit" className={secondaryButton}>
+                                  Check what DVC brokers have
+                                </button>
+                              </form>
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                      {editable ? (
+                        <details>
+                          <summary className="cursor-pointer text-sm font-medium">Add a part</summary>
+                          <form action={addTripLineAction} className="mt-2 space-y-2">
+                            <input type="hidden" name="trip_id" value={trip.id} />
+                            <input type="hidden" name="variant_id" value={variant.id} />
+                            <label className="block text-xs text-[var(--color-ink-soft)]">
+                              What
+                              <input name="label" required placeholder="Stroller rental" className={input} />
+                            </label>
+                            <div className="grid grid-cols-2 gap-2">
+                              <label className="block text-xs text-[var(--color-ink-soft)]">
+                                Part of
+                                <select name="category" className={input} defaultValue="souvenirs">
+                                  {TRIP_LINE_CATEGORIES.map((category) => (
+                                    <option key={category} value={category}>
+                                      {CATEGORY_LABELS[category]}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                              <label className="block text-xs text-[var(--color-ink-soft)]">
+                                Due
+                                <input name="due_date" type="date" required defaultValue={trip.startDate} className={input} />
+                              </label>
+                              <label className="block text-xs text-[var(--color-ink-soft)]">
+                                Each
+                                <input name="unit_amount" required inputMode="decimal" placeholder="60" className={input} />
+                              </label>
+                              <label className="block text-xs text-[var(--color-ink-soft)]">
+                                How many
+                                <input name="quantity" inputMode="numeric" defaultValue={1} className={input} />
+                              </label>
+                            </div>
+                            <button type="submit" className={secondaryButton}>
+                              Add it
+                            </button>
+                          </form>
+                        </details>
+                      ) : null}
+                    </div>
+                  </details>
+                </Card>
+              )
+            })}
+          </div>
+        </Section>
+      </div>
     </>
   )
 }
 
 /** A section of the trip that folds up on a phone with its headline still showing. */
-function Section({ id, title, headline, children }: { id: string; title: string; headline: string; children: ReactNode }) {
+function Section({ id, title, headline, wide, children }: { id: string; title: string; headline: string; wide?: boolean; children: ReactNode }) {
   return (
-    <details id={id} open className="mb-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]">
+    <details id={id} open className={`mb-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] ${wide ? 'xl:col-span-2' : ''}`}>
       <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="text-lg font-semibold">{title}</h2>

@@ -231,6 +231,9 @@ import {
   federalHolidaysBetween,
   indexWaitHistory,
   monthBounds,
+  monthOf,
+  yearStrip,
+  yearStripBounds,
   normalsForDates,
   normalsFromArchive,
   OPEN_METEO_SOURCE,
@@ -243,6 +246,7 @@ import {
   validateWaitObservation,
   type BusynessSources,
   type CalendarMonth,
+  type YearStripMonth,
   type ParkHours,
   type ParkWeather,
   parkDayPlanDiff,
@@ -4364,6 +4368,13 @@ export class Engine {
       blackouts,
       today: this.today(),
     })
+  }
+
+  /** The twelve-month strip above the calendar (D48), from this month on: how busy and whether we can go, a sliver a day. */
+  async calendarYear(destination: TripDestination = 'wdw'): Promise<YearStripMonth[]> {
+    const fromMonth = monthOf(this.today())
+    const [busyness, blackouts] = await Promise.all([this.busynessSources(yearStripBounds(fromMonth), destination), this.blackoutDates()])
+    return yearStrip({ fromMonth, busyness, blackouts, today: this.today() })
   }
 
   private async recordSchoolCalendarChange(
