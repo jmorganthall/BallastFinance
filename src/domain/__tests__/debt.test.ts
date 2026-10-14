@@ -16,6 +16,7 @@ import {
   type Debt,
   monthlyPaymentCents,
   promoCliff,
+  chargedBackInterestCents,
 } from '../debt'
 
 const TODAY = '2026-09-19'
@@ -503,7 +504,7 @@ describe('projections run at the rate in force each month, never a blend', () =>
     balanceCents: 577542,
     aprBasisPoints: 3049,
     minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 30300 },
-    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-03-31' }],
+    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-03-31', chargedBack: false }],
   })
 
   it('charges nothing while the deal runs, and the full rate only on what survives it', () => {
@@ -528,5 +529,50 @@ describe('projections run at the rate in force each month, never a blend', () =>
   it('still bills a plain card its full rate from the first month', () => {
     const plain = debt({ id: 'p', name: 'Plain', balanceCents: 500000, aprBasisPoints: 2499 })
     expect(interestOverNextYearCents(plain, '2026-09-21')).toBeGreaterThan(80000)
+  })
+})
+
+describe('interest charged back when a deal ends unpaid (PRD D49 (9))', () => {
+  // $1,200 at 0% until 2027-03-31, $100 a month from 2026-09-21: six
+  // payments land before the deal ends (Oct 21 - Mar 21), leaving $600.
+  const card = debt({
+    id: 'store',
+    name: 'Store card',
+    balanceCents: 120000,
+    aprBasisPoints: 2400,
+    minPaymentRule: { type: 'fixed', amountCents: 10000 },
+    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-03-31', startDate: '2026-06-21' }],
+  })
+  const TODAY_HERE = '2026-09-21'
+
+  it('agrees with the cliff about how many payments land before the deal ends', () => {
+    expect(promoCliff(card, TODAY_HERE)).toMatchObject({ monthsLeft: 6, shortCents: 60000 })
+  })
+
+  it('charges 2% a month on the deal balance from its start to its end, when it ends unpaid', () => {
+    // Three months before today at the $1,200 known now: 3 x $24 = $72.
+    // Then each month at the balance before its payment: $24 (1,200), $22
+    // (1,100), $20 (1,000), $18 (900), $16 (800), $14 (700) = $114. $186 in all.
+    expect(chargedBackInterestCents(card, TODAY_HERE)).toBe(18600)
+  })
+
+  it('charges nothing back when the terms say so, or when the deal is cleared in time', () => {
+    const notCharged = { ...card, promoRules: [{ ...card.promoRules[0]!, chargedBack: false }] }
+    expect(chargedBackInterestCents(notCharged, TODAY_HERE)).toBeNull()
+    const cleared = { ...card, plannedPaymentCents: 20000 }
+    expect(chargedBackInterestCents(cleared, TODAY_HERE)).toBeNull()
+  })
+
+  it('without a start date, counts from the day the debt was entered', () => {
+    const entered = { ...card, enteredOn: '2026-08-21', promoRules: [{ ...card.promoRules[0]!, startDate: undefined }] }
+    // One month before today: $24, then the same $114.
+    expect(chargedBackInterestCents(entered, TODAY_HERE)).toBe(13800)
+  })
+
+  it('lands in the projection as interest, so "Interest left to pay" carries it', () => {
+    const notCharged = { ...card, promoRules: [{ ...card.promoRules[0]!, chargedBack: false }] }
+    const withBack = projectPayoff({ debt: card, today: TODAY_HERE })
+    const without = projectPayoff({ debt: notCharged, today: TODAY_HERE })
+    expect(withBack.totalInterestCents - without.totalInterestCents).toBeGreaterThanOrEqual(18600)
   })
 })

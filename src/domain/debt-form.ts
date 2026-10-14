@@ -32,6 +32,10 @@ export interface DebtFormValues {
   has_promo: boolean
   promo_rate: string
   promo_until: string
+  /** 'yes', 'no', or '' for not sure yet (taken as yes; D49 (9)). */
+  promo_charged_back: string
+  /** When the deal started, blank for the day the debt was entered. */
+  promo_started: string
 }
 
 export type DebtFormField = keyof DebtFormValues
@@ -68,6 +72,8 @@ export const EMPTY_DEBT_FORM: DebtFormValues = {
   has_promo: false,
   promo_rate: '',
   promo_until: '',
+  promo_charged_back: 'yes',
+  promo_started: '',
 }
 
 const CATEGORIES: readonly DebtCategory[] = ['consumer', 'auto', 'mortgage']
@@ -170,8 +176,29 @@ export function parseDebtForm(values: DebtFormValues): DebtFormResult {
           `interest rate field, not the promotional one.`,
       )
     }
+    const startedRaw = values.promo_started.trim()
+    let startDate: CivilDate | undefined
+    if (startedRaw) {
+      try {
+        assertCivilDate(startedRaw)
+        startDate = startedRaw
+        if (validUntil && startedRaw >= validUntil) {
+          problem('promo_started', 'The deal has to start before it ends.')
+        }
+      } catch {
+        problem('promo_started', 'That is not a real date.')
+      }
+    }
+    const chargedBack =
+      values.promo_charged_back === 'yes' ? true : values.promo_charged_back === 'no' ? false : undefined
     if (rateBasisPoints !== null && rateBasisPoints >= 0 && validUntil) {
-      promoRules.push({ rateBasisPoints, appliesTo: 'full', untilDate: validUntil })
+      promoRules.push({
+        rateBasisPoints,
+        appliesTo: 'full',
+        untilDate: validUntil,
+        ...(chargedBack === undefined ? {} : { chargedBack }),
+        ...(startDate ? { startDate } : {}),
+      })
     }
   }
 
@@ -225,6 +252,8 @@ export function debtFormValuesOf(debt: {
     has_promo: promo !== undefined,
     promo_rate: promo ? percent(promo.rateBasisPoints) : '',
     promo_until: promo?.untilDate ?? '',
+    promo_charged_back: promo?.chargedBack === true ? 'yes' : promo?.chargedBack === false ? 'no' : promo ? '' : 'yes',
+    promo_started: promo?.startDate ?? '',
   }
 }
 
@@ -250,5 +279,7 @@ export function debtFormValuesFrom(get: (name: string) => unknown): DebtFormValu
     has_promo: flag('has_promo'),
     promo_rate: text('promo_rate'),
     promo_until: text('promo_until'),
+    promo_charged_back: text('promo_charged_back'),
+    promo_started: text('promo_started'),
   }
 }

@@ -320,7 +320,7 @@ describe('a deal-rate card takes only what its payments would leave at the full 
     balanceCents: 577542,
     aprBasisPoints: 3049,
     minPaymentRule: { type: 'percent_with_floor', basisPoints: 100, floorCents: 30300 },
-    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-03-31' }],
+    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-03-31', chargedBack: false }],
   })
   const altitude = debt({
     id: 'altitude',

@@ -38,7 +38,7 @@ describeDb('debt statuses', () => {
       balanceCents: 670239,
       balanceAsOf: '2026-10-01',
       aprBasisPoints: 3049,
-      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-01-12' }],
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-01-12', chargedBack: false }],
       minPaymentRule: { type: 'fixed', amountCents: 4000 },
       plannedPaymentCents: 47500,
     })
@@ -93,5 +93,23 @@ describeDb('debt statuses', () => {
     const { todos, caughtUp } = await engine.debtStatuses()
     expect(todos).toEqual([])
     expect(caughtUp).toBe(true)
+  })
+
+  it('a deal entered before Ballast asked about charged-back interest asks once, and the answer is kept', async () => {
+    const debt = await engine.createDebt({
+      name: 'Store card',
+      category: 'consumer',
+      balanceCents: 90000,
+      aprBasisPoints: 2699,
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-06-30' }],
+      minPaymentRule: { type: 'fixed', amountCents: 20000 },
+    })
+    expect((await engine.debtStatuses()).todos.map((t) => [t.kind, t.debtName])).toEqual([
+      ['check_deal_terms', 'Store card'],
+    ])
+    const [stored] = (await engine.listDebts()).filter((d) => d.id === debt.id)
+    await engine.updateDebt(debt.id, { promoRules: stored!.promoRules.map((r) => ({ ...r, chargedBack: false })) })
+    expect((await engine.debtStatuses()).todos).toEqual([])
+    expect((await engine.listDebts()).find((d) => d.id === debt.id)!.enteredOn).toBe(TODAY)
   })
 })

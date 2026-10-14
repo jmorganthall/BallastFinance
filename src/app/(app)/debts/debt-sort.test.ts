@@ -4,17 +4,22 @@ import { DEFAULT_SORT, nextSort, sortDebtRows, type SortableDebtRow } from './de
 // The screenshot's ladder, in payoff order. Names carry the rank so a failure
 // reads as a sequence.
 const rows: SortableDebtRow[] = [
-  { rank: 1, name: 'US Bank Shield 0568', balanceCents: 670239, effectiveAprBasisPoints: 0, paymentCents: 47500, payoffDate: '2027-12-21' },
-  { rank: 2, name: 'US Bank Shield 9795', balanceCents: 577542, effectiveAprBasisPoints: 3049, paymentCents: 30300, payoffDate: '2028-05-21' },
-  { rank: 3, name: 'Car Payment', balanceCents: 1781712, effectiveAprBasisPoints: 599, paymentCents: 55525, payoffDate: '2029-09-21' },
-  { rank: 4, name: 'AMEX', balanceCents: 1066893, effectiveAprBasisPoints: 990, paymentCents: 28253, payoffDate: '2030-07-21' },
-  { rank: 5, name: 'Lightstream', balanceCents: 2128349, effectiveAprBasisPoints: 1254, paymentCents: 52633, payoffDate: '2031-02-21' },
-  { rank: 6, name: 'US Bank Altitude Reserve', balanceCents: 567020, effectiveAprBasisPoints: 2049, paymentCents: 5671, payoffDate: null },
-  { rank: 7, name: 'Mortgage', balanceCents: 38122696, effectiveAprBasisPoints: 475, paymentCents: 253940, payoffDate: '2045-10-21' },
+  { rank: 1, name: 'US Bank Shield 0568', balanceCents: 670239, effectiveAprBasisPoints: 0, paymentCents: 47500, payoffDate: '2027-12-21', interestLeftCents: 5239 },
+  { rank: 2, name: 'US Bank Shield 9795', balanceCents: 577542, effectiveAprBasisPoints: 3049, paymentCents: 30300, payoffDate: '2028-05-21', interestLeftCents: 32142 },
+  { rank: 3, name: 'Car Payment', balanceCents: 1781712, effectiveAprBasisPoints: 599, paymentCents: 55525, payoffDate: '2029-09-21', interestLeftCents: 250000 },
+  { rank: 4, name: 'AMEX', balanceCents: 1066893, effectiveAprBasisPoints: 990, paymentCents: 28253, payoffDate: '2030-07-21', interestLeftCents: 180000 },
+  { rank: 5, name: 'Lightstream', balanceCents: 2128349, effectiveAprBasisPoints: 1254, paymentCents: 52633, payoffDate: '2031-02-21', interestLeftCents: 520000 },
+  { rank: 6, name: 'US Bank Altitude Reserve', balanceCents: 567020, effectiveAprBasisPoints: 2049, paymentCents: 5671, payoffDate: null, interestLeftCents: null },
+  { rank: 7, name: 'Mortgage', balanceCents: 38122696, effectiveAprBasisPoints: 475, paymentCents: 253940, payoffDate: '2045-10-21', interestLeftCents: 9100000 },
 ]
 const ranks = (sorted: SortableDebtRow[]) => sorted.map((row) => row.rank)
 
 describe('sortDebtRows', () => {
+  it('orders by interest left to pay, a debt never paid off costing the most', () => {
+    expect(ranks(sortDebtRows(rows, { key: 'interest', direction: 'asc' }))).toEqual([1, 2, 4, 3, 5, 7, 6])
+    expect(ranks(sortDebtRows(rows, { key: 'interest', direction: 'desc' }))).toEqual([6, 7, 5, 3, 4, 2, 1])
+  })
+
   it('defaults to the payoff order and never mutates the input', () => {
     const copy = [...rows].reverse()
     expect(ranks(sortDebtRows(copy, DEFAULT_SORT))).toEqual([1, 2, 3, 4, 5, 6, 7])

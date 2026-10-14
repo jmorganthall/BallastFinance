@@ -56,6 +56,10 @@ export interface DebtRow {
   /** What goes at it each month: the planned payment, else the minimum. */
   paymentCents: number
   payoffDate: string | null
+  /** Interest from today to payoff at the payment set up now (D49 (10)); null when never paid off. */
+  interestLeftCents: number | null
+  /** That figure as a share of the largest on the table, for its bar. */
+  interestLeftShare: number | null
   cumulativeCostCents: number
   cumulativeFreedCents: number
   breakEvenMonths: number | null
@@ -68,7 +72,7 @@ const smallField =
   'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-2 text-base text-[var(--color-ink)]'
 const th = 'px-2 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
 const td = 'px-2 py-3 align-top'
-const COLUMNS = 6
+const COLUMNS = 7
 
 export function DebtTable({ rows, today }: { rows: DebtRow[]; today: CivilDate }) {
   const [open, setOpen] = useState<Open>(null)
@@ -96,6 +100,7 @@ export function DebtTable({ rows, today }: { rows: DebtRow[]; today: CivilDate }
             {heading('rate', 'Rate', 'hidden text-right sm:table-cell')}
             {heading('payment', 'Per month', 'text-right')}
             {heading('payoff', 'Paid off by', 'hidden md:table-cell')}
+            {heading('interest', 'Interest left to pay', 'hidden text-right sm:table-cell')}
             {/* On a phone the Edit link sits under the debt's name instead, so the table stays inside its card. */}
             <th className={`${th} hidden w-16 sm:table-cell`}>
               <span className="sr-only">Actions</span>
@@ -216,6 +221,22 @@ function Row({
         </td>
         <td className={`${td} hidden md:table-cell`}>
           {row.payoffDate ? humanDate(row.payoffDate) : <span className="text-[var(--color-ink-soft)]">Never, at this rate</span>}
+        </td>
+        <td className={`${td} hidden text-right tabular sm:table-cell`}>
+          {row.interestLeftCents === null ? (
+            <span className="text-xs text-[var(--color-behind)]">Never paid off at this payment</span>
+          ) : (
+            <>
+              {formatCents(row.interestLeftCents)}
+              {/* How it compares with the costliest debt, read at a glance. */}
+              <span aria-hidden="true" className="mt-1 ml-auto block h-1.5 w-20 rounded-full bg-[var(--color-surface)]">
+                <span
+                  className="block h-1.5 rounded-full bg-[var(--color-caution)]"
+                  style={{ width: `${Math.round((row.interestLeftShare ?? 0) * 100)}%` }}
+                />
+              </span>
+            </>
+          )}
         </td>
         <td className={`${td} hidden text-right sm:table-cell`}>{editButton}</td>
       </tr>

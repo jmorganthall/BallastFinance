@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Debt } from '../debt'
 import { debtStatusLabel, debtStatusLine, debtStatuses, debtTodoSentence } from '../debt-status'
+import { formatCents } from '../money'
 
 // PRD D49 (4)-(6): one status per debt, its words and its to-dos.
 
@@ -13,7 +14,7 @@ function card(over: Partial<Debt> & Pick<Debt, 'id' | 'name'>): Debt {
     balanceCents: 670239,
     balanceAsOf: '2026-10-01',
     aprBasisPoints: 3049,
-    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-01-12' }],
+    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-01-12', chargedBack: false }],
     minPaymentRule: { type: 'fixed', amountCents: 4000 },
     plannedPaymentCents: 47500,
     fixedPayment: false,
@@ -29,7 +30,7 @@ describe('debtStatuses', () => {
     name: 'Shield 9795',
     balanceCents: 482958,
     plannedPaymentCents: 30300,
-    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-02-15' }],
+    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-02-15', chargedBack: false }],
   })
 
   it('a deal the payments will not clear in time Misses its 0%, with the cliff and the fix', () => {
@@ -63,14 +64,17 @@ describe('debtStatuses', () => {
       name: 'Soon',
       balanceCents: 100000,
       plannedPaymentCents: null,
-      promoRules: [{ rateBasisPoints: 299, appliesTo: 'full', untilDate: '2026-11-30' }],
+      promoRules: [{ rateBasisPoints: 299, appliesTo: 'full', untilDate: '2026-11-30', chargedBack: false }],
     })
     const [view] = debtStatuses({ debts: [soon], today: TODAY }).debts
     expect(view!.status).toBe('short')
     expect(debtStatusLabel(view!)).toBe('Short')
     expect(view!.miss!.owedAtEndCents).toBe(96000)
     expect(debtStatusLine(view!)[0]!.text).toBe('The 2.99% deal ends ')
-    const later = debtStatuses({ debts: [{ ...soon, promoRules: [{ rateBasisPoints: 299, appliesTo: 'full', untilDate: '2027-06-30' }] }], today: TODAY })
+    const later = debtStatuses({
+      debts: [{ ...soon, promoRules: [{ rateBasisPoints: 299, appliesTo: 'full', untilDate: '2027-06-30', chargedBack: false }] }],
+      today: TODAY,
+    })
     expect(debtStatusLabel(later.debts[0]!)).toBe('Misses its deal')
   })
 
@@ -98,6 +102,47 @@ describe('debtStatuses', () => {
   it('a paid-off debt has no status and asks nothing', () => {
     const done = { ...misses, balanceCents: 0, state: 'paid_off' as const, balanceAsOf: '2025-01-01' }
     expect(debtStatuses({ debts: [done], today: TODAY })).toEqual({ debts: [], todos: [], caughtUp: true })
+  })
+})
+
+describe('a deal that charges its interest back (D49 (9))', () => {
+  const shield: Debt = {
+    id: '0568',
+    householdId: 'hh',
+    name: 'Shield 0568',
+    category: 'consumer',
+    balanceCents: 670239,
+    balanceAsOf: '2026-10-01',
+    aprBasisPoints: 3049,
+    promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-01-12', chargedBack: true }],
+    minPaymentRule: { type: 'fixed', amountCents: 4000 },
+    plannedPaymentCents: 47500,
+    fixedPayment: false,
+    state: 'open',
+    enteredOn: TODAY,
+  }
+
+  it('says how much interest missing it brings back', () => {
+    const [view] = debtStatuses({ debts: [shield], today: TODAY }).debts
+    // From today: the full rate on each month's deal balance before its
+    // payment, $6,702.39 falling by $475 a month over 14 months.
+    let expected = 0
+    for (let k = 0; k < 14; k += 1) expected += Math.round(((670239 - k * 47500) * 3049) / 10000 / 12)
+    expect(view!.miss!.chargedBackCents).toBe(expected)
+    expect(debtStatusLine(view!).map((p) => p.text).join('')).toBe(
+      `The 0% ends 2028-01-12 with $52.39 still owed, which brings back about ${formatCents(expected)} of interest. Pay $478.75 a month to clear it in time.`,
+    )
+  })
+
+  it('a deal nobody has checked is taken as charged back, and asks once to be checked', () => {
+    const unasked = { ...shield, promoRules: [{ ...shield.promoRules[0]!, chargedBack: undefined }] }
+    const { debts, todos } = debtStatuses({ debts: [unasked], today: TODAY })
+    expect(debts[0]!.miss!.chargedBackCents).not.toBeNull()
+    expect(todos.map((t) => t.kind)).toEqual(['raise_debt_payment', 'check_deal_terms'])
+    expect(debtTodoSentence(todos[1]!)).toBe(
+      'Check the terms of the deal on Shield 0568: if it is not paid off by the time it ends, is the interest charged back to when it started?',
+    )
+    expect(todos[1]!.blocking).toBe(false)
   })
 })
 
