@@ -134,6 +134,13 @@
       "when": 1791945534481,
       "tag": "0018_debt_balance_recorded_at",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791945877411,
+      "tag": "0019_debt_payment_day",
+      "breakpoints": true
     }
   ]
 }

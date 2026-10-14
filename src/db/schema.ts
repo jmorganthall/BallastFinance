@@ -23,6 +23,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -382,12 +383,20 @@ export const debts = pgTable(
      * balance is on track to clear before its rate ends.
      */
     plannedPaymentCents: cents('planned_payment_cents'),
+    /**
+     * The day of the month the regular payment goes out, 1-31 (PRD D49 (3)).
+     * Null: no payment is assumed between stated balances.
+     */
+    paymentDay: smallint('payment_day'),
     fixedPayment: boolean('fixed_payment').notNull().default(false),
     state: debtStateEnum('state').notNull().default('open'),
     /** The home or vehicle this debt is secured on (PRD §15). Removing the asset unlinks it. */
     assetId: uuid('asset_id').references(() => assets.id, { onDelete: 'set null' }),
   },
-  (t) => [index('debts_household_idx').on(t.householdId, t.state)],
+  (t) => [
+    index('debts_household_idx').on(t.householdId, t.state),
+    check('debts_payment_day_in_month', sql`${t.paymentDay} is null or ${t.paymentDay} between 1 and 31`),
+  ],
 )
 
 /**

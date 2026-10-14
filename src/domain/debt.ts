@@ -51,6 +51,19 @@ export interface Debt {
    */
   plannedPaymentCents?: Cents | null
   /**
+   * The day of the month the regular payment goes out (PRD D49 (3)), 1-31,
+   * a day past a short month's end meaning its last day. Null or absent: no
+   * payment is assumed between stated balances.
+   */
+  paymentDay?: number | null
+  /**
+   * The last balance a person stated, as of `balanceAsOf`, when the engine
+   * read it. `balanceCents` is the likely balance today worked out from it
+   * (D49 (2)-(3)); the two differ once a payment has been made or assumed.
+   * Never stored: the engine fills it on every read.
+   */
+  statedBalanceCents?: Cents
+  /**
    * Listed in the PRD's data model, read by nothing. The form no longer asks
    * for it: a set-amount minimum already says the payment never changes, and
    * asking twice looked like two different questions. Stays false.
@@ -105,6 +118,112 @@ export function balanceAfterPayments(statedCents: Cents, paymentsSinceCents: rea
   return Math.max(0, statedCents - paid)
 }
 
+/** A payment marked done on a debt since its stated balance (D49 (1)). */
+export interface DebtPaymentMade {
+  on: CivilDate
+  amountCents: Cents
+  /**
+   * The regular monthly payment, recorded on the payment form. It stands in
+   * for the payment assumed that month. A payment asked for on a to-do is
+   * the money a share-out sends on top of the regular one (PRD §6), so it
+   * never replaces it.
+   */
+  regular: boolean
+}
+
+/** The day `paymentDay` falls on in the month of `d`, or that month's last day if it is shorter. */
+function paymentDateIn(d: CivilDate, paymentDay: number): CivilDate {
+  const [y, m] = d.split('-').map(Number) as [number, number]
+  const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate()
+  return `${d.slice(0, 7)}-${String(Math.min(paymentDay, lastDay)).padStart(2, '0')}` as CivilDate
+}
+
+/**
+ * A debt's likely balance today (PRD D49 (2)-(3)), from the balance a person
+ * last stated (`debt.balanceCents` as of `debt.balanceAsOf`).
+ *
+ * Without a payment day, it is the stated balance less the payments marked
+ * done since: nothing is assumed. With one, each payment day after the
+ * statement and up to today charges a month's interest at the rate in force
+ * that month (a deal balance at its deal rate until the deal ends, the rest
+ * at the full rate -- the same month as `projectPayoff`'s) and then takes the
+ * regular payment, the planned one or else the minimum, the way an account
+ * assumes its confirmed transfer runs (D35). A regular payment marked done in
+ * a month replaces that month's assumed one; a payment asked for on a to-do
+ * comes off on top. Payments go to the deal balance first. Never below zero.
+ */
+export function likelyDebtBalance(args: {
+  debt: Debt
+  payments: readonly DebtPaymentMade[]
+  today: CivilDate
+}): Cents {
+  const { debt, payments, today } = args
+  const paymentDay = debt.paymentDay ?? null
+  if (paymentDay === null) {
+    return balanceAfterPayments(
+      debt.balanceCents,
+      payments.map((p) => p.amountCents),
+    )
+  }
+
+  const deals = debt.promoRules
+    .filter((rule) => compareDates(rule.untilDate, debt.balanceAsOf) > 0)
+    .sort((a, b) => compareDates(a.untilDate, b.untilDate))
+  let standard = debt.balanceCents
+  const tranches: { balance: Cents; rateBasisPoints: number; untilDate: CivilDate }[] = []
+  for (const rule of deals) {
+    if (standard <= 0) break
+    const amount = rule.appliesTo === 'full' ? standard : Math.min(rule.amountCents ?? 0, standard)
+    if (amount <= 0) continue
+    tranches.push({ balance: amount, rateBasisPoints: rule.rateBasisPoints, untilDate: rule.untilDate })
+    standard -= amount
+  }
+  const total = () => standard + tranches.reduce((sum, t) => sum + t.balance, 0)
+  const pay = (cents: Cents) => {
+    let left = cents
+    for (const t of tranches) {
+      const take = Math.min(t.balance, left)
+      t.balance -= take
+      left -= take
+    }
+    standard -= Math.min(standard, left)
+  }
+
+  const monthOf = (d: CivilDate) => d.slice(0, 7)
+  const paidRegularly = new Set(payments.filter((p) => p.regular).map((p) => monthOf(p.on)))
+
+  type Step = { on: CivilDate; payment?: DebtPaymentMade }
+  const steps: Step[] = payments.map((payment) => ({ on: payment.on, payment }))
+  for (let month = 0; ; month += 1) {
+    const due = paymentDateIn(addMonths(`${debt.balanceAsOf.slice(0, 7)}-01` as CivilDate, month), paymentDay)
+    if (compareDates(due, today) > 0) break
+    if (compareDates(due, debt.balanceAsOf) > 0) steps.push({ on: due })
+  }
+  // In date order; on the same day a payment marked done comes before the
+  // assumed one, so the month's interest is charged on what is left.
+  steps.sort((a, b) => compareDates(a.on, b.on) || (a.payment ? 0 : 1) - (b.payment ? 0 : 1))
+
+  for (const step of steps) {
+    if (step.payment) {
+      pay(step.payment.amountCents)
+      continue
+    }
+    for (let i = tranches.length - 1; i >= 0; i -= 1) {
+      if (compareDates(tranches[i]!.untilDate, step.on) <= 0) {
+        standard += tranches[i]!.balance
+        tranches.splice(i, 1)
+      }
+    }
+    if (total() <= 0) continue
+    for (const t of tranches) t.balance += Math.round((t.balance * t.rateBasisPoints) / BASIS_POINTS / 12)
+    standard += Math.round((standard * debt.aprBasisPoints) / BASIS_POINTS / 12)
+    if (!paidRegularly.has(monthOf(step.on))) {
+      pay(Math.min(total(), monthlyPaymentCents({ ...debt, balanceCents: total() })))
+    }
+  }
+  return Math.max(0, total())
+}
+
 /**
  * A promo rate that is not actually cheaper than the rate it reverts to is a
  * data-entry mistake, and a costly one: it silently disables the whole
@@ -125,7 +244,11 @@ export function validateDebtInputs(input: {
   aprBasisPoints: number
   minPaymentRule: MinPaymentRule
   plannedPaymentCents?: Cents | null
+  paymentDay?: number | null
 }): void {
+  if (input.paymentDay != null && !(Number.isInteger(input.paymentDay) && input.paymentDay >= 1 && input.paymentDay <= 31)) {
+    throw new DebtDataError('The payment day is a day of the month, 1 to 31.')
+  }
   if (!Number.isFinite(input.balanceCents) || input.balanceCents < 0) {
     throw new DebtDataError('A debt balance must be zero or more.')
   }

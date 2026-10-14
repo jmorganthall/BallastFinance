@@ -128,4 +128,41 @@ describeDb('debt payments reach the balance', () => {
     await engine.confirmInstruction({ instructionId })
     expect((await engine.listDebts()).map((d) => d.balanceCents)).toEqual(before.map((d) => d.balanceCents))
   })
+
+  it('with a payment day, the likely balance assumes the regular payment and says what was stated', async () => {
+    const created = await engine.createDebt({
+      name: 'Shield autopay',
+      category: 'consumer',
+      balanceCents: 670239,
+      balanceAsOf: STATED_ON,
+      aprBasisPoints: 3049,
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2028-01-12' }],
+      minPaymentRule: { type: 'fixed', amountCents: 4000 },
+      plannedPaymentCents: 47500,
+      paymentDay: 13,
+    })
+    const debt = await balanceOf('Shield autopay')
+    expect(debt.paymentDay).toBe(13)
+    expect(debt.balanceCents).toBe(670239 - 47500)
+    expect(debt.statedBalanceCents).toBe(670239)
+
+    // The regular payment, recorded on the form, stands in for the assumed one.
+    await engine.confirmDebtPayment({ debtId: created.id, amountCents: 47500 })
+    expect((await balanceOf('Shield autopay')).balanceCents).toBe(670239 - 47500)
+
+    // A share-out's to-do comes off on top.
+    await payByTodo(created.id, 'Shield autopay', 20000)
+    expect((await balanceOf('Shield autopay')).balanceCents).toBe(670239 - 47500 - 20000)
+  })
+
+  it('the payment day is a term: changed on the debt, recorded before and after', async () => {
+    const debt = await balanceOf('Shield 9795')
+    await engine.updateDebt(debt.id, { paymentDay: 13 })
+    expect((await balanceOf('Shield 9795')).paymentDay).toBe(13)
+    const [change] = (
+      await db.select().from(schema.events).where(eq(schema.events.kind, 'debt_updated'))
+    ).filter((r) => r.householdId === householdId)
+    expect(change!.payload).toMatchObject({ before: { payment_day: null }, after: { payment_day: 13 } })
+    await expect(engine.updateDebt(debt.id, { paymentDay: 32 })).rejects.toThrow('1 to 31')
+  })
 })

@@ -40,6 +40,7 @@ describe('the add-a-debt form, parsed', () => {
       promoRules: [],
       creditLimitCents: 1500000,
       plannedPaymentCents: null,
+      paymentDay: null,
     })
   })
 
@@ -126,6 +127,7 @@ describe('the add-a-debt form, parsed', () => {
       promoRules: [{ rateBasisPoints: 0, appliesTo: 'full' as const, untilDate: '2027-03-01' }],
       creditLimitCents: 1500000,
       plannedPaymentCents: null,
+      paymentDay: null,
     }
     const values = debtFormValuesOf(stored)
     expect(values).toMatchObject({
@@ -168,5 +170,28 @@ describe('the add-a-debt form, parsed', () => {
     expect(result.input.aprBasisPoints).toBe(650)
     expect(result.input.minPaymentRule).toEqual({ type: 'fixed', amountCents: 25000 })
     expect(result.input.promoRules[0]!.untilDate).toBe('2027-01-15')
+  })
+})
+
+describe('the payment day (D49 (3))', () => {
+  const base = {
+    ...EMPTY_DEBT_FORM,
+    name: 'Shield',
+    balance: '6702.39',
+    apr: '30.49',
+    min_amount: '40',
+  }
+  it('takes a day of the month, or none', () => {
+    const day = parseDebtForm({ ...base, payment_day: '13' })
+    expect(day.ok && day.input.paymentDay).toBe(13)
+    const none = parseDebtForm({ ...base, payment_day: ' ' })
+    expect(none.ok && none.input.paymentDay).toBeNull()
+  })
+  it('refuses anything that is not a day of the month, next to its box', () => {
+    for (const payment_day of ['0', '32', 'the 13th', '1.5']) {
+      const result = parseDebtForm({ ...base, payment_day })
+      expect(result.ok).toBe(false)
+      expect(!result.ok && result.problems.map((p) => p.field)).toEqual(['payment_day'])
+    }
   })
 })
