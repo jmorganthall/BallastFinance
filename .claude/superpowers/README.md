@@ -9,8 +9,13 @@ They are copied rather than enabled as a plugin because a cloud session does not
 install plugins a repository turns on in `.claude/settings.json`; it does load
 the repository's `.claude/skills/`.
 
-Not copied: the plugin's SessionStart hook, which injects `using-superpowers`
-into every session. Without it the skills fire on their descriptions. The
+The plugin's SessionStart hook is copied too, unchanged, as
+`.claude/hooks/superpowers-session-start`, and wired in `.claude/settings.json`.
+It injects `using-superpowers` into every session; it is run with
+`CLAUDE_PLUGIN_ROOT` set to `.claude` so it finds the skill and answers in
+Claude Code's format. Remove that entry to have the skills fire only on their
+descriptions. A cloud session with several repositories does not run a
+repository's hooks. The
 skills refer to each other as `superpowers:<name>`; here each is just `<name>`.
 The repo's CLAUDE.md is the source of truth where the two disagree.
 
