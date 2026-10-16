@@ -9,6 +9,7 @@ import {
   position,
   requirementsFor,
   slotTicks,
+  smartSaving,
   steadyLineStart,
   type PositionInput,
 } from '../position'
@@ -108,6 +109,53 @@ describe('the Disney plan becomes one transfer per account (Phase A acceptance)'
   it('has nothing to judge until the transfers are confirmed', () => {
     expect(p.accounts.map((a) => a.status)).toEqual(['unconfirmed', 'unconfirmed'])
     expect(p.todos.map((t) => t.kind === 'set_transfer' && t.toCents)).toEqual([21177, 7059])
+  })
+})
+
+describe('smart saving (D50)', () => {
+  it('sets what Ballast needs a week against every plan saving on its own', () => {
+    const annual = { ...gifts, id: 'annual', name: 'Annual Expenses' }
+    const longTerm = { ...gifts, id: 'long-term', name: 'Long Term Savings' }
+    const p = position({
+      today: '2026-09-19',
+      accounts: [annual, longTerm, { ...gifts, id: 'empty', name: 'Nothing in it' }],
+      packages: [pkg({ committedAt: '2026-09-19' })],
+      lineItems: [
+        li({ id: 'tickets', unitAmountCents: 60000, quantity: 3, dueDate: '2027-01-16', reserveAccountId: 'annual' }),
+        li({ id: 'airfare', unitAmountCents: 45000, quantity: 3, dueDate: '2026-11-21', reserveAccountId: 'annual' }),
+        li({ id: 'food', unitAmountCents: 9000, quantity: 5, dueDate: '2027-01-16', reserveAccountId: 'annual' }),
+        li({ id: 'lodging', unitAmountCents: 120000, dueDate: '2027-01-16', reserveAccountId: 'long-term' }),
+      ],
+      counts: [
+        { accountId: 'annual', amountCents: 0, on: '2026-09-19' },
+        { accountId: 'long-term', amountCents: 0, on: '2026-09-19' },
+      ],
+    })
+    const s = smartSaving(p)!
+    // What the account cards say they need: $211.77 + $70.59.
+    expect(s.withBallastPerWeekCents).toBe(21177 + 7059)
+    // Each part on its own: the airfare alone is $150 a week.
+    expect(s.onItsOwnPerWeekCents).toBe(15000 + Math.ceil(180000 / 17) + Math.ceil(45000 / 17) + Math.ceil(120000 / 17))
+    expect(s.lessPerWeekCents).toBe(s.onItsOwnPerWeekCents - s.withBallastPerWeekCents)
+    expect(s.lessPerYearCents).toBe(s.lessPerWeekCents * 52)
+    expect(s.withBallastShare).toBeCloseTo(28236 / s.onItsOwnPerWeekCents, 4)
+    expect(s.planCount).toBe(1)
+  })
+
+  it('claims nothing when Ballast needs as much as the plans on their own', () => {
+    // Saving since 1 Sep, but counted at $0 today: the 52 transfers left
+    // need more than the 56-transfer even share.
+    const p = position(input({ lineItems: [li({ id: 'roof' })], counts: [{ accountId: gifts.id, amountCents: 0, on: TODAY }] }))
+    const s = smartSaving(p)!
+    expect(s.withBallastPerWeekCents).toBe(1924)
+    expect(s.onItsOwnPerWeekCents).toBeLessThan(1924)
+    expect(s.lessPerWeekCents).toBe(0)
+    expect(s.lessPerYearCents).toBe(0)
+    expect(s.withBallastShare).toBe(1)
+  })
+
+  it('has no headline without a live plan', () => {
+    expect(smartSaving(position(input({})))).toBeNull()
   })
 })
 

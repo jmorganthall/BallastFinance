@@ -1690,3 +1690,45 @@ export function planChart(args: {
     targetCents: plan.totalCents,
   }
 }
+
+/**
+ * The headline (D50): what Ballast needs a week against every plan saving on
+ * its own. Both sides are "what it takes": the transfer each account card
+ * says it needs, and each part's even share from its Saving since, added up
+ * (D41 (1)). The difference is the whole of what paying the soonest dates
+ * first out of the money already there is worth. Null with no live plan.
+ */
+export interface SmartSaving {
+  /** What every account with a plan needs a week, as its card says it. */
+  withBallastPerWeekCents: Cents
+  /** Every live part saving evenly on its own, added up. */
+  onItsOwnPerWeekCents: Cents
+  /** How much less Ballast needs; 0 when it needs as much or more, and then nothing is claimed. */
+  lessPerWeekCents: Cents
+  /** That over a year of 52 transfers. */
+  lessPerYearCents: Cents
+  /** With Ballast as a share of on its own, 0 to 1, for the bar: four decimals. */
+  withBallastShare: number
+  /** Live plans with at least one live part. */
+  planCount: number
+}
+
+export function smartSaving(p: Pick<HouseholdPosition, 'accounts' | 'plans'>): SmartSaving | null {
+  const planCount = p.plans.filter((plan) => plan.parts.length > 0).length
+  if (planCount === 0) return null
+  const withPlans = p.accounts.filter((a) => a.parts.length > 0)
+  const withBallastPerWeekCents = withPlans.reduce((s, a) => s + a.neededPerWeekCents, 0)
+  const onItsOwnPerWeekCents = withPlans.reduce((s, a) => s + a.steadyPerWeekCents, 0)
+  const lessPerWeekCents = Math.max(0, onItsOwnPerWeekCents - withBallastPerWeekCents)
+  return {
+    withBallastPerWeekCents,
+    onItsOwnPerWeekCents,
+    lessPerWeekCents,
+    lessPerYearCents: lessPerWeekCents * 52,
+    withBallastShare:
+      onItsOwnPerWeekCents <= 0
+        ? 1
+        : Math.min(1, Math.round((withBallastPerWeekCents / onItsOwnPerWeekCents) * 10000) / 10000),
+    planCount,
+  }
+}
