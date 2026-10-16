@@ -14,6 +14,7 @@ import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, Money, PageHeader, Pill, When, Zzz } from '@/components/ui'
 import { AccountPositionCard } from '@/components/account-position'
 import { CloseOutCard } from '@/components/close-out-card'
+import { SmartSavingCard } from '@/components/smart-saving'
 import {
   attentionHeadline,
   awakeCloseOuts,
@@ -27,6 +28,7 @@ import {
   formatCents,
   instructionSentenceParts,
   runningAdjustments,
+  smartSaving,
   taskBucket,
   type CivilDate,
   type DerivedTodo,
@@ -279,6 +281,7 @@ export default async function ThisWeekPage({
   const needAttention = shown.filter((a) => a.status !== 'on_track').length
 
   const firstName = viewer.name?.split(' ')[0] ?? 'there'
+  const saving = smartSaving(position)
 
   return (
     <>
@@ -286,6 +289,13 @@ export default async function ThisWeekPage({
         title="This week"
         subtitle={`Hi ${firstName} — here is where everything stands, as of ${humanDate(today)}.`}
       />
+
+      {/*
+        * Smart saving (D50 (1)): what Ballast needs a week for every plan,
+        * against every plan saving on its own. The first thing on the page,
+        * because the lower weekly amount is what Ballast is for.
+        */}
+      {saving ? <SmartSavingCard saving={saving} /> : null}
 
       {/*
         * The headline (D35). "All caught up" means every account, run forward
