@@ -78,7 +78,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
   const endsShort = last.cents < chart.targetCents
   const todayX = dayNumber(today) >= x0 && dayNumber(today) <= x1 ? sx(today) : null
   const turn = chart.story.turn
-  const below = chart.onItsOwn.some((p, i) => p.cents > (points[i]?.cents ?? p.cents))
+  const below = chart.dipsBelow
 
   return (
     <figure className="m-0">

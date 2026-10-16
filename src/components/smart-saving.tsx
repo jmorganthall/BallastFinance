@@ -17,7 +17,10 @@ export function SmartSavingCard({ saving }: { saving: SmartSaving }) {
       <p className="text-sm text-[var(--color-ink-soft)]">Your weekly set-aside</p>
       <p className="mt-1">
         <Money cents={saving.withBallastPerWeekCents} className="text-4xl font-bold tracking-tight" />{' '}
-        <span className="text-[var(--color-ink-soft)]">a week covers {plans}</span>
+        <span className="text-[var(--color-ink-soft)]">
+          a week covers {plans}
+          {saving.coversOnItsOwn ? '' : ', once the to-dos below are done'}
+        </span>
       </p>
       {saving.lessPerWeekCents > 0 ? (
         <>

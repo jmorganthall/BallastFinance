@@ -116,7 +116,7 @@ describe('smart saving (D50)', () => {
   it('sets what Ballast needs a week against every plan saving on its own', () => {
     const annual = { ...gifts, id: 'annual', name: 'Annual Expenses' }
     const longTerm = { ...gifts, id: 'long-term', name: 'Long Term Savings' }
-    const p = position({
+    const facts: PositionInput = {
       today: '2026-09-19',
       accounts: [annual, longTerm, { ...gifts, id: 'empty', name: 'Nothing in it' }],
       packages: [pkg({ committedAt: '2026-09-19' })],
@@ -130,16 +130,61 @@ describe('smart saving (D50)', () => {
         { accountId: 'annual', amountCents: 0, on: '2026-09-19' },
         { accountId: 'long-term', amountCents: 0, on: '2026-09-19' },
       ],
-    })
-    const s = smartSaving(p)!
-    // What the account cards say they need: $211.77 + $70.59.
-    expect(s.withBallastPerWeekCents).toBe(21177 + 7059)
+    }
+    const p = position(facts)
+    // Nobody has set the transfers up yet: the figure covers the plans
+    // once that is done, and nothing is claimed until then.
+    const asked = smartSaving(p)!
+    expect(asked.withBallastPerWeekCents).toBe(21177 + 7059)
+    expect(asked.coversOnItsOwn).toBe(false)
+    expect(asked.lessPerWeekCents).toBe(0)
     // Each part on its own: the airfare alone is $150 a week.
-    expect(s.onItsOwnPerWeekCents).toBe(15000 + Math.ceil(180000 / 17) + Math.ceil(45000 / 17) + Math.ceil(120000 / 17))
+    expect(asked.onItsOwnPerWeekCents).toBe(15000 + Math.ceil(180000 / 17) + Math.ceil(45000 / 17) + Math.ceil(120000 / 17))
+
+    const set = position({
+      ...facts,
+      transfers: [
+        { accountId: 'annual', perWeekCents: 21177, confirmedOn: '2026-09-19' },
+        { accountId: 'long-term', perWeekCents: 7059, confirmedOn: '2026-09-19' },
+      ],
+    })
+    const s = smartSaving(set)!
+    expect(s.coversOnItsOwn).toBe(true)
+    expect(s.withBallastPerWeekCents).toBe(set.accounts.reduce((t, a) => t + a.neededPerWeekCents, 0))
+    expect(s.onItsOwnPerWeekCents).toBe(asked.onItsOwnPerWeekCents)
     expect(s.lessPerWeekCents).toBe(s.onItsOwnPerWeekCents - s.withBallastPerWeekCents)
+    expect(s.lessPerWeekCents).toBeGreaterThan(0)
     expect(s.lessPerYearCents).toBe(s.lessPerWeekCents * 52)
-    expect(s.withBallastShare).toBeCloseTo(28236 / s.onItsOwnPerWeekCents, 4)
+    expect(s.withBallastShare).toBeCloseTo(s.withBallastPerWeekCents / s.onItsOwnPerWeekCents, 4)
     expect(s.planCount).toBe(1)
+  })
+
+  it('never counts a one-time move as saving', () => {
+    // $1,000 due in eleven days with nothing there and $10 a week at the
+    // bank: a one-time move is asked, so the weekly figure covers nothing yet.
+    const p = position(
+      input({
+        lineItems: [li({ id: 'soon', dueDate: '2026-10-09' })],
+        counts: [{ accountId: gifts.id, amountCents: 0, on: TODAY }],
+        transfers: [{ accountId: gifts.id, perWeekCents: 1000, confirmedOn: TODAY }],
+      }),
+    )
+    expect(p.accounts[0]!.oneTimeMove).not.toBeNull()
+    const s = smartSaving(p)!
+    expect(s.coversOnItsOwn).toBe(false)
+    expect(s.lessPerWeekCents).toBe(0)
+  })
+
+  it('leaves a part on or past its date out of saving on its own', () => {
+    const p = position(
+      input({
+        lineItems: [li({ id: 'party', unitAmountCents: 50000, dueDate: '2026-09-26' }), li({ id: 'roof' })],
+        counts: [{ accountId: gifts.id, amountCents: 150000, on: TODAY }],
+        transfers: [{ accountId: gifts.id, perWeekCents: 0, confirmedOn: TODAY }],
+      }),
+    )
+    const roof = p.accounts[0]!.parts.find((x) => x.lineItem.id === 'roof')!
+    expect(smartSaving(p)!.onItsOwnPerWeekCents).toBe(roof.steadyPerWeekCents)
   })
 
   it('claims nothing when Ballast needs as much as the plans on their own', () => {
@@ -682,7 +727,44 @@ describe('the plan chart beside saving it on its own (D50)', () => {
     expect(turn.onItsOwnCents).toBeGreaterThan(turn.cents)
     expect(turn.perWeekAfterCents).toBeGreaterThan(0)
     expect(turn.perWeekAfterCents).toBeLessThanOrEqual(asked)
-    expect(chart.story.due).toEqual({ on: '2027-09-24', cents: 400000, totalCents: 400000 })
+    expect(chart.story.due).toEqual({ on: '2027-09-24', cents: 400000, totalCents: 400000, reachesTotal: true })
+    expect(chart.story.onTrack).toBe(true)
+  })
+
+  it('puts the turning point on a drawn point however coarsely the chart is drawn', () => {
+    const coarse = planChart({ plan, household: p, today: TODAY, transferWeekday: FRIDAY, maxPoints: 5 })!
+    const turn = coarse.story.turn!
+    const before = coarse.actual.filter((x) => compareDates(x.date, turn.on) <= 0).at(-1)!
+    expect(before.cents).toBe(turn.cents)
+  })
+
+  it('never promises on a transfer nobody has set up', () => {
+    const unset = position(facts)
+    const c = planChart({ plan: unset.plans.find((x) => x.package.id === trip.id)!, household: unset, today: TODAY, transferWeekday: FRIDAY })!
+    expect(unset.accounts[0]!.status).toBe('unconfirmed')
+    expect(c.story.onTrack).toBe(false)
+  })
+
+  it('works out what is below its own pace account by account', () => {
+    // The trip's lodging sits in a second account, well ahead of its pace;
+    // its tickets, in the first, are behind theirs while Christmas is paid
+    // first. Ahead in one account never hides below in the other.
+    const other = { ...gifts, id: 'acct-other', name: 'Long Term' }
+    const split = position({
+      ...facts,
+      accounts: [gifts, other],
+      lineItems: [...lineItems, li({ id: 'lodging', packageId: trip.id, unitAmountCents: 400000, dueDate: '2027-09-24', reserveAccountId: other.id })],
+      counts: [
+        { accountId: gifts.id, amountCents: 100000, on: TODAY },
+        { accountId: other.id, amountCents: 400000, on: TODAY },
+      ],
+    })
+    const tripPlan = split.plans.find((x) => x.package.id === trip.id)!
+    const c = planChart({ plan: tripPlan, household: split, today: TODAY, transferWeekday: FRIDAY })!
+    const tickets = tripPlan.parts.find((x) => x.lineItem.id === 'trip')!
+    expect(tripPlan.countedCents).toBeGreaterThan(tripPlan.savedForCents)
+    expect(c.story.now.belowCents).toBe(tickets.savedForCents - tickets.countedCents)
+    expect(c.story.now.covering.map((x) => x.name)).toEqual(['Christmas'])
   })
 
   it('claims nothing for a plan at or ahead of its own pace', () => {
@@ -952,6 +1034,13 @@ describe('invariants over randomised households (D35)', () => {
         expect(now.coveringCents + now.toComeCents).toBe(now.belowCents)
         expect(now.covering.length > 0).toBe(now.coveringCents > 0)
         expect(chart.story.due.cents).toBe(chart.actual.at(-1)!.cents)
+        if (chart.story.onTrack) {
+          expect(chart.story.due.reachesTotal).toBe(true)
+          expect(plan.status).toBe('on_track')
+        }
+        if (saving && saving.lessPerWeekCents > 0) {
+          for (const a of p.accounts.filter((x) => x.parts.length > 0)) expect(a.oneTimeMove).toBeNull()
+        }
         if (chart.story.turn) {
           expect(compareDates(chart.story.turn.on, today)).toBeGreaterThan(0)
           expect(compareDates(chart.story.turn.on, chart.story.due.on)).toBeLessThan(0)

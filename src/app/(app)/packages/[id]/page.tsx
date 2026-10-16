@@ -288,7 +288,7 @@ export default async function PackageDetailPage({
         <Card className="mb-4">
           <h2 className="mb-3 text-sm font-semibold">How the money builds up</h2>
           <AccrualChart chart={curve} today={today} />
-          {plan ? <PlanStory story={curve.story} status={plan.status} today={today} /> : null}
+          {plan ? <PlanStory story={curve.story} today={today} /> : null}
         </Card>
       ) : null}
 

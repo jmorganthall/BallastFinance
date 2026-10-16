@@ -9,7 +9,7 @@
 
 import type { ReactNode } from 'react'
 import { Money, When } from '@/components/ui'
-import { barOf, type CivilDate, type PartStatus, type PlanStory as Story, type StoryPlan } from '@/domain'
+import { barOf, type CivilDate, type PlanStory as Story, type StoryPlan } from '@/domain'
 
 function names(plans: readonly StoryPlan[]): string {
   const all = plans.map((p) => p.name)
@@ -39,10 +39,10 @@ function Step({ label, children }: { label: ReactNode; children: ReactNode }) {
   )
 }
 
-export function PlanStory({ story, status, today }: { story: Story; status: PartStatus; today: CivilDate }) {
+export function PlanStory({ story, today }: { story: Story; today: CivilDate }) {
   const { now, turn, due } = story
   const total = due.totalCents
-  const there = due.cents >= total
+  const there = due.reachesTotal
   return (
     <div className="mt-4">
       <div className={`grid gap-2 ${turn ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
@@ -63,11 +63,11 @@ export function PlanStory({ story, status, today }: { story: Story; status: Part
               {now.coveringCents > 0 ? (
                 <>
                   {' '}
-                  <Money cents={now.coveringCents} /> of that is paying {names(now.covering)} first, due sooner in
-                  the same account.
+                  <Money cents={now.coveringCents} /> of the difference is paying {names(now.covering)} first, due
+                  sooner in the same account.
                 </>
               ) : null}
-              {now.toComeCents > 0 ? (
+              {now.toComeCents > 0 && there ? (
                 <>
                   {' '}
                   {now.coveringCents > 0 ? 'The other ' : 'The '}
@@ -113,7 +113,7 @@ export function PlanStory({ story, status, today }: { story: Story; status: Part
           </p>
         </Step>
       </div>
-      {status === 'on_track' && there ? (
+      {story.onTrack ? (
         <p className="mt-3 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm">
           <strong className="text-[var(--color-ahead)]">
             On track: all <Money cents={total} /> <When date={due.on} today={today} as="due" />.
