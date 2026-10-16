@@ -627,10 +627,75 @@ describe('the plan chart (D40)', () => {
     expect(chart.actual[0]).toEqual({ date: TODAY, cents: 50000 })
     expect(chart.actual.at(-1)!.cents).toBeLessThan(200000)
     expect(chart.afterFix!.at(-1)!.cents).toBe(200000)
+    expect(chart.story.due.cents).toBeLessThan(chart.story.due.totalCents)
     const fine = position({ ...facts, transfers: [{ accountId: gifts.id, perWeekCents: 10000, confirmedOn: '2026-09-01' }] })
     const fineChart = planChart({ plan: fine.plans[0]!, household: fine, today: TODAY, transferWeekday: FRIDAY })!
     expect(fineChart.afterFix).toBeNull()
     expect(fineChart.actual.at(-1)!.cents).toBe(200000)
+  })
+})
+
+describe('the plan chart beside saving it on its own (D50)', () => {
+  // Christmas started last week, so its own pace is near nothing, but it is
+  // due in twelve transfers: the account's money is paying it first. The
+  // trip has been saving since January and holds less than its own pace.
+  const christmas = pkg({ id: 'pkg-xmas', name: 'Christmas', committedAt: '2026-09-25' })
+  const trip = pkg({ id: 'pkg-trip', name: 'Disney trip', committedAt: '2026-01-02' })
+  const lineItems = [
+    li({ id: 'gifts', packageId: christmas.id, unitAmountCents: 120000, dueDate: '2026-12-25' }),
+    li({ id: 'trip', packageId: trip.id, unitAmountCents: 400000, dueDate: '2027-09-24' }),
+  ]
+  const facts = input({
+    packages: [christmas, trip],
+    lineItems,
+    counts: [{ accountId: gifts.id, amountCents: 100000, on: TODAY }],
+  })
+  const asked = position(facts).accounts[0]!.weeklyCents
+  const p = position({ ...facts, transfers: [{ accountId: gifts.id, perWeekCents: asked, confirmedOn: TODAY }] })
+  const plan = p.plans.find((x) => x.package.id === trip.id)!
+  const chart = planChart({ plan, household: p, today: TODAY, transferWeekday: FRIDAY })!
+
+  it('draws saving it on its own on the same dates, reaching the total on the day', () => {
+    expect(plan.status).toBe('on_track')
+    expect(chart.onItsOwn.map((x) => x.date)).toEqual(chart.actual.map((x) => x.date))
+    expect(chart.onItsOwn[0]!.cents).toBe(plan.savedForCents)
+    expect(chart.onItsOwn.at(-1)!.cents).toBe(400000)
+    expect(chart.actual.at(-1)!.cents).toBe(400000)
+  })
+
+  it('says what is below its own pace, and that Christmas is holding it', () => {
+    const now = chart.story.now
+    expect(now.cents).toBe(plan.countedCents)
+    expect(now.onItsOwnCents).toBe(plan.savedForCents)
+    expect(now.belowCents).toBe(plan.savedForCents - plan.countedCents)
+    expect(now.belowCents).toBeGreaterThan(0)
+    expect(now.covering.map((c) => c.name)).toEqual(['Christmas'])
+    expect(now.coveringCents).toBeGreaterThan(0)
+    expect(now.toComeCents).toBeGreaterThan(0)
+    expect(now.coveringCents + now.toComeCents).toBe(now.belowCents)
+  })
+
+  it('turns when Christmas is paid, and ends with all of it on the day', () => {
+    const turn = chart.story.turn!
+    expect(turn.on).toBe('2026-12-25')
+    expect(turn.paid.map((x) => x.name)).toEqual(['Christmas'])
+    expect(turn.perWeekAfterCents).toBeGreaterThan(0)
+    expect(turn.perWeekAfterCents).toBeLessThanOrEqual(asked)
+    expect(chart.story.due).toEqual({ on: '2027-09-24', cents: 400000, totalCents: 400000 })
+  })
+
+  it('claims nothing for a plan at or ahead of its own pace', () => {
+    const alone = position({
+      ...facts,
+      packages: [trip],
+      lineItems: [lineItems[1]!],
+      counts: [{ accountId: gifts.id, amountCents: 300000, on: TODAY }],
+      transfers: [{ accountId: gifts.id, perWeekCents: 10000, confirmedOn: TODAY }],
+    })
+    const c = planChart({ plan: alone.plans[0]!, household: alone, today: TODAY, transferWeekday: FRIDAY })!
+    expect(c.story.now.belowCents).toBe(0)
+    expect(c.story.now.covering).toEqual([])
+    expect(c.story.turn).toBeNull()
   })
 })
 
@@ -862,12 +927,42 @@ describe('invariants over randomised households (D35)', () => {
         expect(plan.shortByCents).toBe(plan.parts.reduce((t, x) => t + x.shortByCents, 0))
         expect(plan.shortByCents > 0).toBe(plan.status === 'short')
       }
+      // 8. The headline and the plan chart beside saving it on its own (D50)
+      // never claim more than they can show: the saving is never negative,
+      // the line runs on the plan's own dates and never past its total,
+      // and what is below its own pace is exactly what other plans hold
+      // beyond theirs plus what the transfers still bring.
+      const saving = smartSaving(p)
+      expect(saving === null).toBe(p.plans.every((x) => x.parts.length === 0))
+      if (saving) {
+        expect(saving.lessPerWeekCents).toBeGreaterThanOrEqual(0)
+        expect(saving.lessPerYearCents).toBe(saving.lessPerWeekCents * 52)
+        expect(saving.withBallastShare).toBeLessThanOrEqual(1)
+      }
+      // Charts run every slot forward week by week, so one run in five draws them.
+      for (const plan of run % 5 === 0 ? p.plans : []) {
+        const chart = planChart({ plan, household: p, today, transferWeekday, maxPoints: 1 + (run % 60) })
+        if (!chart) continue
+        expect(chart.onItsOwn.map((x) => x.date)).toEqual(chart.actual.map((x) => x.date))
+        for (const x of chart.onItsOwn) expect(x.cents).toBeLessThanOrEqual(plan.totalCents)
+        const now = chart.story.now
+        expect(now.coveringCents).toBeGreaterThanOrEqual(0)
+        expect(now.coveringCents).toBeLessThanOrEqual(now.belowCents)
+        expect(now.coveringCents + now.toComeCents).toBe(now.belowCents)
+        expect(now.covering.length > 0).toBe(now.coveringCents > 0)
+        expect(chart.story.due.cents).toBe(chart.actual.at(-1)!.cents)
+        if (chart.story.turn) {
+          expect(compareDates(chart.story.turn.on, today)).toBeGreaterThan(0)
+          expect(compareDates(chart.story.turn.on, chart.story.due.on)).toBeLessThan(0)
+          expect(chart.story.turn.paid.length).toBeGreaterThan(0)
+        }
+      }
       if (p.allCaughtUp) {
         for (const a of p.accounts.filter((x) => x.parts.length > 0)) expect(a.status).toBe('on_track')
         expect(p.todos.some((t) => t.blocking)).toBe(false)
       }
     }
-  })
+  }, 20_000)
 })
 
 describe('barOf (D40, D41)', () => {

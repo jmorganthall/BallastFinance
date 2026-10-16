@@ -93,6 +93,7 @@ import {
   compareDates,
   DEFAULT_TRANSFER_WEEKDAY,
   maxDate,
+  minDate,
   nextTransferDay,
   transferWeeksBetween,
   type CivilDate,
@@ -1596,7 +1597,72 @@ export interface PlanChart {
   /** What is counted today, for the dot on the chart. */
   countedToday: PlanChartPoint
   targetCents: Cents
+  /**
+   * Saving it on its own (D50 (2)): each part saving evenly from its Saving
+   * since to its due date (the one pace), on the same dates as `actual`. A
+   * comparison, never a target: nothing judges a plan by it.
+   */
+  onItsOwn: PlanChartPoint[]
+  /** The same story in words (D50 (3)-(5)). */
+  story: PlanStory
 }
+
+/** A plan named in the story: the plans people know, not their parts. */
+export interface StoryPlan {
+  packageId: Id
+  name: string
+}
+
+/**
+ * Why a plan below its own pace still lands on its date (D50), from the
+ * chart's own run-forward. Everything here is derived on read.
+ */
+export interface PlanStory {
+  now: {
+    /** What is counted toward the plan today. */
+    cents: Cents
+    /** What saving it on its own would hold today. */
+    onItsOwnCents: Cents
+    /** How far below that it is; 0 at or ahead of it. */
+    belowCents: Cents
+    /**
+     * Of that, what other plans in the same account(s), due sooner, hold
+     * beyond their own pace: the money is paying them first. Never more
+     * than below.
+     */
+    coveringCents: Cents
+    covering: (StoryPlan & { dueDate: CivilDate })[]
+    /** The rest of below: still to come from the transfers on the way. */
+    toComeCents: Cents
+  }
+  /**
+   * The transfer day after which the plan's line climbs fastest, at another
+   * plan's due date in the same account(s); null when it climbs evenly.
+   */
+  turn: {
+    on: CivilDate
+    /** What the plan holds by then on the transfer set up now. */
+    cents: Cents
+    /** About how much a week comes to the plan from then. */
+    perWeekAfterCents: Cents
+    /** The plans paid that day. */
+    paid: StoryPlan[]
+  } | null
+  due: {
+    on: CivilDate
+    /** What it holds on the day on the transfer set up now. */
+    cents: Cents
+    totalCents: Cents
+  }
+}
+
+/**
+ * A turning point must climb at least this many times faster after it than
+ * before, and at least TURN_MIN_GAIN_CENTS a week faster, or the line is
+ * read as climbing evenly (D50 (4)).
+ */
+export const TURN_MIN_RATIO = 1.5
+export const TURN_MIN_GAIN_CENTS = 100
 
 /**
  * Run one account forward for a chart (D40): what each slot holds after each
@@ -1633,14 +1699,15 @@ function runSlots(args: {
 }
 
 /**
- * The plan's chart (D40), sampled on transfer days: nothing changes between
- * them, and a daily curve would claim the money rises continuously. It runs
- * from today: the even-pace steady line is no longer something a plan is
- * measured against, so it is not drawn.
+ * The plan's chart (D40, D50), sampled on transfer days: nothing changes
+ * between them, and a daily curve would claim the money rises continuously.
+ * It runs from today. Beside it, saving it on its own (D50 (2)), and the
+ * story: what is below its own pace and what is holding it, the turning
+ * point, and the day.
  */
 export function planChart(args: {
   plan: PlanPosition
-  household: Pick<HouseholdPosition, 'accounts' | 'fixes'>
+  household: Pick<HouseholdPosition, 'accounts' | 'fixes' | 'plans'>
   today: CivilDate
   transferWeekday?: Weekday
   maxPoints?: number
@@ -1657,7 +1724,8 @@ export function planChart(args: {
   const partIds = new Set(plan.parts.map((p) => p.lineItem.id))
   const accounts = args.household.accounts.filter((a) => accountIds.includes(a.account.id))
 
-  const line = (fixed: boolean): PlanChartPoint[] => {
+  // What the plan holds after each transfer day, every one of them.
+  const series = (fixed: boolean): Cents[] => {
     const totals = days.map(() => 0)
     for (const a of accounts) {
       const fix = fixed ? args.household.fixes.get(a.account.id) : undefined
@@ -1673,21 +1741,102 @@ export function planChart(args: {
         })
       })
     }
-    const points: PlanChartPoint[] = [{ date: today, cents: plan.countedCents }]
-    const stride = Math.max(1, Math.ceil(days.length / (args.maxPoints ?? 60)))
-    days.forEach((date, i) => {
-      if (i % stride === stride - 1 || i === days.length - 1) points.push({ date, cents: totals[i]! })
+    return totals
+  }
+  // The days drawn: today, then every stride-th transfer day and the last.
+  const stride = Math.max(1, Math.ceil(days.length / (args.maxPoints ?? 60)))
+  const drawn = days.flatMap((date, i) => (i % stride === stride - 1 || i === days.length - 1 ? [i] : []))
+  const points = (totals: readonly Cents[]): PlanChartPoint[] => {
+    const out: PlanChartPoint[] = [{ date: today, cents: plan.countedCents }]
+    for (const i of drawn) out.push({ date: days[i]!, cents: totals[i]! })
+    if (out.at(-1)!.date !== to) out.push({ date: to, cents: out.at(-1)!.cents })
+    return out
+  }
+
+  const totals = series(false)
+  const actual = points(totals)
+  const onItsOwnAt = (on: CivilDate) =>
+    plan.parts.reduce(
+      (s, p) =>
+        s +
+        evenPaceCents({
+          totalCents: p.totalCents,
+          fromDate: minDate(p.savingSince.date, p.lineItem.dueDate),
+          dueDate: p.lineItem.dueDate,
+          today: on,
+          transferWeekday,
+        }),
+      0,
+    )
+  const onItsOwn = actual.map((x) => ({ date: x.date, cents: onItsOwnAt(x.date) }))
+
+  // The other plans in the same account(s): what is paying them first.
+  const names = new Map(args.household.plans.map((x) => [x.package.id, x.package.name]))
+  const others = accounts
+    .flatMap((a) => a.parts)
+    .filter((p) => !partIds.has(p.lineItem.id))
+    .sort((a, b) => compareDates(a.outflowDate, b.outflowDate))
+  const storyPlans = (parts: readonly PartPosition[]) => {
+    const seen = new Set<Id>()
+    return parts.flatMap((p) => {
+      if (seen.has(p.packageId)) return []
+      seen.add(p.packageId)
+      return [{ packageId: p.packageId, name: names.get(p.packageId) ?? p.lineItem.label, dueDate: p.outflowDate }]
     })
-    if (points.at(-1)!.date !== to) points.push({ date: to, cents: points.at(-1)!.cents })
-    return points
+  }
+
+  const onItsOwnToday = onItsOwn[0]!.cents
+  const belowCents = Math.max(0, onItsOwnToday - plan.countedCents)
+  const ahead = others.filter((p) => compareDates(p.outflowDate, to) < 0 && p.countedCents > p.savedForCents)
+  const coveringCents = Math.min(
+    belowCents,
+    ahead.reduce((s, p) => s + p.countedCents - p.savedForCents, 0),
+  )
+
+  // The turning point: at another plan's date, the split of the plan's
+  // weekly rises with the largest gain after it over before.
+  const rises = totals.map((t, i) => t - (i === 0 ? plan.countedCents : totals[i - 1]!))
+  const average = (xs: readonly Cents[]) => xs.reduce((s, x) => s + x, 0) / xs.length
+  let turn: PlanStory['turn'] = null
+  let bestGain = 0
+  const dates = [...new Set(others.map((p) => p.outflowDate))].filter(
+    (d) => compareDates(d, today) > 0 && compareDates(d, to) < 0,
+  )
+  for (const d of dates) {
+    const k = days.findIndex((x) => compareDates(x, d) > 0)
+    if (k < 1) continue
+    const before = average(rises.slice(0, k))
+    const after = average(rises.slice(k))
+    const gain = after - before
+    if (after < before * TURN_MIN_RATIO || gain < TURN_MIN_GAIN_CENTS || gain <= bestGain) continue
+    bestGain = gain
+    turn = {
+      on: d,
+      cents: totals[k - 1]!,
+      perWeekAfterCents: Math.round(after),
+      paid: storyPlans(others.filter((p) => p.outflowDate === d)).map(({ packageId, name }) => ({ packageId, name })),
+    }
   }
 
   const fixable = plan.status === 'short' && accounts.some((a) => args.household.fixes.has(a.account.id))
   return {
-    actual: line(false),
-    afterFix: fixable ? line(true) : null,
+    actual,
+    afterFix: fixable ? points(series(true)) : null,
     countedToday: { date: today, cents: plan.countedCents },
     targetCents: plan.totalCents,
+    onItsOwn,
+    story: {
+      now: {
+        cents: plan.countedCents,
+        onItsOwnCents: onItsOwnToday,
+        belowCents,
+        coveringCents,
+        covering: coveringCents > 0 ? storyPlans(ahead) : [],
+        toComeCents: belowCents - coveringCents,
+      },
+      turn,
+      due: { on: to, cents: actual.at(-1)!.cents, totalCents: plan.totalCents },
+    },
   }
 }
 
