@@ -191,6 +191,25 @@ principles, and they are non-negotiable.
   Per week · Total · Most short, each reversible, in the address
   (`?sort=&dir=`), never a setting; live, then drafts, then done; a draft
   falls back to Next due under the two figures it lacks.
+- **Smart saving is the headline, and a plan shows why it lands on time**
+  (PRD D50, rev 96). This week opens with `SmartSavingCard`
+  (`src/components/smart-saving.tsx`): "$W a week covers all N plans" from
+  `smartSaving` in `position.ts`, W the accounts' `neededPerWeekCents`
+  against their `steadyPerWeekCents` (each plan saving on its own), and the
+  difference a week and × 52 a year; when W is as much or more, the weekly
+  figure alone and nothing claimed. `planChart` also returns `onItsOwn`
+  (each part's `evenPaceCents` from its Saving since, on the chart's own
+  dates) and `story` (`PlanStory`): what is below its own pace, how much of
+  that other plans in the same account(s) due sooner hold beyond theirs
+  (`covering`) and the rest still to come, the turning point (another
+  plan's due date with the largest jump in the plan's weekly rise,
+  `TURN_MIN_RATIO` 1.5 and `TURN_MIN_GAIN_CENTS` $1), and the day. The
+  plan's page draws the dashed "Saving it on its own" line with the space
+  below it shaded, and `PlanStory` (`src/components/plan-story.tsx`) tells
+  it in steps, with "On track: all $X due in N" for an On track plan that
+  gets there. It is a comparison and never a target: nothing judges a plan
+  by it, and no screen says "behind", "lent" or "guaranteed". This brings
+  back the line D40 (5) took off the chart, with that job and that name.
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
   order the events were recorded (`recorded_at`, then id), answered by
@@ -446,7 +465,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 756 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 763 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

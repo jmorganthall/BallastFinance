@@ -1643,6 +1643,8 @@ export interface PlanStory {
     on: CivilDate
     /** What the plan holds by then on the transfer set up now. */
     cents: Cents
+    /** What saving it on its own would hold by then: above `cents`, it catches up from there. */
+    onItsOwnCents: Cents
     /** About how much a week comes to the plan from then. */
     perWeekAfterCents: Cents
     /** The plans paid that day. */
@@ -1813,6 +1815,7 @@ export function planChart(args: {
     turn = {
       on: d,
       cents: totals[k - 1]!,
+      onItsOwnCents: onItsOwnAt(d),
       perWeekAfterCents: Math.round(after),
       paid: storyPlans(others.filter((p) => p.outflowDate === d)).map(({ packageId, name }) => ({ packageId, name })),
     }

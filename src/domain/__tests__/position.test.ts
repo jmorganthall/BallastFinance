@@ -679,6 +679,7 @@ describe('the plan chart beside saving it on its own (D50)', () => {
     const turn = chart.story.turn!
     expect(turn.on).toBe('2026-12-25')
     expect(turn.paid.map((x) => x.name)).toEqual(['Christmas'])
+    expect(turn.onItsOwnCents).toBeGreaterThan(turn.cents)
     expect(turn.perWeekAfterCents).toBeGreaterThan(0)
     expect(turn.perWeekAfterCents).toBeLessThanOrEqual(asked)
     expect(chart.story.due).toEqual({ on: '2027-09-24', cents: 400000, totalCents: 400000 })
