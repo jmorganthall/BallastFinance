@@ -195,6 +195,13 @@ describeDb('allocation runs', () => {
     expect(topUp).toBeDefined()
     expect(topUp!.note).toContain('behind')
 
+    // While the cover is open it stands in for the move the position would
+    // ask for: the same $300 is never on the list twice, nor offered again.
+    const whileOpen = await engine.position()
+    expect(whileOpen.accounts.find((a) => a.account.id === account!.id)!.oneTimeMove).toBeNull()
+    expect(whileOpen.todos.filter((t) => t.kind === 'move_in' && t.accountId === account!.id)).toEqual([])
+    expect((await engine.shortfalls()).filter((s) => s.kind === 'plan')).toEqual([])
+
     // Not enough to cover it all: it takes what there is, and nothing is split.
     const partial = await engine.previewAllocation(50000, undefined, cover)
     expect(partial.topUps[0]!.amountCents).toBe(15000)

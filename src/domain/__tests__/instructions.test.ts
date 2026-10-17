@@ -1,11 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   doneMoveOf,
-  doneMovesSummary,
   driftAdjustmentsFrom,
   instructionSentence,
   instructionSentenceParts,
-  likelyBalanceCents,
   openCommitmentsFor,
   outstandingInstructions,
   perWeekOf,
@@ -258,18 +256,8 @@ describe('outstanding instructions', () => {
       expect(doneMoveOf(issued({ instructionId: 'l', type: 'one_time_move', purpose: 'left_over' }), { instructionId: 'l', confirmedOn: '2026-11-05' })).toBeNull()
       expect(doneMoveOf(issued({ instructionId: 't' }), { instructionId: 't', confirmedOn: '2026-11-05' })).toBeNull()
 
-      const doneMoves = [
-        doneMoveOf(move, { instructionId: 'move', confirmedOn: '2026-11-05' })!,
-        doneMoveOf(out, { instructionId: 'out', confirmedOn: '2026-11-06' })!,
-      ]
-      const commitments = openCommitmentsFor({ reserveAccountId: 'acct-annual', accepted: [bump], pending: [], outstanding: [], doneMoves })
-      expect(commitments.doneMoves).toEqual(doneMoves)
-      expect(doneMovesSummary(doneMoves)).toEqual({ inCents: 5000, outCents: 1200, netCents: 3800 })
-      expect(likelyBalanceCents(50000, doneMoves)).toBe(53800)
-      expect(likelyBalanceCents(null, doneMoves)).toBeNull()
-      // Nothing done since the count: nothing carried, and the likely balance is the count.
-      expect(openCommitmentsFor({ reserveAccountId: 'acct-annual', accepted: [], pending: [], outstanding: [] }).doneMoves).toEqual([])
-      expect(likelyBalanceCents(50000, [])).toBe(50000)
+      // What was marked done since the last count is the position's to add up, not a second ledger here.
+      expect(openCommitmentsFor({ reserveAccountId: 'acct-annual', accepted: [bump], pending: [], outstanding: [] })).not.toHaveProperty('doneMoves')
     })
 
 

@@ -4,6 +4,8 @@ import {
   barOf,
   countTowardParts,
   levelWeekly,
+  moneySinceParts,
+  moneySinceSentence,
   NEAR_TRANSFERS,
   PHASE_MIN_RISE_CENTS,
   planChart,
@@ -14,6 +16,7 @@ import {
   steadyLineStart,
   type PositionInput,
 } from '../position'
+import { formatCents } from '../money'
 import { addDays, compareDates, transferWeeksBetween, type CivilDate, type Weekday } from '../dates'
 import type { LineItem, LineItemCycle, Package, ReserveAccount } from '../types'
 
@@ -818,6 +821,58 @@ describe('the plan chart beside saving it on its own (D50)', () => {
   })
 })
 
+describe('what an account likely holds, in words (D34, D35)', () => {
+  // Gifts & Giving: counted at $3,904.83 on Sunday; since then $95.44 moved
+  // out and a $350 part confirmed spent. The sentence and the number come
+  // from the same breakdown, so the spend is in both.
+  const p = position(
+    input({
+      today: '2026-10-17',
+      transferWeekday: 6,
+      lineItems: [li({ id: 'xmas', unitAmountCents: 200000, dueDate: '2026-12-19', recurrence: yearly })],
+      counts: [{ accountId: gifts.id, amountCents: 390483, on: '2026-10-11' }],
+      movesSinceCount: [{ accountId: gifts.id, amountCents: -9544 }],
+      spendsSinceCount: [{ accountId: gifts.id, amountCents: 35000 }],
+    }),
+  )
+  const money = p.accounts[0]!.money
+
+  it('carries the spend as well as the move, and asks for a count', () => {
+    expect(money).toMatchObject({
+      startCents: 390483,
+      movesInCents: 0,
+      movesOutCents: 9544,
+      spendsSinceCents: 35000,
+      totalCents: 390483 - 9544 - 35000,
+      countOwed: true,
+    })
+  })
+
+  it('says every piece of it, with the count as a date a screen can say as a distance', () => {
+    const parts = moneySinceParts(money)
+    expect(parts.filter((x) => x.date).map((x) => x.date)).toEqual([{ on: '2026-10-11', as: 'plain' }])
+    expect(moneySinceSentence(money)).toBe(
+      'Counted at $3,904.83 on 2026-10-11. Since then, $95.44 moved out and $350.00 spent. Likely holds $3,459.39.',
+    )
+  })
+
+  it('does not ask for a count when only the transfer has run since', () => {
+    const quiet = position(
+      input({
+        today: '2026-10-17',
+        transferWeekday: 6,
+        lineItems: [li({ id: 'xmas', unitAmountCents: 200000, dueDate: '2026-12-19' })],
+        counts: [{ accountId: gifts.id, amountCents: 100000, on: '2026-10-11' }],
+        transfers: [{ accountId: gifts.id, perWeekCents: 15000, confirmedOn: '2026-09-01' }],
+      }),
+    ).accounts[0]!.money
+    expect(quiet).toMatchObject({ transfersSinceCents: 15000, countOwed: false })
+    expect(moneySinceSentence(quiet)).toBe(
+      'Counted at $1,000.00 on 2026-10-11. Since then, $150.00 transferred in. Likely holds $1,150.00.',
+    )
+  })
+})
+
 describe('invariants over randomised households (D35)', () => {
   // A small deterministic PRNG so a failure is reproducible.
   function rng(seed: number) {
@@ -857,7 +912,7 @@ describe('invariants over randomised households (D35)', () => {
           timelineStartDate: recurring && kind === 2 ? addDays(today, -int(200)) : null,
         })
       })
-      const facts: PositionInput = {
+      const facts: { -readonly [K in keyof PositionInput]: PositionInput[K] } = {
         today,
         accounts,
         packages,
@@ -871,9 +926,44 @@ describe('invariants over randomised households (D35)', () => {
           .filter(() => random() < 0.8)
           .map((a) => ({ accountId: a.id, perWeekCents: int(60000), confirmedOn: addDays(today, -int(90)) })),
       }
+      // Moves in and out and spends marked done since the count (D34), one
+      // entry each. What goes out is bounded by what the account held before
+      // it, as at a bank: a likely balance below zero is not generated here.
+      const held = new Map(position(facts).accounts.map((a) => [a.account.id, Math.max(0, a.money.totalCents)]))
+      const movesSinceCount: { accountId: string; amountCents: number }[] = []
+      const spendsSinceCount: { accountId: string; amountCents: number }[] = []
+      for (let k = int(4); k > 0; k -= 1) {
+        const id = `acct-${int(2)}`
+        const have = held.get(id) ?? 0
+        const amount = random() < 0.5 ? -int(Math.min(have, 50000) + 1) : 1 + int(50000)
+        if (amount === 0) continue
+        movesSinceCount.push({ accountId: id, amountCents: amount })
+        held.set(id, have + amount)
+      }
+      for (const a of accounts) {
+        const have = held.get(a.id) ?? 0
+        if (random() < 0.3) spendsSinceCount.push({ accountId: a.id, amountCents: int(have + 1) })
+      }
+      facts.movesSinceCount = movesSinceCount
+      facts.spendsSinceCount = spendsSinceCount
       const p = position(facts)
 
       for (const a of p.accounts) {
+        // 0. What the account likely holds is said in the same pieces it is
+        // added up from (D34, D35): the sentence on check-in and This week
+        // can never disagree with the number, and a recount is owed exactly
+        // when a move or a spend was marked done since the count.
+        const mine = facts.movesSinceCount!.filter((m) => m.accountId === a.account.id)
+        const spent = facts.spendsSinceCount!.filter((m) => m.accountId === a.account.id)
+        expect(a.money.movesInCents).toBe(mine.filter((m) => m.amountCents > 0).reduce((t, m) => t + m.amountCents, 0))
+        expect(a.money.movesOutCents).toBe(mine.filter((m) => m.amountCents < 0).reduce((t, m) => t - m.amountCents, 0))
+        expect(a.money.movesSinceCents).toBe(a.money.openingsSinceCents + a.money.movesInCents - a.money.movesOutCents)
+        expect(a.money.totalCents).toBe(
+          a.money.startCents + a.money.transfersSinceCents + a.money.movesSinceCents - a.money.spendsSinceCents,
+        )
+        expect(a.money.countOwed).toBe(mine.length > 0 || spent.length > 0)
+        expect(moneySinceSentence(a.money)).toContain(`Likely holds ${formatCents(a.money.totalCents)}.`)
+
         // 1. At W with M made, every date passes -- and W is the smallest that does.
         const { requirements, runRatePerWeekCents } = requirementsFor({
           parts: a.parts,
@@ -1016,14 +1106,17 @@ describe('invariants over randomised households (D35)', () => {
       if (between.length > 0) {
         const after = position({
           ...facts,
-          movesSinceCount: between.flatMap((t) =>
+          movesSinceCount: [
+            ...(facts.movesSinceCount ?? []),
+            ...between.flatMap((t) =>
             t.kind === 'move_between'
               ? [
                   { accountId: t.fromAccountId, amountCents: -t.amountCents },
                   { accountId: t.accountId, amountCents: t.amountCents },
                 ]
               : [],
-          ),
+            ),
+          ],
         })
         for (const t of between) {
           if (t.kind !== 'move_between') continue

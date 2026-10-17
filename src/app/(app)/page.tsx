@@ -15,6 +15,7 @@ import { Card, Empty, humanDate, Money, PageHeader, Pill, When, Zzz } from '@/co
 import { AccountPositionCard } from '@/components/account-position'
 import { CloseOutCard } from '@/components/close-out-card'
 import { SmartSavingCard } from '@/components/smart-saving'
+import { MoneySince } from '@/components/money-since'
 import {
   attentionHeadline,
   awakeCloseOuts,
@@ -24,7 +25,6 @@ import {
   type DebtTodo,
   latestSnoozeDay,
   snoozeDays,
-  doneMovesSummary,
   formatCents,
   instructionSentenceParts,
   runningAdjustments,
@@ -220,7 +220,7 @@ export default async function ThisWeekPage({
 }) {
   const { balances, snoozed, until, snooze_error: snoozeError, item: errorItem, error } = await searchParams
   const { engine, viewer } = await requireEngine()
-  const [position, outstanding, allCloseOuts, commitments, tripToDos, transferWeekday, lastCounts, debtState] =
+  const [position, outstanding, allCloseOuts, commitments, tripToDos, transferWeekday, debtState] =
     await Promise.all([
       engine.position(),
       engine.outstandingInstructions(),
@@ -228,7 +228,6 @@ export default async function ThisWeekPage({
       engine.openCommitmentsByAccount(),
       engine.comingUpTripTasks(3),
       engine.transferWeekday(),
-      engine.latestConfirmedBalances(),
       engine.debtStatuses(),
     ])
   const today = engine.today()
@@ -238,19 +237,10 @@ export default async function ThisWeekPage({
   const justSnoozed = snoozed ? allCloseOuts.find((p) => p.lineItemId === snoozed && p.snoozedUntil) : undefined
   const snoozeOn = snoozeDays(today, transferWeekday)
 
-  // Accounts a done move has changed since they were last counted (D34): the
-  // position already carries the moves; what is missing is the count.
-  const toCount = position.accounts
-    .map((a) => {
-      const moves = commitments.get(a.account.id)?.doneMoves ?? []
-      return {
-        a,
-        moves,
-        last: lastCounts.get(a.account.id) ?? null,
-        summary: doneMovesSummary(moves),
-      }
-    })
-    .filter((x) => x.moves.length > 0)
+  // Accounts a move or a spend marked done has changed since they were last
+  // counted (D34): the position already carries the money and says so
+  // (`money.countOwed`); what is missing is the count.
+  const toCount = position.accounts.filter((a) => a.money.countOwed)
 
   // What can be done today, and what is held back until a later day (the
   // second half of the fun money). Different lists, so "now" is never in doubt.
@@ -465,7 +455,7 @@ export default async function ThisWeekPage({
           {toCount.length > 0 ? (
             <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
               When these are done, update what{' '}
-              {toCount.map((x) => x.a.account.name).join(' and ')} {toCount.length === 1 ? 'holds' : 'hold'}.
+              {toCount.map((a) => a.account.name).join(' and ')} {toCount.length === 1 ? 'holds' : 'hold'}.
             </p>
           ) : null}
         </section>
@@ -478,9 +468,9 @@ export default async function ThisWeekPage({
       ) : null}
 
       {/*
-        * A move marked done is money the account holds (D34). The figures
-        * already carry it; once nothing is left to do, ask for the count that
-        * makes it a fact. The likely balance is the position's, never stored.
+        * A move or a spend marked done is money the account holds or no longer
+        * holds (D34). The figures already carry it; once nothing is left to
+        * do, ask for the count that makes it a fact. The likely balance is the position's, never stored.
         */}
       {!moneyToDo && toCount.length > 0 ? (
         <section className="mb-5">
@@ -489,37 +479,10 @@ export default async function ThisWeekPage({
           </h2>
           <form action={confirmBalancesAction} className="space-y-3">
             <input type="hidden" name="back" value="home" />
-            {toCount.map(({ a, last, summary }) => (
+            {toCount.map((a) => (
               <Card key={a.account.id}>
                 <p className="font-medium">{a.account.name}</p>
-                <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-                  {last ? (
-                    <>
-                      Since you last counted it <When date={last.on} today={today} /> at <Money cents={last.amountCents} />, you moved
-                    </>
-                  ) : (
-                    <>It has never been counted, and you moved</>
-                  )}
-                  {summary.inCents > 0 ? (
-                    <>
-                      {' '}
-                      <Money cents={summary.inCents} /> in
-                    </>
-                  ) : null}
-                  {summary.inCents > 0 && summary.outCents > 0 ? ' and' : null}
-                  {summary.outCents > 0 ? (
-                    <>
-                      {' '}
-                      <Money cents={summary.outCents} /> out
-                    </>
-                  ) : null}
-                  {a.money.transfersSinceCents > 0 ? (
-                    <>
-                      , and the transfers since added <Money cents={a.money.transfersSinceCents} />
-                    </>
-                  ) : null}
-                  , so it likely holds <Money cents={a.money.totalCents} /> now.
-                </p>
+                <MoneySince money={a.money} today={today} />
                 <label className="mt-3 block text-sm font-medium">
                   What it actually holds
                   <input

@@ -222,15 +222,29 @@ principles, and they are non-negotiable.
   back the line D40 (5) took off the chart, with that job and that name.
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
-  order the events were recorded (`recorded_at`, then id), answered by
-  `Engine.positionInput` (and `doneMovesSinceCount` for the words on This
-  week); `doneMoveOf` decides whether a confirmation is a move on the ledger
-  (any move into a reserve account or out of it since D35; never a "left
-  over" ask, a transfer change or a bump). This week asks "Update what these
-  accounts hold" once nothing is left to do, with the position's likely
-  balance in the box, through the ordinary `confirmBalancesAction` (with
-  `back=home`). The to-do sentence marks the account the money goes to, and
-  the screen sets it in bold and the accent colour.
+  order the events were recorded (`recorded_at`, then id), answered only by
+  `Engine.positionInput`; `doneMoveOf` decides whether a confirmation is a
+  move on the ledger (any move into a reserve account or out of it since
+  D35; never a "left over" ask, a transfer change or a bump). There is no
+  second since-count ledger: the words come from the position's own
+  breakdown, `AccountMoneyToday` (the count, transfers, `movesInCents`,
+  `movesOutCents`, openings and spends since), said in one sentence by
+  `moneySinceParts` / `moneySinceSentence` through `MoneySince`
+  (`src/components/money-since.tsx`) on check-in and This week and in the
+  account card's tooltip, so a spend can never change the number without
+  changing the words. `money.countOwed` (a move or a spend marked done
+  since the count; a transfer alone never) is the one answer to "ask what
+  this account holds": This week asks "Update what these accounts hold" and
+  the digest says the same once nothing else that moves money is left to
+  do, with the position's likely balance in the box, through the ordinary
+  `confirmBalancesAction` (with `back=home`). The last count is
+  `money.from === 'count'` and `money.on`; the check-in nudge reads it
+  there. An open "cover what is short" move, like an old catch-up, stands in
+  for the one-time move the position would ask for, so the same money is
+  never asked for twice. "Yes, spent" left blank records the part's own
+  total, read by the engine, never a figure the form posted. The to-do
+  sentence marks the account the money goes to, and the screen sets it in
+  bold and the accent colour.
 - **A debt's balance is the last one stated, less the payments since**
   (PRD D49 (1)-(2)). `debts.balance_cents` / `balance_as_of` are the last
   balance a person stated (a statement, the edit form, or the zero a payment
@@ -475,7 +489,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 769 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 773 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

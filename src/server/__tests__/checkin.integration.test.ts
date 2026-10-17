@@ -18,7 +18,7 @@ import { eq } from 'drizzle-orm'
 import postgres from 'postgres'
 import * as schema from '@/db/schema'
 import { Engine } from '@/server/engine'
-import { awakeCloseOuts, INTAKE_CONTRACT_VERSION, type AccountPosition } from '@/domain'
+import { awakeCloseOuts, INTAKE_CONTRACT_VERSION, moneySinceSentence, type AccountPosition } from '@/domain'
 
 const url = process.env.DATABASE_URL
 const describeDb = url ? describe : describe.skip
@@ -141,16 +141,18 @@ describeDb('check-ins and close-out (D35)', () => {
 
     await engine.confirmBalance({ reserveAccountId: accountId, amountCents: 50000 })
 
-    const latest = await engine.latestConfirmedBalances()
-    expect(latest.get(accountId)).toEqual({ amountCents: 50000, on: '2026-10-31' })
     expect((await account()).money).toEqual({
       from: 'count',
       on: '2026-10-31',
       startCents: 50000,
       transfersSinceCents: 0,
       movesSinceCents: 0,
+      movesInCents: 0,
+      movesOutCents: 0,
+      openingsSinceCents: 0,
       spendsSinceCents: 0,
       totalCents: 50000,
+      countOwed: false,
     })
   })
 
@@ -306,7 +308,9 @@ describeDb('check-ins and close-out (D35)', () => {
     expect(a.parts).toEqual([])
     expect(a.horizon).toBeNull()
     // What was spent leaves the likely balance until the next count: 194,000 - 165,000.
-    expect(a.money).toMatchObject({ spendsSinceCents: 165000, totalCents: 29000 })
+    expect(a.money).toMatchObject({ spendsSinceCents: 165000, totalCents: 29000, countOwed: true })
+    // The words say the spend wherever the number carries it (D34, D35).
+    expect(moneySinceSentence(a.money)).toContain('$1,650.00 spent. Likely holds $290.00.')
     const plan = p.plans.find((x) => x.package.id === packageId)!
     expect(plan.parts).toEqual([])
     expect(plan.totalCents).toBe(0)
@@ -361,7 +365,6 @@ describeDb('one-time moves (D34, D35)', () => {
   }
   const account = async (): Promise<AccountPosition> =>
     (await engine.position()).accounts.find((a) => a.account.id === accountId)!
-  const doneMoves = async () => (await engine.openCommitmentsByAccount()).get(accountId)!.doneMoves
 
   beforeAll(async () => {
     client = postgres(url!, { max: 4, prepare: false })
@@ -457,9 +460,7 @@ describeDb('one-time moves (D34, D35)', () => {
     expect(await engine.outstandingInstructions()).toEqual([])
     const move = (await engine.listIssuedInstructions()).find((i) => i.type === 'one_time_move')!
     expect(move).toMatchObject({ amountCents: 15000, targetId: accountId, purpose: 'catch_up' })
-    expect(await doneMoves()).toEqual([
-      { instructionId: move.instructionId, amountCents: 15000, confirmedOn: '2026-10-03' },
-    ])
+    expect((await account()).money).toMatchObject({ movesInCents: 15000, movesOutCents: 0, countOwed: true })
 
     const p = await engine.position()
     const a = p.accounts.find((x) => x.account.id === accountId)!
@@ -472,7 +473,7 @@ describeDb('one-time moves (D34, D35)', () => {
 
     // A count entered later the same day includes it, so it is carried no more.
     await engine.confirmBalance({ reserveAccountId: accountId, amountCents: 20000 })
-    expect(await doneMoves()).toEqual([])
+    expect((await account()).money).toMatchObject({ movesInCents: 0, countOwed: false })
     expect((await account()).money).toMatchObject({
       from: 'count',
       startCents: 20000,
@@ -491,7 +492,7 @@ describeDb('one-time moves (D34, D35)', () => {
     })
     await engine.confirmInstruction({ instructionId: outId, actualAmountCents: 800 })
 
-    expect(await doneMoves()).toEqual([{ instructionId: outId, amountCents: -800, confirmedOn: '2026-10-03' }])
+    expect((await account()).money).toMatchObject({ movesInCents: 0, movesOutCents: 800, countOwed: true })
     const a = await account()
     expect(a.money).toMatchObject({ movesSinceCents: -800, totalCents: 19200 })
     // 19,200 + 30,000 = 49,200 by Oct 24: $8 short, which is what a move now has to cover.
@@ -500,7 +501,7 @@ describeDb('one-time moves (D34, D35)', () => {
     expect(a.oneTimeMove).toEqual({ amountCents: 800, byDate: '2026-10-24' })
 
     await engine.confirmBalance({ reserveAccountId: accountId, amountCents: 19200 })
-    expect(await doneMoves()).toEqual([])
+    expect((await account()).money).toMatchObject({ movesOutCents: 0, countOwed: false })
     const counted = await account()
     expect(counted.money).toMatchObject({ from: 'count', startCents: 19200, movesSinceCents: 0, totalCents: 19200 })
     expect(counted.short).toEqual({ on: '2026-10-24', byCents: 800 })
@@ -534,6 +535,24 @@ describeDb('one-time moves (D34, D35)', () => {
     expect(a.status).toBe('on_track')
     expect(p.allCaughtUp).toBe(true)
     expect(await engine.outstandingInstructions()).toEqual([])
+  })
+
+  it("records a spend left blank at the part's own total, never a figure the form sent", async () => {
+    pin('2026-10-24')
+    const registration = (await engine.listLineItems()).find((li) => li.label === 'Registration')!
+    await expect(engine.confirmSpend({ lineItemId: registration.id, actualAmountCents: -1 })).rejects.toThrow(
+      /whole number of cents/,
+    )
+    const before = (await account()).money
+    await engine.confirmSpend({ lineItemId: registration.id })
+
+    const rows = await db.select().from(schema.events).where(eq(schema.events.kind, 'spend_confirmed'))
+    const ours = rows.filter((r) => r.householdId === householdId)
+    expect(ours.at(-1)!.payload).toMatchObject({ planned_cents: 50000, actual_amount_cents: 50000 })
+    const after = (await account()).money
+    expect(after.spendsSinceCents - before.spendsSinceCents).toBe(50000)
+    expect(after.totalCents).toBe(before.totalCents - 50000)
+    expect(after.countOwed).toBe(true)
   })
 })
 

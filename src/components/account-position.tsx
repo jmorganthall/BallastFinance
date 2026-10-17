@@ -9,7 +9,7 @@
 
 import { Card, Hint, humanDate, Money, When } from '@/components/ui'
 import { AccountStatusPill } from '@/components/status'
-import { formatCents, type AccountPosition, type CivilDate } from '@/domain'
+import { formatCents, moneySinceSentence, type AccountPosition, type CivilDate } from '@/domain'
 
 export function AccountPositionCard({
   account: a,
@@ -20,12 +20,9 @@ export function AccountPositionCard({
   today: CivilDate
 }) {
   const money = a.money
-  const moneyDetail =
-    money.from === 'count'
-      ? `Counted ${formatCents(money.startCents)} on ${humanDate(money.on!)}, plus ${formatCents(money.transfersSinceCents)} transferred since, ${formatCents(money.movesSinceCents)} moved in or out, less ${formatCents(money.spendsSinceCents)} spent. A check-in replaces this with what the bank says.`
-      : money.from === 'openings'
-        ? `Never counted: this is what you said was already set aside when its plans started (${formatCents(money.startCents)}, ${humanDate(money.on!)}), plus transfers, moves and spends since. A check-in replaces it with what the bank says.`
-        : 'Never counted, and nothing was said to be set aside when its plans started, so this counts only transfers and moves since. A check-in replaces it with what the bank says.'
+  // The same sentence check-in and This week say (D34), with a plain date
+  // in the tooltip; a check-in replaces it with what the bank says.
+  const moneyDetail = `${moneySinceSentence(money, humanDate)} A check-in replaces this with what the bank says.`
 
   return (
     <Card>

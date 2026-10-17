@@ -60,7 +60,7 @@ export function CloseOutCard({
 
       <form action={confirmSpendAction} className="mt-3 flex items-end gap-2">
         <input type="hidden" name="line_item_id" value={prompt.lineItemId} />
-        <input type="hidden" name="planned_cents" value={prompt.plannedCents} />
+        {back}
         <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
           How much actually went out
           <input
