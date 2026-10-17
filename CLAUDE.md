@@ -209,11 +209,15 @@ principles, and they are non-negotiable.
   (`phases`, read off the run-forward transfer by transfer: `filling` when
   money comes here, `waiting` for two transfers or more that bring under
   `PHASE_MIN_RISE_CENTS` ($1), each naming the other plans the same
-  transfers pay), the day it is full (`full`), and the day. The plan's page
+  transfers pay, and `rolledOff`, the ones the stretch before paid and this
+  one does not), the day it is full (`full`), and the day. The plan's page
   draws the dashed "Saving it on its own" line with the space below it
   shaded and numbered badges over the stretches (`StretchBadge`), and
   `PlanStory` (`src/components/plan-story.tsx`) says "Where the money is
-  today" and "What happens next" with the same numbers, then "On track:
+  today" and "What happens next" with the same numbers (each stretch "In N
+  · start to end" and one line: where the money is focused while nothing
+  comes here, or which plans are covered so money starts coming here, about
+  $X a transfer, to $Y), then "On track:
   all $X due in N" only when `story.onTrack` (the plan On track, every
   account it is in On track on a confirmed transfer, and all of it there
   on the day). The chart scrolls sideways inside its card on a phone. It
