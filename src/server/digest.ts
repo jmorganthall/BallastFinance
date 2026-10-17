@@ -19,6 +19,7 @@ import {
   formatCents,
   instructionSentence,
   isTransferDay,
+  moneySinceSentence,
   transferWeeksBetween,
 } from '@/domain'
 
@@ -154,6 +155,19 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
       )
     }
   }
+  // A move or a spend marked done since an account was counted (D34): the
+  // same ask This week makes, in the same words, held back the same way until
+  // nothing else that moves money is left to do.
+  const toCount = position.accounts.filter((a) => a.money.countOwed)
+  const moneyToDo = position.todos.length > 0 || debtState.todos.some((t) => t.blocking) || dueNow.length > 0
+  if (toCount.length > 0) {
+    if (moneyToDo) {
+      lines.push(`- When these are done, update what ${toCount.map((a) => a.account.name).join(' and ')} ${toCount.length === 1 ? 'holds' : 'hold'}.`)
+    } else {
+      lines.push('', '## Update what these accounts hold', '')
+      for (const a of toCount) lines.push(`- **${a.account.name}**: ${moneySinceSentence(a.money)}`)
+    }
+  }
   if (comingUp.length > 0) {
     lines.push('', '## Coming up', '')
     for (const instruction of comingUp) {
@@ -253,18 +267,16 @@ export async function buildCheckInNudge(
   const afterWeeks = input.afterWeeks ?? (await engine.getSetting('check_in_nudge_weeks', 2))
   const today = engine.today()
 
-  const [confirmed, transferWeekday] = await Promise.all([
-    engine.latestConfirmedBalances(),
-    engine.transferWeekday(),
-  ])
-  const accounts = (await engine.position()).accounts.filter((a) => a.parts.length > 0)
+  const [position, transferWeekday] = await Promise.all([engine.position(), engine.transferWeekday()])
+  const accounts = position.accounts.filter((a) => a.parts.length > 0)
   if (accounts.length === 0) return null
 
-  const stale = accounts.filter((view) => {
-    const last = confirmed.get(view.account.id)
-    if (!last) return true
-    return transferWeeksBetween(last.on, today, transferWeekday) >= afterWeeks
-  })
+  // The last count is the position's (D35): the one it starts from, chosen
+  // by the order the events were recorded.
+  const stale = accounts.filter(
+    ({ money }) =>
+      money.from !== 'count' || transferWeeksBetween(money.on!, today, transferWeekday) >= afterWeeks,
+  )
   if (stale.length === 0) return null
 
   return {

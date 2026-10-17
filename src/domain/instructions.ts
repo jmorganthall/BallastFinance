@@ -274,9 +274,9 @@ function stopAdjustment(
 /**
  * Everything still on the way into (or out of) one account that a check-in
  * must not offer again (D18): bumps and cuts running or waiting, and one-time
- * catch-up moves and move-outs still on the to-do list, and the one-time
- * moves marked done since the account was last counted (D34): that money is
- * in the bank, and until a count includes it the math must carry it too.
+ * catch-up moves and move-outs still on the to-do list. What has been marked
+ * done since the last count is the position's (`AccountMoneyToday`), never
+ * a second ledger here.
  */
 export interface OpenCommitments {
   reserveAccountId: Id
@@ -286,14 +286,6 @@ export interface OpenCommitments {
   pending: DriftAdjustment[]
   /** One-time catch-up moves (positive) and move-outs (negative) still open, at their full amount. */
   pendingMoves: { instructionId: Id; amountCents: Cents }[]
-  /**
-   * One-time moves marked done since this account's balance was last counted
-   * (D34): money the person says is in the account that no count has seen
-   * yet. Signed like `pendingMoves`, at the amount it was confirmed at. Which
-   * moves came after the last count is settled by the order the events were
-   * recorded, which the engine answers; the domain only sums.
-   */
-  doneMoves: DoneMove[]
 }
 
 /** A one-time move a person marked done, signed: into the account positive, out of it negative. */
@@ -308,8 +300,6 @@ export function openCommitmentsFor(args: {
   accepted: readonly DriftAdjustment[]
   pending: readonly DriftAdjustment[]
   outstanding: readonly OutstandingInstruction[]
-  /** This account's moves marked done since its last count, from the engine. */
-  doneMoves?: readonly DoneMove[]
 }): OpenCommitments {
   const mine = (a: DriftAdjustment) => a.reserveAccountId === args.reserveAccountId
   const pendingMoves: OpenCommitments['pendingMoves'] = []
@@ -326,7 +316,6 @@ export function openCommitmentsFor(args: {
     running: args.accepted.filter(mine),
     pending: args.pending.filter(mine),
     pendingMoves,
-    doneMoves: [...(args.doneMoves ?? [])],
   }
 }
 
@@ -352,34 +341,6 @@ export function doneMoveOf(
     return { instructionId: instruction.instructionId, amountCents: -amount, confirmedOn: confirmation.confirmedOn }
   }
   return null
-}
-
-/** What the done moves add up to, in and out, so a screen can say it in words. */
-export function doneMovesSummary(moves: readonly DoneMove[]): {
-  inCents: Cents
-  outCents: Cents
-  netCents: Cents
-} {
-  let inCents = 0
-  let outCents = 0
-  for (const m of moves) {
-    if (m.amountCents >= 0) inCents += m.amountCents
-    else outCents += -m.amountCents
-  }
-  return { inCents, outCents, netCents: inCents - outCents }
-}
-
-/**
- * What an account likely holds now: its last count plus every move marked
- * done since (D34). An offer to be confirmed, never a figure stored; with no
- * count ever recorded there is nothing to add to, so null.
- */
-export function likelyBalanceCents(
-  lastCountCents: Cents | null,
-  moves: readonly DoneMove[],
-): Cents | null {
-  if (lastCountCents === null) return null
-  return lastCountCents + doneMovesSummary(moves).netCents
 }
 
 /** What a bump or cut will still put into (positive) or take out of (negative) the account after `from`. */

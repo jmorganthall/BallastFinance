@@ -161,7 +161,7 @@ export interface PositionInput {
   transfers?: readonly ConfirmedTransfer[]
   /** Bumps and cuts confirmed before D35 (shortened if stopped). They still run until they end. */
   adjustments?: readonly DriftAdjustment[]
-  /** One-time moves marked done since each account's last count (D34), signed. */
+  /** One-time moves marked done since each account's last count (D34), signed, one entry per move. */
   movesSinceCount?: readonly AccountMovement[]
   /** Spends confirmed since each account's last count, as money out (positive amounts). */
   spendsSinceCount?: readonly AccountMovement[]
@@ -235,10 +235,23 @@ export interface AccountMoneyToday {
   on: CivilDate | null
   startCents: Cents
   transfersSinceCents: Cents
+  /** Openings stated at a later commit, plus moves in, less moves out: the net of the three below. */
   movesSinceCents: Cents
+  /** Moves marked done into the account since it was counted (D34). */
+  movesInCents: Cents
+  /** Moves marked done out of the account since it was counted, as a positive amount. */
+  movesOutCents: Cents
+  /** Never counted: what was said to be set aside when a later plan in it started. */
+  openingsSinceCents: Cents
   spendsSinceCents: Cents
   /** The likely balance: start + transfers + moves − spends. */
   totalCents: Cents
+  /**
+   * A move or a spend a person marked done since the last count: money no
+   * count has seen, so This week and the digest ask what the account holds.
+   * A transfer alone never does, or it would ask every week.
+   */
+  countOwed: boolean
 }
 
 export interface BankTransfer {
@@ -918,14 +931,12 @@ export function moneyToday(args: {
 
   const transfersSinceCents =
     on === null ? 0 : bankTransfersBetween(args.schedule, on, args.today)
-  const movesSinceCents =
-    laterOpeningsCents +
-    args.movesSinceCount
-      .filter((m) => m.accountId === args.accountId)
-      .reduce((s, m) => s + m.amountCents, 0)
-  const spendsSinceCents = args.spendsSinceCount
-    .filter((m) => m.accountId === args.accountId)
-    .reduce((s, m) => s + m.amountCents, 0)
+  const mine = args.movesSinceCount.filter((m) => m.accountId === args.accountId)
+  const movesInCents = mine.filter((m) => m.amountCents > 0).reduce((s, m) => s + m.amountCents, 0)
+  const movesOutCents = mine.filter((m) => m.amountCents < 0).reduce((s, m) => s - m.amountCents, 0)
+  const movesSinceCents = laterOpeningsCents + movesInCents - movesOutCents
+  const spends = args.spendsSinceCount.filter((m) => m.accountId === args.accountId)
+  const spendsSinceCents = spends.reduce((s, m) => s + m.amountCents, 0)
 
   return {
     from,
@@ -933,8 +944,12 @@ export function moneyToday(args: {
     startCents,
     transfersSinceCents,
     movesSinceCents,
+    movesInCents,
+    movesOutCents,
+    openingsSinceCents: laterOpeningsCents,
     spendsSinceCents,
     totalCents: startCents + transfersSinceCents + movesSinceCents - spendsSinceCents,
+    countOwed: mine.some((m) => m.amountCents !== 0) || spends.length > 0,
   }
 }
 
@@ -984,6 +999,8 @@ function accountPosition(args: {
   // are worked out as if it were done, and nothing else is.
   if (args.pendingCents) {
     money.movesSinceCents += args.pendingCents
+    if (args.pendingCents > 0) money.movesInCents += args.pendingCents
+    else money.movesOutCents -= args.pendingCents
     money.totalCents += args.pendingCents
   }
 
@@ -1505,6 +1522,50 @@ export function steadySinceWords(reason: SteadySinceReason): string {
     case 'spent':
       return 'the day it was last spent'
   }
+}
+
+/**
+ * What an account likely holds and why, in one sentence (D34, D35): the last
+ * count (or the openings, never counted), then everything since -- transfers,
+ * moves in, moves out, spends -- and the likely balance. Every screen and the
+ * digest say it with these words from the position's own figures, so a spend
+ * or a move can never change the number without changing the sentence.
+ */
+export function moneySinceParts(
+  money: AccountMoneyToday,
+  humanDate: (d: CivilDate) => string = (d) => d,
+): SentencePart[] {
+  const t = (text: string): SentencePart => ({ text })
+  const when = (on: CivilDate): SentencePart => ({ text: `on ${humanDate(on)}`, date: { on, as: 'plain' } })
+  const parts: SentencePart[] =
+    money.from === 'count'
+      ? [t(`Counted at ${formatCents(money.startCents)} `), when(money.on!), t('.')]
+      : money.from === 'openings'
+        ? [t(`Never counted; ${formatCents(money.startCents)} was said to be set aside when its plans started `), when(money.on!), t('.')]
+        : [t('Never counted.')]
+  const since = [
+    money.transfersSinceCents > 0 ? `${formatCents(money.transfersSinceCents)} transferred in` : null,
+    money.openingsSinceCents > 0 ? `${formatCents(money.openingsSinceCents)} set aside as later plans started` : null,
+    money.movesInCents > 0 ? `${formatCents(money.movesInCents)} moved in` : null,
+    money.movesOutCents > 0 ? `${formatCents(money.movesOutCents)} moved out` : null,
+    money.spendsSinceCents > 0 ? `${formatCents(money.spendsSinceCents)} spent` : null,
+  ].filter((x): x is string => x !== null)
+  if (since.length > 0) {
+    const list = since.length === 1 ? since[0]! : `${since.slice(0, -1).join(', ')} and ${since[since.length - 1]}`
+    parts.push(t(` Since then, ${list}.`))
+  }
+  parts.push(t(` Likely holds ${formatCents(money.totalCents)}.`))
+  return parts
+}
+
+/** The same sentence as plain text, for a tooltip or the digest. */
+export function moneySinceSentence(
+  money: AccountMoneyToday,
+  humanDate: (d: CivilDate) => string = (d) => d,
+): string {
+  return moneySinceParts(money, humanDate)
+    .map((p) => p.text)
+    .join('')
 }
 
 /**

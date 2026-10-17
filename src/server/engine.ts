@@ -75,7 +75,6 @@ import {
   openCommitmentsFor,
   outstandingInstructions,
   doneMoveOf,
-  type DoneMove,
   packageViews,
   todayIn,
   validateIntake,
@@ -1328,7 +1327,7 @@ export class Engine {
     const issuedById = new Map(issued.map((i) => [i.instructionId, i]))
     const accountOfItem = new Map(lineItems.map((li) => [li.id, li.reserveAccountId]))
     const counts = new Map<Id, { amountCents: Cents; on: CivilDate }>()
-    const moves = new Map<Id, Cents>()
+    const moves = new Map<Id, Cents[]>()
     const spends = new Map<Id, Cents>()
     const transfers: ConfirmedTransfer[] = []
     const add = (map: Map<Id, Cents>, id: Id, cents: Cents) => map.set(id, (map.get(id) ?? 0) + cents)
@@ -1365,12 +1364,20 @@ export class Engine {
         })
         continue
       }
+      // One entry per move, so the position can say what went in and what
+      // went out, not only the net.
       const move = doneMoveOf(instruction, confirmation)
-      if (move) add(moves, instruction.targetId, move.amountCents)
+      if (move) moves.set(instruction.targetId, [...(moves.get(instruction.targetId) ?? []), move.amountCents])
     }
 
+    // A catch-up from before D35 or a share-out's "cover what is short" move
+    // still on the to-do list is money already asked for: the position takes
+    // it off the one-time move it derives, so the same money is never asked
+    // for twice.
     const openMovesIn = outstanding
-      .filter((i) => i.type === 'one_time_move' && (i.purpose ?? 'catch_up') === 'catch_up')
+      .filter(
+        (i) => i.type === 'one_time_move' && ['catch_up', 'cover'].includes(i.purpose ?? 'catch_up'),
+      )
       .map((i) => ({ accountId: i.targetId, amountCents: i.amountCents }))
 
     return {
@@ -1382,7 +1389,7 @@ export class Engine {
       counts: [...counts].map(([accountId, c]) => ({ accountId, ...c })),
       transfers,
       adjustments: adjustments.accepted,
-      movesSinceCount: [...moves].map(([accountId, amountCents]) => ({ accountId, amountCents })),
+      movesSinceCount: [...moves].flatMap(([accountId, list]) => list.map((amountCents) => ({ accountId, amountCents }))),
       spendsSinceCount: [...spends].map(([accountId, amountCents]) => ({ accountId, amountCents })),
       openMovesIn,
       transferRoundUpCents,
@@ -1578,25 +1585,6 @@ export class Engine {
     })
   }
 
-  /** The most recent confirmed balance per account, for showing drift since. */
-  async latestConfirmedBalances(): Promise<Map<Id, { amountCents: Cents; on: CivilDate }>> {
-    const rows = await this.db
-      .select()
-      .from(events)
-      .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'balance_confirmed')))
-
-    const latest = new Map<Id, { amountCents: Cents; on: CivilDate }>()
-    for (const row of rows) {
-      const payload = row.payload as { reserve_account_id: Id; amount_cents: Cents }
-      const on = row.occurredAt as CivilDate
-      const current = latest.get(payload.reserve_account_id)
-      if (!current || current.on <= on) {
-        latest.set(payload.reserve_account_id, { amountCents: payload.amount_cents, on })
-      }
-    }
-    return latest
-  }
-
   /**
    * Rate bumps and cuts as account-level catch-up components, split into the
    * ones a human has marked done and the ones still waiting. Only `accepted`
@@ -1621,11 +1609,10 @@ export class Engine {
    * this to the domain; it works nothing out for itself.
    */
   async openCommitmentsByAccount(): Promise<Map<Id, OpenCommitments>> {
-    const [accounts, adjustments, outstanding, doneMoves] = await Promise.all([
+    const [accounts, adjustments, outstanding] = await Promise.all([
       this.listReserveAccounts(),
       this.driftAdjustments(),
       this.outstandingInstructions(),
-      this.doneMovesSinceCount(),
     ])
     return new Map(
       accounts.map((account) => [
@@ -1635,57 +1622,9 @@ export class Engine {
           accepted: adjustments.accepted,
           pending: adjustments.pending,
           outstanding,
-          doneMoves: doneMoves.get(account.id) ?? [],
         }),
       ]),
     )
-  }
-
-  /**
-   * The one-time moves marked done since each account was last counted
-   * (D34): money the person says is in the account that no count has seen.
-   * Which came after which is the order the events were recorded, not the
-   * calendar day, so a count entered later the same day supersedes a move
-   * marked done that morning. That is a question of order, answered here;
-   * whether a confirmation is a move on an account, and what the moves add up
-   * to, is the domain's (`doneMoveOf`, `likelyBalanceCents`).
-   */
-  async doneMovesSinceCount(): Promise<Map<Id, DoneMove[]>> {
-    const [issued, rows] = await Promise.all([
-      this.listIssuedInstructions(),
-      this.db
-        .select()
-        .from(events)
-        .where(
-          and(
-            eq(events.householdId, this.householdId),
-            inArray(events.kind, ['balance_confirmed', 'instruction_confirmed']),
-          ),
-        )
-        .orderBy(events.recordedAt, events.id),
-    ])
-    const byId = new Map(issued.map((i) => [i.instructionId, i]))
-    const since = new Map<Id, DoneMove[]>()
-    for (const row of rows) {
-      if (row.kind === 'balance_confirmed') {
-        const p = row.payload as { reserve_account_id: Id }
-        since.set(p.reserve_account_id, [])
-        continue
-      }
-      const p = row.payload as { instruction_id: Id; actual_amount_cents: Cents | null }
-      const instruction = byId.get(p.instruction_id)
-      if (!instruction) continue
-      const move = doneMoveOf(instruction, {
-        instructionId: p.instruction_id,
-        confirmedOn: row.occurredAt as CivilDate,
-        actualAmountCents: p.actual_amount_cents ?? undefined,
-      })
-      if (!move) continue
-      const list = since.get(instruction.targetId) ?? []
-      list.push(move)
-      since.set(instruction.targetId, list)
-    }
-    return since
   }
 
   /** The confirmed bumps and cuts: the only ones the live figures read. */
@@ -1774,7 +1713,10 @@ export class Engine {
    * plan, and the difference is recorded rather than discarded -- it is either
    * money still sitting in the account or money that came from elsewhere.
    */
-  async confirmSpend(input: { lineItemId: Id; actualAmountCents: Cents }): Promise<void> {
+  async confirmSpend(input: { lineItemId: Id; actualAmountCents?: Cents }): Promise<void> {
+    if (input.actualAmountCents !== undefined && (!Number.isInteger(input.actualAmountCents) || input.actualAmountCents < 0)) {
+      throw new EngineError('What was spent must be a whole number of cents, zero or more')
+    }
     const today = this.today()
     await this.db.transaction(async (tx) => {
       const [row] = await tx
@@ -1811,8 +1753,10 @@ export class Engine {
         payload: {
           line_item_id: input.lineItemId,
           rolled_to: rolledTo,
-          planned_cents: row.unitAmountCents * row.quantity,
-          actual_amount_cents: input.actualAmountCents,
+          planned_cents: lineItemTotalCents(row),
+          // Left blank, it is the part's own total, read here and never from
+          // a figure the form posted.
+          actual_amount_cents: input.actualAmountCents ?? lineItemTotalCents(row),
         },
       })
     })

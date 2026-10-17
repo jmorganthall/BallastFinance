@@ -12,10 +12,11 @@
 
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Hint, Money, PageHeader, When } from '@/components/ui'
+import { Card, PageHeader } from '@/components/ui'
+import { MoneySince } from '@/components/money-since'
 import { AccountPositionCard } from '@/components/account-position'
 import { confirmBalancesAction } from '@/server/actions'
-import { doneMovesSummary, formatCents } from '@/domain'
+import { formatCents } from '@/domain'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,11 +30,7 @@ export default async function CheckInPage({
   const { done } = await searchParams
   const { engine } = await requireEngine()
   const today = engine.today()
-  const [position, confirmed, commitments] = await Promise.all([
-    engine.position(),
-    engine.latestConfirmedBalances(),
-    engine.openCommitmentsByAccount(),
-  ])
+  const position = await engine.position()
 
   const live = position.accounts.filter((a) => a.parts.length > 0)
 
@@ -60,43 +57,12 @@ export default async function CheckInPage({
         <>
           <form action={confirmBalancesAction} className="space-y-4">
             {live.map((a) => {
-              const last = confirmed.get(a.account.id)
-              // Moves marked done since the last count (D34), in words; the
-              // likely balance is the position's and is offered in the box.
-              const moved = doneMovesSummary(commitments.get(a.account.id)?.doneMoves ?? [])
               return (
                 <Card key={a.account.id}>
                   <h2 className="font-semibold">{a.account.name}</h2>
-                  <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-                    <Hint detail="The last count, plus the transfers since at what the bank is set to, plus moves marked done, less anything confirmed spent. What you type is the fact; this is only a guess.">
-                      Likely holds <Money cents={a.money.totalCents} />
-                    </Hint>
-                    {last ? (
-                      <>
-                        {' · '}last counted <When date={last.on} today={today} /> at <Money cents={last.amountCents} />
-                      </>
-                    ) : (
-                      ' · never counted'
-                    )}
-                    {moved.inCents > 0 || moved.outCents > 0 ? (
-                      <>
-                        {' · '}since then you moved
-                        {moved.inCents > 0 ? (
-                          <>
-                            {' '}
-                            <Money cents={moved.inCents} /> in
-                          </>
-                        ) : null}
-                        {moved.inCents > 0 && moved.outCents > 0 ? ' and' : null}
-                        {moved.outCents > 0 ? (
-                          <>
-                            {' '}
-                            <Money cents={moved.outCents} /> out
-                          </>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </p>
+                  {/* The position's own breakdown (D34, D35): the count, then
+                      every transfer, move and spend since. */}
+                  <MoneySince money={a.money} today={today} />
                   <label className="mt-3 block text-sm font-medium">
                     What it actually holds
                     <input

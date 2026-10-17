@@ -465,21 +465,26 @@ export async function confirmSpendAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const lineItemId = String(formData.get('line_item_id'))
   const raw = String(formData.get('actual_amount') ?? '').trim()
-  const planned = Number(formData.get('planned_cents'))
 
-  let actualAmountCents = planned
+  // Left blank, the engine records the part's own total; it is never read
+  // from a figure the form posted. A box that does not read as an amount is
+  // said back under the card, not quietly swapped for the plan's figure.
+  let actualAmountCents: number | undefined
   if (raw !== '') {
     try {
       const { parseAmountToCents } = await import('@/domain')
       actualAmountCents = parseAmountToCents(raw)
     } catch {
-      actualAmountCents = planned
+      redirect(
+        `${snoozeBack(formData)}?snooze_error=${encodeURIComponent('Enter what went out, like 350 or 349.99.')}&item=${lineItemId}`,
+      )
     }
   }
 
   await engine.confirmSpend({ lineItemId, actualAmountCents })
   revalidatePath('/')
   revalidatePath('/packages')
+  revalidatePath('/check-in')
 }
 
 /** Where a snooze form sends a person back to: This week, or a plan's page. */

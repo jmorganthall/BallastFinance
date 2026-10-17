@@ -36,8 +36,12 @@ function account(over: {
       startCents: total,
       transfersSinceCents: 0,
       movesSinceCents: 0,
+      movesInCents: 0,
+      movesOutCents: 0,
+      openingsSinceCents: 0,
       spendsSinceCents: 0,
       totalCents: total,
+      countOwed: false,
     },
   }
 }

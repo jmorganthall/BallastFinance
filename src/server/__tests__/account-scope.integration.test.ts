@@ -152,14 +152,14 @@ describeDb('individual vs household accounts', () => {
 
   it('allows Josh confirming his own', async () => {
     await josh.confirmBalance({ reserveAccountId: joshsOwnId, amountCents: 5000 })
-    const latest = await josh.latestConfirmedBalances()
-    expect(latest.get(joshsOwnId)?.amountCents).toBe(5000)
+    const money = (await josh.position()).accounts.find((a) => a.account.id === joshsOwnId)?.money
+    expect(money).toMatchObject({ from: 'count', startCents: 5000 })
   })
 
   it('allows either spouse to confirm the shared account', async () => {
     await shelby.confirmBalance({ reserveAccountId: sharedId, amountCents: 1200 })
-    const latest = await shelby.latestConfirmedBalances()
-    expect(latest.get(sharedId)?.amountCents).toBe(1200)
+    const money = (await shelby.position()).accounts.find((a) => a.account.id === sharedId)?.money
+    expect(money).toMatchObject({ from: 'count', startCents: 1200 })
   })
 
   it("refuses Shelby setting the transfer or marking a move done on Josh's account", async () => {
