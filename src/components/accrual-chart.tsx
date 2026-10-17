@@ -7,14 +7,17 @@
  * solid line is what will happen on the transfer set up now: each transfer
  * paying the account's dates soonest first. Beside it, dashed in the soft
  * ink, saving it on its own (D50 (2)): each part saving evenly from its
- * Saving since. Where the plan's line is below that one the space between is
- * shaded: money paying sooner bills first, or still to come, and the two
- * meet on the day. A dot marks the turning point, when a sooner bill is paid
- * and the transfers start coming here. When the plan is Short it ends below
- * the total, and a second line, dashed in the on-track green, shows the same
- * after the fix This week asks for. Every line is named in the caption, so
- * identity never depends on colour alone, and the colours are tokens with
- * separate light and dark values. Blue is kept for Ready to spend (D38 (5)).
+ * Saving since. Where the plan's line is below that one the space between
+ * is shaded. Numbered badges above the plot mark the stretches of transfers
+ * ahead (D50 (4)): a filled badge where money comes here, a hollow one
+ * where the transfers pay other plans first; `PlanStory` says what each
+ * number means, so the picture and the words point at the same weeks. Each
+ * stretch's first day is marked on the axis. When the plan is Short it ends
+ * below the total, and a second line, dashed in the on-track green, shows
+ * the same after the fix This week asks for. Every line is named in the
+ * caption, so identity never depends on colour alone, and the colours are
+ * tokens with separate light and dark values. Blue is kept for Ready to
+ * spend (D38 (5)).
  *
  * The plan's line is stepped, not smoothed: money moves on the transfer day.
  * Saving it on its own is drawn straight, as the even pace it is. Every
@@ -23,16 +26,21 @@
 
 import { formatCents, type PlanChart, type PlanChartPoint } from '@/domain'
 
-const WIDTH = 320
-const HEIGHT = 168
-const PAD = { top: 14, right: 12, bottom: 26, left: 46 }
+const WIDTH = 600
+const HEIGHT = 250
+const PAD = { top: 34, right: 16, bottom: 32, left: 78 }
+const FONT = 14
+/** The least room between two date labels on the axis, so none overlap. */
+const LABEL_GAP = 64
+/** The least room between two badge centres. */
+const BADGE_GAP = 22
 
-function shortDate(iso: string): string {
+function shortDate(iso: string, withYear = true): string {
   const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
-    year: 'numeric',
+    ...(withYear ? { year: 'numeric' } : {}),
     timeZone: 'UTC',
   })
 }
@@ -40,6 +48,22 @@ function shortDate(iso: string): string {
 function dayNumber(iso: string): number {
   const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
   return Date.UTC(y, m - 1, d) / 86_400_000
+}
+
+/** A stretch's number, drawn the same here and beside its words in `PlanStory`. */
+export function StretchBadge({ n, waiting }: { n: number; waiting: boolean }) {
+  return (
+    <span
+      aria-hidden
+      className={`inline-grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-semibold ${
+        waiting
+          ? 'border border-[var(--color-ink-soft)] text-[var(--color-ink-soft)]'
+          : 'bg-[var(--color-ink)] text-[var(--color-card)]'
+      }`}
+    >
+      {n}
+    </span>
+  )
 }
 
 export function AccrualChart({ chart, today }: { chart: PlanChart; today: string }) {
@@ -75,18 +99,40 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
     `${line} L ${sx(series.at(-1)!.date)} ${sy(0)} L ${sx(series[0]!.date)} ${sy(0)} Z`
   const ownLine = chart.onItsOwn.length > 1 ? straight(chart.onItsOwn) : null
   const fixLine = chart.afterFix && chart.afterFix.length > 1 ? stepped(chart.afterFix) : null
-  const endsShort = last.cents < chart.targetCents
-  const todayX = dayNumber(today) >= x0 && dayNumber(today) <= x1 ? sx(today) : null
-  const turn = chart.story.turn
+  const endsShort = !chart.story.due.reachesTotal
   const below = chart.dipsBelow
+  const phases = chart.story.phases
+
+  // A stretch is drawn from the week before its first transfer (when the
+  // money starts changing) to its last transfer.
+  const phaseStart = (from: string) => Math.max(PAD.left, sx(from) - plotW * (7 / span))
+  let lastBadge = -Infinity
+  const badges = phases.map((p, i) => {
+    const x = Math.max((phaseStart(p.from) + sx(p.to)) / 2, lastBadge + BADGE_GAP)
+    lastBadge = x
+    return { n: i + 1, x: Math.min(x, WIDTH - PAD.right - 9), waiting: p.kind === 'waiting' }
+  })
+  // Date labels at each stretch's start, kept clear of one another and of
+  // Today and the due date at the two ends.
+  const labels: { x: number; text: string }[] = []
+  let lastLabel = PAD.left
+  for (const p of phases.slice(1)) {
+    const x = phaseStart(p.from)
+    if (x - lastLabel >= LABEL_GAP && WIDTH - PAD.right - x >= LABEL_GAP * 1.4) {
+      labels.push({ x, text: shortDate(p.from, false) })
+      lastLabel = x
+    }
+  }
 
   return (
     <figure className="m-0">
+      {/* On a phone the chart keeps a readable size and scrolls sideways inside its card. */}
+      <div className="overflow-x-auto">
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="h-auto w-full"
+        className="h-auto w-full min-w-[520px]"
         role="img"
-        aria-label={`${formatCents(chart.countedToday.cents)} is here today; saving it on its own would have ${formatCents(chart.story.now.onItsOwnCents)}. On the transfer set up now this plan reaches ${formatCents(last.cents)} of ${formatCents(chart.targetCents)} by ${shortDate(last.date)}${turn ? `, climbing faster from ${shortDate(turn.on)}` : ''}${fixLine ? `; after the fix on This week it reaches ${formatCents(chart.afterFix!.at(-1)!.cents)}` : ''}.`}
+        aria-label={`${formatCents(chart.countedToday.cents)} is here today; saving it on its own would have ${formatCents(chart.story.now.onItsOwnCents)}. On the transfer set up now this plan reaches ${formatCents(last.cents)} of ${formatCents(chart.targetCents)} by ${shortDate(last.date)}, in ${phases.length} stretches described below${fixLine ? `; after the fix on This week it reaches ${formatCents(chart.afterFix!.at(-1)!.cents)}` : ''}.`}
       >
         {/*
           * The shading: everything under saving it on its own, then the
@@ -100,7 +146,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
           </>
         ) : null}
 
-        {/* Recessive frame: a baseline and one reference line, nothing more. */}
+        {/* Recessive frame: a baseline, the total, and where each stretch begins. */}
         <line
           x1={PAD.left}
           y1={sy(chart.targetCents)}
@@ -111,11 +157,22 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
           strokeDasharray="3 3"
         />
         <line x1={PAD.left} y1={sy(0)} x2={WIDTH - PAD.right} y2={sy(0)} stroke="var(--color-line)" strokeWidth="1" />
+        {phases.slice(1).map((p) => (
+          <line
+            key={p.from}
+            x1={phaseStart(p.from)}
+            y1={PAD.top - 6}
+            x2={phaseStart(p.from)}
+            y2={sy(0)}
+            stroke="var(--color-line)"
+            strokeWidth="1"
+          />
+        ))}
 
-        <text x="2" y={sy(chart.targetCents) + 4} fontSize="9" fill="var(--color-ink-soft)">
+        <text x={PAD.left - 8} y={sy(chart.targetCents) + 4} fontSize={FONT} textAnchor="end" fill="var(--color-ink-soft)">
           {formatCents(chart.targetCents)}
         </text>
-        <text x="2" y={sy(0) + 4} fontSize="9" fill="var(--color-ink-soft)">
+        <text x={PAD.left - 8} y={sy(0) + 4} fontSize={FONT} textAnchor="end" fill="var(--color-ink-soft)">
           $0
         </text>
 
@@ -124,7 +181,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
             d={ownLine}
             fill="none"
             stroke="var(--color-ink-soft)"
-            strokeDasharray="4 3"
+            strokeDasharray="5 4"
             strokeWidth="1.5"
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -134,7 +191,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
           d={actualLine}
           fill="none"
           stroke="var(--color-ink)"
-          strokeWidth="2"
+          strokeWidth="2.25"
           strokeLinejoin="round"
           strokeLinecap="round"
         />
@@ -150,39 +207,46 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
           />
         ) : null}
 
-        {todayX !== null ? (
-          <>
+        {/* The stretches, numbered as the words below number them. */}
+        {badges.map((b) => (
+          <g key={b.n}>
             <circle
-              cx={todayX}
-              cy={sy(chart.countedToday.cents)}
-              r="4"
-              fill="var(--color-ink)"
-              stroke="var(--color-card)"
-              strokeWidth="2"
+              cx={b.x}
+              cy={PAD.top - 18}
+              r="9"
+              fill={b.waiting ? 'var(--color-card)' : 'var(--color-ink)'}
+              stroke={b.waiting ? 'var(--color-ink-soft)' : 'var(--color-ink)'}
+              strokeWidth="1"
+            />
+            <text
+              x={b.x}
+              y={PAD.top - 14}
+              fontSize="11"
+              fontWeight="600"
+              textAnchor="middle"
+              fill={b.waiting ? 'var(--color-ink-soft)' : 'var(--color-card)'}
             >
-              {/* One string: React renders a <title> with several children empty on the server. */}
-              <title>{`Today: ${formatCents(chart.countedToday.cents)} here`}</title>
-            </circle>
-          </>
-        ) : null}
+              {b.n}
+            </text>
+          </g>
+        ))}
 
-        {turn ? (
-          <circle
-            cx={sx(turn.on)}
-            cy={sy(turn.cents)}
-            r="3.5"
-            fill="var(--color-ink)"
-            stroke="var(--color-card)"
-            strokeWidth="2"
-          >
-            <title>{`${shortDate(turn.on)}: from then about ${formatCents(turn.perWeekAfterCents)} a week comes here`}</title>
-          </circle>
-        ) : null}
+        <circle
+          cx={sx(first.date)}
+          cy={sy(chart.countedToday.cents)}
+          r="5"
+          fill="var(--color-ink)"
+          stroke="var(--color-card)"
+          strokeWidth="2"
+        >
+          {/* One string: React renders a <title> with several children empty on the server. */}
+          <title>{`Today: ${formatCents(chart.countedToday.cents)} here`}</title>
+        </circle>
         {!endsShort ? (
           <circle
             cx={sx(last.date)}
             cy={sy(last.cents)}
-            r="4"
+            r="5"
             fill="var(--color-ahead)"
             stroke="var(--color-card)"
             strokeWidth="2"
@@ -191,20 +255,27 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
           </circle>
         ) : null}
 
-        <text x={PAD.left} y={HEIGHT - 8} fontSize="9" fill="var(--color-ink-soft)">
+        <text x={PAD.left} y={HEIGHT - 8} fontSize={FONT} fill="var(--color-ink-soft)">
           {/* The chart starts today (D40 (5)), so its left edge is today. */}
           {first.date === today ? 'Today' : shortDate(first.date)}
         </text>
-        <text x={WIDTH - PAD.right} y={HEIGHT - 8} fontSize="9" textAnchor="end" fill="var(--color-ink-soft)">
+        {labels.map((l) => (
+          <text key={l.text} x={l.x} y={HEIGHT - 8} fontSize={FONT} textAnchor="middle" fill="var(--color-ink-soft)">
+            {l.text}
+          </text>
+        ))}
+        <text x={WIDTH - PAD.right} y={HEIGHT - 8} fontSize={FONT} textAnchor="end" fill="var(--color-ink-soft)">
           {shortDate(last.date)}
         </text>
       </svg>
+      </div>
 
       {/* Direct labels rather than a legend box, so identity is never colour alone. */}
       <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-ink-soft)]">
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-ink)]" />
-          On the transfer set up now{endsShort ? ` (ends ${formatCents(chart.targetCents - last.cents)} short)` : ''}
+          This plan, on the transfer set up now
+          {endsShort ? ` (ends ${formatCents(chart.targetCents - last.cents)} short)` : ''}
         </span>
         {ownLine ? (
           <span className="flex items-center gap-1.5">
@@ -215,11 +286,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
         {below ? (
           <span className="flex items-center gap-1.5">
             <span aria-hidden className="inline-block h-2.5 w-4 rounded-sm bg-[var(--color-ink-soft)] opacity-30" />
-            {endsShort
-              ? 'Below saving it on its own'
-              : turn || chart.story.now.coveringCents > 0
-                ? 'Paying sooner bills first'
-                : 'Still to come from the transfer'}
+            Below saving it on its own
           </span>
         ) : null}
         {fixLine ? (
@@ -228,13 +295,13 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
             After the fix on This week
           </span>
         ) : null}
-        <span className="flex items-center gap-1.5">
-          <span
-            aria-hidden
-            className="inline-block h-2 w-2 rounded-full bg-[var(--color-ink)] ring-2 ring-[var(--color-card)]"
-          />
-          Here today
-        </span>
+        {phases.length > 0 ? (
+          <span className="flex items-center gap-1.5">
+            <StretchBadge n={1} waiting={false} />
+            <StretchBadge n={2} waiting />
+            Money comes here, or pays other plans first: see below
+          </span>
+        ) : null}
       </figcaption>
     </figure>
   )

@@ -201,17 +201,23 @@ principles, and they are non-negotiable.
   plan is Short, unconfirmed or asked for a one-time move
   (`coversOnItsOwn` false), the weekly figure alone and nothing claimed. `planChart` also returns `onItsOwn`
   (each part's `evenPaceCents` from its Saving since, on the chart's own
-  dates) and `story` (`PlanStory`): what is below its own pace, how much of
-  that other plans in the same account due sooner hold beyond theirs
-  (`covering`, worked out account by account and added up, never netted
-  across accounts) and the rest still to come, the turning point (another
-  plan's due date with the largest jump in the plan's weekly rise,
-  `TURN_MIN_RATIO` 1.5 and `TURN_MIN_GAIN_CENTS` $1), and the day. The
-  plan's page draws the dashed "Saving it on its own" line with the space
-  below it shaded, and `PlanStory` (`src/components/plan-story.tsx`) tells
-  it in steps, with "On track: all $X due in N" only when `story.onTrack`
-  (the plan On track, every account it is in On track on a confirmed
-  transfer, and all of it there on the day). It is a comparison and never a target: nothing judges a plan
+  dates) and `story` (`PlanStory`, D50 (10), rev 98): what is below its
+  own pace and where that money is (`heldBy`: other plans in the same
+  account holding more than their own pace, due sooner or later, each up
+  to its excess, worked out account by account and never netted across
+  accounts; the rest still to come), the stretches of transfers ahead
+  (`phases`, read off the run-forward transfer by transfer: `filling` when
+  money comes here, `waiting` for two transfers or more that bring under
+  `PHASE_MIN_RISE_CENTS` ($1), each naming the other plans the same
+  transfers pay), the day it is full (`full`), and the day. The plan's page
+  draws the dashed "Saving it on its own" line with the space below it
+  shaded and numbered badges over the stretches (`StretchBadge`), and
+  `PlanStory` (`src/components/plan-story.tsx`) says "Where the money is
+  today" and "What happens next" with the same numbers, then "On track:
+  all $X due in N" only when `story.onTrack` (the plan On track, every
+  account it is in On track on a confirmed transfer, and all of it there
+  on the day). The chart scrolls sideways inside its card on a phone. It
+  is a comparison and never a target: nothing judges a plan
   by it, and no screen says "behind", "lent" or "guaranteed". This brings
   back the line D40 (5) took off the chart, with that job and that name.
 - **A move marked done is money the account holds until the next count**
@@ -469,7 +475,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 768 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 769 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
