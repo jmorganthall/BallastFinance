@@ -5,6 +5,7 @@ import {
   countTowardParts,
   levelWeekly,
   NEAR_TRANSFERS,
+  PHASE_MIN_RISE_CENTS,
   planChart,
   position,
   requirementsFor,
@@ -714,28 +715,63 @@ describe('the plan chart beside saving it on its own (D50)', () => {
     expect(now.onItsOwnCents).toBe(plan.savedForCents)
     expect(now.belowCents).toBe(plan.savedForCents - plan.countedCents)
     expect(now.belowCents).toBeGreaterThan(0)
-    expect(now.covering.map((c) => c.name)).toEqual(['Christmas'])
+    expect(now.heldBy.map((c) => [c.name, c.sooner])).toEqual([['Christmas', true]])
+    expect(now.coveringCents).toBe(now.heldBy[0]!.cents)
     expect(now.coveringCents).toBeGreaterThan(0)
     expect(now.toComeCents).toBeGreaterThan(0)
     expect(now.coveringCents + now.toComeCents).toBe(now.belowCents)
   })
 
-  it('turns when Christmas is paid, and ends with all of it on the day', () => {
-    const turn = chart.story.turn!
-    expect(turn.on).toBe('2026-12-25')
-    expect(turn.paid.map((x) => x.name)).toEqual(['Christmas'])
-    expect(turn.onItsOwnCents).toBeGreaterThan(turn.cents)
-    expect(turn.perWeekAfterCents).toBeGreaterThan(0)
-    expect(turn.perWeekAfterCents).toBeLessThanOrEqual(asked)
+  it('tells the transfers ahead in stretches: Christmas first, then the trip', () => {
+    const [first, second] = chart.story.phases
+    expect(first!.kind).toBe('waiting')
+    expect(first!.addedCents).toBeLessThan(PHASE_MIN_RISE_CENTS * first!.transfers)
+    expect(first!.others.map((x) => x.name)).toEqual(['Christmas'])
+    expect(first!.others[0]!.dueDate).toBe('2026-12-25')
+    expect(compareDates(first!.to, '2026-12-25')).toBeLessThanOrEqual(0)
+    expect(second!.kind).toBe('filling')
+    expect(second!.perWeekCents).toBeGreaterThan(0)
+    expect(second!.perWeekCents).toBeLessThanOrEqual(asked)
+    const last = chart.story.phases.at(-1)!
+    expect(last.endCents).toBe(400000)
+    expect(chart.story.full!.on).toBe(last.to)
     expect(chart.story.due).toEqual({ on: '2027-09-24', cents: 400000, totalCents: 400000, reachesTotal: true })
     expect(chart.story.onTrack).toBe(true)
   })
 
-  it('puts the turning point on a drawn point however coarsely the chart is drawn', () => {
+  it('draws every stretch where it starts and ends, however coarsely the chart is drawn', () => {
     const coarse = planChart({ plan, household: p, today: TODAY, transferWeekday: FRIDAY, maxPoints: 5 })!
-    const turn = coarse.story.turn!
-    const before = coarse.actual.filter((x) => compareDates(x.date, turn.on) <= 0).at(-1)!
-    expect(before.cents).toBe(turn.cents)
+    const dates = new Set(coarse.actual.map((x) => x.date))
+    for (const x of coarse.story.phases) {
+      expect(dates.has(x.from)).toBe(true)
+      expect(dates.has(x.to)).toBe(true)
+    }
+  })
+
+  it('names a later plan holding the money today, while the plan due soonest rides the next transfers', () => {
+    // The screenshot: $200 due in a fortnight, saving since a year ago,
+    // holding only what is left over, because the money already here is
+    // what a bigger plan due later must hold now.
+    const soon = pkg({ id: 'pkg-soon', name: 'Anniversary', committedAt: '2025-10-10' })
+    const later = pkg({ id: 'pkg-later', name: 'Property tax', committedAt: '2026-09-21' })
+    const f = input({
+      packages: [soon, later],
+      lineItems: [
+        li({ id: 'a', packageId: soon.id, unitAmountCents: 20000, dueDate: '2026-10-09' }),
+        li({ id: 'b', packageId: later.id, unitAmountCents: 500000, dueDate: '2026-12-25' }),
+      ],
+      counts: [{ accountId: gifts.id, amountCents: 300000, on: TODAY }],
+    })
+    const w = position(f).accounts[0]!.weeklyCents
+    const h = position({ ...f, transfers: [{ accountId: gifts.id, perWeekCents: w, confirmedOn: TODAY }] })
+    const small = h.plans.find((x) => x.package.id === soon.id)!
+    const c = planChart({ plan: small, household: h, today: TODAY, transferWeekday: FRIDAY })!
+    expect(c.story.now.belowCents).toBeGreaterThan(0)
+    expect(c.story.now.heldBy.map((x) => [x.name, x.sooner])).toEqual([['Property tax', false]])
+    expect(c.story.now.toComeCents).toBe(0)
+    expect(c.story.phases[0]!.kind).toBe('filling')
+    expect(c.story.full).not.toBeNull()
+    expect(c.story.onTrack).toBe(true)
   })
 
   it('never promises on a transfer nobody has set up', () => {
@@ -764,7 +800,7 @@ describe('the plan chart beside saving it on its own (D50)', () => {
     const tickets = tripPlan.parts.find((x) => x.lineItem.id === 'trip')!
     expect(tripPlan.countedCents).toBeGreaterThan(tripPlan.savedForCents)
     expect(c.story.now.belowCents).toBe(tickets.savedForCents - tickets.countedCents)
-    expect(c.story.now.covering.map((x) => x.name)).toEqual(['Christmas'])
+    expect(c.story.now.heldBy.map((x) => x.name)).toEqual(['Christmas'])
   })
 
   it('claims nothing for a plan at or ahead of its own pace', () => {
@@ -777,8 +813,8 @@ describe('the plan chart beside saving it on its own (D50)', () => {
     })
     const c = planChart({ plan: alone.plans[0]!, household: alone, today: TODAY, transferWeekday: FRIDAY })!
     expect(c.story.now.belowCents).toBe(0)
-    expect(c.story.now.covering).toEqual([])
-    expect(c.story.turn).toBeNull()
+    expect(c.story.now.heldBy).toEqual([])
+    expect(c.story.phases.every((x) => x.kind === 'filling')).toBe(true)
   })
 })
 
@@ -1032,7 +1068,27 @@ describe('invariants over randomised households (D35)', () => {
         expect(now.coveringCents).toBeGreaterThanOrEqual(0)
         expect(now.coveringCents).toBeLessThanOrEqual(now.belowCents)
         expect(now.coveringCents + now.toComeCents).toBe(now.belowCents)
-        expect(now.covering.length > 0).toBe(now.coveringCents > 0)
+        expect(now.heldBy.length > 0).toBe(now.coveringCents > 0)
+        expect(now.heldBy.reduce((t, x) => t + x.cents, 0)).toBe(now.coveringCents)
+        for (const x of now.heldBy) expect(x.cents).toBeGreaterThan(0)
+        // The stretches run transfer by transfer with no gap, alternate,
+        // and add up to what the plan holds when they end.
+        const phases = chart.story.phases
+        phases.forEach((x, i) => {
+          if (i > 0) {
+            expect(x.from).toBe(addDays(phases[i - 1]!.to, 7))
+            expect(x.kind).not.toBe(phases[i - 1]!.kind)
+          }
+          expect(x.transfers).toBe(transferWeeksBetween(x.from, x.to, transferWeekday) + 1)
+          if (x.kind === 'waiting') expect(x.transfers).toBeGreaterThanOrEqual(1)
+        })
+        if (phases.length > 0) {
+          expect(now.cents + phases.reduce((t, x) => t + x.addedCents, 0)).toBe(phases.at(-1)!.endCents)
+        }
+        if (chart.story.full) {
+          expect(phases.at(-1)!.endCents).toBeGreaterThanOrEqual(plan.totalCents)
+          expect(chart.story.due.reachesTotal).toBe(true)
+        }
         expect(chart.story.due.cents).toBe(chart.actual.at(-1)!.cents)
         if (chart.story.onTrack) {
           expect(chart.story.due.reachesTotal).toBe(true)
@@ -1040,11 +1096,6 @@ describe('invariants over randomised households (D35)', () => {
         }
         if (saving && saving.lessPerWeekCents > 0) {
           for (const a of p.accounts.filter((x) => x.parts.length > 0)) expect(a.oneTimeMove).toBeNull()
-        }
-        if (chart.story.turn) {
-          expect(compareDates(chart.story.turn.on, today)).toBeGreaterThan(0)
-          expect(compareDates(chart.story.turn.on, chart.story.due.on)).toBeLessThan(0)
-          expect(chart.story.turn.paid.length).toBeGreaterThan(0)
         }
       }
       if (p.allCaughtUp) {
