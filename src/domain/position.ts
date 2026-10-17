@@ -1701,6 +1701,12 @@ export interface StoryPhase {
   endCents: Cents
   /** The other plans the same transfers pay over the stretch, most first (at most three), each taking at least PHASE_MIN_RISE_CENTS a transfer. */
   others: StoryOther[]
+  /**
+   * The plans the stretch before paid that this one no longer does: covered,
+   * so their share of the transfer comes free (soonest due first, at most
+   * three). Empty on the first stretch.
+   */
+  rolledOff: StoryOther[]
 }
 
 /**
@@ -1919,12 +1925,21 @@ export function planChart(args: {
     if (k === 'waiting' && kinds[i - 1] === 'filling' && kinds[i + 1] === 'filling') kinds[i] = 'filling'
   })
   const phases: StoryPhase[] = []
+  let paidBefore = new Map<Id, Cents>()
   for (let i = 0; i < kinds.length; ) {
     let j = i
     while (j + 1 < kinds.length && kinds[j + 1] === kinds[i]) j += 1
     const addedCents = rises.slice(i, j + 1).reduce((s, r) => s + r, 0)
     const got = new Map<Id, Cents>()
     for (let k = i; k <= j; k += 1) for (const [id, c] of received[k]!) got.set(id, (got.get(id) ?? 0) + c)
+    // A plan that only takes rounding cents over the stretch is not named.
+    const paid = new Map([...got.entries()].filter(([, cents]) => cents >= PHASE_MIN_RISE_CENTS * (j - i + 1)))
+    const other = (packageId: Id, cents: Cents): StoryOther => ({
+      packageId,
+      name: names.get(packageId) ?? packageId,
+      dueDate: nextDue(packageId),
+      cents,
+    })
     phases.push({
       kind: kinds[i]!,
       from: days[i]!,
@@ -1933,13 +1948,17 @@ export function planChart(args: {
       addedCents,
       perWeekCents: Math.round(addedCents / (j - i + 1)),
       endCents: totals[j]!,
-      // A plan that only takes rounding cents over the stretch is not named.
-      others: [...got.entries()]
-        .filter(([, cents]) => cents >= PHASE_MIN_RISE_CENTS * (j - i + 1))
+      others: [...paid.entries()]
         .sort((x, y) => y[1] - x[1])
         .slice(0, 3)
-        .map(([packageId, cents]) => ({ packageId, name: names.get(packageId) ?? packageId, dueDate: nextDue(packageId), cents })),
+        .map(([packageId, cents]) => other(packageId, cents)),
+      rolledOff: [...paidBefore.entries()]
+        .filter(([packageId]) => !paid.has(packageId))
+        .map(([packageId, cents]) => other(packageId, cents))
+        .sort((x, y) => compareDates(x.dueDate, y.dueDate))
+        .slice(0, 3),
     })
+    paidBefore = paid
     i = j + 1
   }
 

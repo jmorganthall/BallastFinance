@@ -732,7 +732,11 @@ describe('the plan chart beside saving it on its own (D50)', () => {
     expect(first!.others.map((x) => x.name)).toEqual(['Christmas'])
     expect(first!.others[0]!.dueDate).toBe('2026-12-25')
     expect(compareDates(first!.to, '2026-12-25')).toBeLessThanOrEqual(0)
+    expect(first!.rolledOff).toEqual([])
     expect(second!.kind).toBe('filling')
+    // Christmas is covered, so money starts coming here: that is the turn.
+    expect(second!.rolledOff.map((x) => x.name)).toEqual(['Christmas'])
+    expect(second!.others.map((x) => x.name)).not.toContain('Christmas')
     expect(second!.perWeekCents).toBeGreaterThan(0)
     expect(second!.perWeekCents).toBeLessThanOrEqual(asked)
     const last = chart.story.phases.at(-1)!
@@ -1171,6 +1175,8 @@ describe('invariants over randomised households (D35)', () => {
           if (i > 0) {
             expect(x.from).toBe(addDays(phases[i - 1]!.to, 7))
             expect(x.kind).not.toBe(phases[i - 1]!.kind)
+          // A plan that rolled off was paid the stretch before and is not paid in this one.
+          for (const r of x.rolledOff) expect(x.others.map((o) => o.packageId)).not.toContain(r.packageId)
           }
           expect(x.transfers).toBe(transferWeeksBetween(x.from, x.to, transferWeekday) + 1)
           if (x.kind === 'waiting') expect(x.transfers).toBeGreaterThanOrEqual(1)

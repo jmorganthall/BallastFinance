@@ -23,6 +23,17 @@ export function humanDate(iso: string): string {
   })
 }
 
+/** "Oct 24", or "Jan 23, 2027" when the year is not this year's: a date in a sentence that already says how far away it is. */
+export function shortDate(iso: string, today: string): string {
+  const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...(iso.slice(0, 4) === today.slice(0, 4) ? {} : { year: 'numeric' as const }),
+    timeZone: 'UTC',
+  })
+}
+
 export function Card({
   children,
   className = '',

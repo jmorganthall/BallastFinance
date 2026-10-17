@@ -8,8 +8,9 @@
  *    amounts. Anything the account does not hold yet comes from the
  *    transfers on the way.
  * 2. What happens next: the stretches of transfers ahead, numbered as the
- *    badges on the chart are numbered, each saying which plans the
- *    transfers pay and what comes here.
+ *    badges on the chart are numbered, each "In N · start to end" and one
+ *    line: where the money is focused while nothing comes here, or which
+ *    plans are covered so money starts coming here, and how much.
  * 3. The day it is full, and the promise, only when `story.onTrack`: never
  *    "guaranteed", because it rests on the transfer running.
  *
@@ -17,7 +18,7 @@
  */
 
 import { StretchBadge } from '@/components/accrual-chart'
-import { Money, When } from '@/components/ui'
+import { Money, shortDate, When } from '@/components/ui'
 import type { CivilDate, PlanStory as Story, StoryOther, StoryPhase } from '@/domain'
 
 function names(plans: readonly { name: string }[]): string {
@@ -40,31 +41,42 @@ function Held({ other, today }: { other: StoryOther & { sooner: boolean }; today
   )
 }
 
-function Stretch({ phase, n, today }: { phase: StoryPhase; n: number; today: CivilDate }) {
+/**
+ * One stretch, read at a glance (D50 (10)): when it starts and the dates it
+ * runs, then one line. A waiting stretch says where the money is focused and
+ * that nothing comes here until it ends; a filling one says which plans are
+ * covered so money starts coming here, how much a transfer and to what.
+ */
+function Stretch({ phase, n, first, today }: { phase: StoryPhase; n: number; first: boolean; today: CivilDate }) {
   const waiting = phase.kind === 'waiting'
+  const plans = (list: readonly { name: string }[]) => <strong className="font-semibold">{names(list)}</strong>
   return (
     <li className="flex gap-3">
       <StretchBadge n={n} waiting={waiting} />
       <div className="min-w-0">
         <p className="text-xs text-[var(--color-ink-soft)]">
-          <When date={phase.from} today={today} as="lead" /> · {transfers(phase.transfers)}
+          <When date={phase.from} today={today} as="lead" /> · {shortDate(phase.from, today)}
+          {phase.to !== phase.from ? ` to ${shortDate(phase.to, today)}` : ''}
         </p>
         {waiting ? (
           <p>
-            The transfers pay {phase.others.length > 0 ? <strong className="font-semibold">{names(phase.others)}</strong> : 'other plans'}{' '}
-            first. {phase.addedCents === 0 ? 'Nothing new comes here' : 'Only rounding cents come here'}; it holds{' '}
-            <Money cents={phase.endCents} />.
+            Money is focused on {phase.others.length > 0 ? plans(phase.others) : 'other plans'}.{' '}
+            {phase.addedCents === 0 ? 'Nothing comes here.' : 'Almost nothing comes here.'}
           </p>
         ) : (
           <p>
-            About <Money cents={phase.perWeekCents} /> a transfer comes here, <Money cents={phase.addedCents} /> in all,
-            to <Money cents={phase.endCents} />.
-            {phase.others.length > 0 ? (
+            {phase.rolledOff.length > 0 ? (
               <>
-                {' '}
-                The rest pays <strong className="font-semibold">{names(phase.others)}</strong>.
+                {plans(phase.rolledOff)} {phase.rolledOff.length === 1 ? 'is' : 'are'} covered, so money starts coming
+                here
               </>
-            ) : null}
+            ) : first ? (
+              'Money comes here'
+            ) : (
+              'Money starts coming here'
+            )}
+            : about <Money cents={phase.perWeekCents} /> a transfer, to <Money cents={phase.endCents} />.
+            {phase.others.length > 0 ? <> Shared with {plans(phase.others)}.</> : null}
           </p>
         )}
       </div>
@@ -125,7 +137,7 @@ export function PlanStory({ story, today }: { story: Story; today: CivilDate }) 
           </h3>
           <ol className="mt-2 space-y-3">
             {phases.map((p, i) => (
-              <Stretch key={p.from} phase={p} n={i + 1} today={today} />
+              <Stretch key={p.from} phase={p} n={i + 1} first={i === 0} today={today} />
             ))}
           </ol>
         </section>
