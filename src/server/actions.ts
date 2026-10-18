@@ -811,8 +811,8 @@ export async function sheetImportAction(
       rule.type === 'fixed'
         ? `${formatCents(rule.amountCents)} a month`
         : rule.type === 'percent'
-          ? `${(rule.basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')}% of the balance`
-          : `${(rule.basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')}% of the balance, never below ${formatCents(rule.floorCents)}`
+          ? `interest plus ${(rule.basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')}% of the balance`
+          : `interest plus ${(rule.basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')}% of the balance, never below ${formatCents(rule.floorCents)}`
     return {
       phase: 'preview',
       text,

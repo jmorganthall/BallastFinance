@@ -405,7 +405,7 @@ export function parseSheet(
           minPaymentRule = { type: 'fixed', amountCents: monthly }
           notes.push('No % or $ minimum given, so the Monthly figure is taken as a set minimum payment.')
         } else {
-          fail('No minimum payment: fill in % (of the balance) and/or $ (a set amount), or Monthly.')
+          fail('No minimum payment: fill in % (of the balance, on top of the interest) and/or $ (a set amount), or Monthly.')
         }
         if (balanceAsOf === null && asOfRaw === '') notes.push('No "As of" date; today will be used.')
         if (limit !== null && limit <= 0) notes.push('Limit is zero; treated as none.')

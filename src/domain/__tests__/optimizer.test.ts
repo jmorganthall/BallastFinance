@@ -88,13 +88,13 @@ describe('knockouts first', () => {
   })
 
   it('is honest when a debt would never be paid off at its minimum', () => {
-    // 1% of the balance a month against 29.99% never gets there.
+    // $100 a month against $124.96 of interest at 29.99% never gets there.
     const endless = debt({
       id: 'endless',
       name: 'Endless card',
       balanceCents: 500000,
       aprBasisPoints: 2999,
-      minPaymentRule: { type: 'percent', basisPoints: 100 },
+      minPaymentRule: { type: 'fixed', amountCents: 10000 },
     })
     const result = optimiseLumpSum({ debts: [endless], amountCents: 100000, today: TODAY })
     expect(result.allocations[0]!.lifetimeInterestAvoidedCents).toBeNull()
@@ -125,13 +125,14 @@ describe('a partial payment still frees cash when the minimum follows the balanc
     const result = optimiseLumpSum({ debts: [card], amountCents: 201959, today: TODAY })
     const [only] = result.allocations
     expect(only!.clearsIt).toBe(false)
-    // 2% of $10,000.00 is $200.00. After the payment the balance is $7,980.41,
-    // and 2% of that is $159.6082, rounded up to $159.61.
-    expect(only!.minimumBeforeCents).toBe(20000)
-    expect(only!.minimumAfterCents).toBe(15961)
-    expect(only!.monthlyFreedCents).toBe(4039)
-    expect(result.monthlyFreedCents).toBe(4039)
-    expect(only!.reason).toContain('Its minimum drops from $200.00 to $159.61 a month.')
+    // A month at 20.49% on $10,000.00 is $170.75, plus 2% ($200.00): $370.75.
+    // After the payment the balance is $7,980.41: $136.27 of interest plus
+    // 2% ($159.6082, rounded up to $159.61) is $295.88 (D51).
+    expect(only!.minimumBeforeCents).toBe(37075)
+    expect(only!.minimumAfterCents).toBe(29588)
+    expect(only!.monthlyFreedCents).toBe(7487)
+    expect(result.monthlyFreedCents).toBe(7487)
+    expect(only!.reason).toContain('Its minimum drops from $370.75 to $295.88 a month.')
     // It shrinks, so it has an end, however far off: the long view exists.
     expect(only!.lifetimeInterestAvoidedCents).not.toBeNull()
     expect(only!.lifetimeInterestAvoidedCents!).toBeGreaterThan(result.interestAvoidedCents)
@@ -139,16 +140,17 @@ describe('a partial payment still frees cash when the minimum follows the balanc
   })
 
   it('frees nothing while a floor is what sets the minimum', () => {
-    // 2% of $2,000 is $40, under the $50 floor; after paying $500 it is $30, still under.
+    // $41.65 of interest plus 2% of $2,000 is $81.65, under the $100 floor;
+    // after paying $500 it is $31.24 + $30 = $61.24, still under.
     const card = debt({
       id: 'floored',
       name: 'Floored card',
       balanceCents: 200000,
-      minPaymentRule: { type: 'percent_with_floor', basisPoints: 200, floorCents: 5000 },
+      minPaymentRule: { type: 'percent_with_floor', basisPoints: 200, floorCents: 10000 },
     })
     const result = optimiseLumpSum({ debts: [card], amountCents: 50000, today: TODAY })
-    expect(result.allocations[0]!.minimumBeforeCents).toBe(5000)
-    expect(result.allocations[0]!.minimumAfterCents).toBe(5000)
+    expect(result.allocations[0]!.minimumBeforeCents).toBe(10000)
+    expect(result.allocations[0]!.minimumAfterCents).toBe(10000)
     expect(result.monthlyFreedCents).toBe(0)
     expect(result.allocations[0]!.reason).not.toContain('minimum drops')
   })
@@ -161,7 +163,7 @@ describe('a partial payment still frees cash when the minimum follows the balanc
     const result = optimiseLumpSum({ debts, amountCents: 241959, today: TODAY })
     // $400 clears the store card; the remaining $2,019.59 dents the rewards card.
     expect(result.allocations.map((a) => a.amountCents)).toEqual([40000, 201959])
-    expect(result.monthlyFreedCents).toBe(4000 + 4039)
+    expect(result.monthlyFreedCents).toBe(4000 + 7487)
   })
 })
 

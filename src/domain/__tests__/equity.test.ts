@@ -228,7 +228,7 @@ describe('the current housing payment', () => {
         debt({ id: 'm2', plannedPaymentCents: 300_000 }),
         debt({ id: 'car', category: 'auto' }),
         debt({ id: 'old', state: 'paid_off', balanceCents: 0 }),
-      ]),
+      ], '2026-10-18'),
     ).toBe(250_000 + 300_000)
   })
 })

@@ -2973,7 +2973,7 @@ export class Engine {
     ])
     const position = equityPosition(assets, debts)
     const rate = rateInUse({ typedBasisPoints: typed, market, today })
-    const fromMortgages = mortgagePaymentsCents(debts)
+    const fromMortgages = mortgagePaymentsCents(debts, today)
     const target = assumptions.currentHousingPaymentCents ?? fromMortgages
     const common = { equityCents: position.countedCents, assumptions }
     return {

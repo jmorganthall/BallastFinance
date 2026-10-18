@@ -195,10 +195,10 @@ export function validateHomeBuying(a: HomeBuyingAssumptions): void {
  * payoff order uses. Whether that includes tax and insurance depends on how
  * the mortgage was entered, which is why the screen asks.
  */
-export function mortgagePaymentsCents(debts: readonly Debt[]): Cents {
+export function mortgagePaymentsCents(debts: readonly Debt[], today: CivilDate): Cents {
   return debts
     .filter((d) => d.state === 'open' && d.category === 'mortgage' && d.balanceCents > 0)
-    .reduce((sum, d) => sum + monthlyPaymentCents(d), 0)
+    .reduce((sum, d) => sum + monthlyPaymentCents(d, today), 0)
 }
 
 /**

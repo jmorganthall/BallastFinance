@@ -114,9 +114,10 @@ describeDb('debts, the ladder and the optimizer', () => {
     expect(result.allocations[0]!.debtName).toBe('Store card')
     expect(result.allocations[0]!.clearsIt).toBe(true)
     // The store card's $40 minimum goes, and the $675 left dents the big
-    // card: 2% of $9,000 is $180, 2% of $8,325 is $166.50, so $13.50 a
-    // month comes back from that too.
-    expect(result.monthlyFreedCents).toBe(4000 + 1350)
+    // card: $164.93 of interest plus 2% of $9,000 is $344.93, $152.56 plus
+    // 2% of $8,325 is $319.06, so $25.87 a month comes back from that too
+    // (D51).
+    expect(result.monthlyFreedCents).toBe(4000 + 2587)
     expect(result.why).toContain('Store card')
   })
 

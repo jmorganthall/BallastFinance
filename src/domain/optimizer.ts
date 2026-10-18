@@ -167,7 +167,7 @@ export function optimiseLumpSum(args: {
     return {
       debt: d,
       apr: effectiveAprBasisPoints(now, args.today, leadWeeks),
-      freedRatio: now.balanceCents > 0 ? monthlyPaymentCents(now) / now.balanceCents : 0,
+      freedRatio: now.balanceCents > 0 ? monthlyPaymentCents(now, args.today) / now.balanceCents : 0,
     }
   })
   const normalisedApr = normalise(scored.map((r) => r.apr))
@@ -184,7 +184,7 @@ export function optimiseLumpSum(args: {
   for (const d of knockouts) {
     const owed = balance.get(d.id) ?? 0
     if (owed <= 0 || owed > remaining) continue
-    pay(d, owed, `Paying it off completely frees ${formatCents(monthlyPaymentCents(asNow(d)))} a month.`)
+    pay(d, owed, `Paying it off completely frees ${formatCents(monthlyPaymentCents(asNow(d), args.today))} a month.`)
   }
 
   // 3. Whatever is left goes at the most expensive debt still open -- judged
@@ -214,7 +214,7 @@ export function optimiseLumpSum(args: {
       pay(
         debt,
         cents,
-        `Its ${percent(cliff.promoRateBasisPoints)}% deal ends ${cliff.untilDate}, and at ${formatCents(monthlyPaymentCents(now))} a month ${formatCents(cliff.shortCents)} would still be there at ${percent(debt.aprBasisPoints)}% after that. This ${cents >= cliff.shortCents ? 'covers it' : 'covers part of it'}.`,
+        `Its ${percent(cliff.promoRateBasisPoints)}% deal ends ${cliff.untilDate}, and at ${formatCents(monthlyPaymentCents(now, args.today))} a month ${formatCents(cliff.shortCents)} would still be there at ${percent(debt.aprBasisPoints)}% after that. This ${cents >= cliff.shortCents ? 'covers it' : 'covers part of it'}.`,
       )
       continue
     }
@@ -231,8 +231,8 @@ export function optimiseLumpSum(args: {
     const amountCents = paid.get(debt.id) ?? 0
     const after: Debt = { ...debt, balanceCents: debt.balanceCents - amountCents }
     const clearsIt = amountCents >= debt.balanceCents
-    const minimumBeforeCents = monthlyPaymentCents(debt)
-    const minimumAfterCents = clearsIt ? 0 : monthlyPaymentCents(after)
+    const minimumBeforeCents = monthlyPaymentCents(debt, args.today)
+    const minimumAfterCents = clearsIt ? 0 : monthlyPaymentCents(after, args.today)
     const before = projectPayoff({ debt, today: args.today, leadWeeks })
     const then = clearsIt ? null : projectPayoff({ debt: after, today: args.today, leadWeeks })
     const lifetime =

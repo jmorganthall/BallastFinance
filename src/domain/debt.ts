@@ -227,10 +227,17 @@ export function likelyDebtBalance(args: {
       }
     }
     if (total() <= 0) continue
-    for (const t of tranches) t.balance += Math.round((t.balance * t.rateBasisPoints) / BASIS_POINTS / 12)
-    standard += Math.round((standard * debt.aprBasisPoints) / BASIS_POINTS / 12)
+    let charged = 0
+    for (const t of tranches) {
+      const c = Math.round((t.balance * t.rateBasisPoints) / BASIS_POINTS / 12)
+      t.balance += c
+      charged += c
+    }
+    const cs = Math.round((standard * debt.aprBasisPoints) / BASIS_POINTS / 12)
+    standard += cs
+    charged += cs
     if (!paidRegularly.has(monthOf(step.on))) {
-      pay(Math.min(total(), monthlyPaymentCents({ ...debt, balanceCents: total() })))
+      pay(Math.min(total(), paymentGivenInterest({ ...debt, balanceCents: total() - charged }, charged)))
     }
   }
   return Math.max(0, total())
@@ -317,30 +324,125 @@ const BASIS_POINTS = 10_000
 const WEEKS_PER_MONTH = 52 / 12
 
 /** The monthly minimum this debt demands right now. */
-export function minimumPaymentCents(debt: Debt): Cents {
+export function minimumPaymentCents(debt: Debt, today: CivilDate): Cents {
+  return minimumGivenInterest(debt, monthInterestCents(debt, today))
+}
+
+/**
+ * The lender's minimum on `debt.balanceCents`, the balance before this
+ * month's interest, given that interest (PRD D51). A percentage is the
+ * month's interest plus that share of the balance, the way most cards set it;
+ * with a floor, never less than the floor; and never more than the balance
+ * and its interest, which is everything owed.
+ */
+function minimumGivenInterest(debt: Debt, interestCents: Cents): Cents {
   const rule = debt.minPaymentRule
+  const owed = debt.balanceCents + interestCents
+  const share = (basisPoints: number) => interestCents + Math.ceil((debt.balanceCents * basisPoints) / BASIS_POINTS)
   switch (rule.type) {
     case 'fixed':
-      return Math.min(rule.amountCents, debt.balanceCents)
+      return Math.min(rule.amountCents, owed)
     case 'percent':
-      return Math.min(Math.ceil((debt.balanceCents * rule.basisPoints) / BASIS_POINTS), debt.balanceCents)
-    case 'percent_with_floor': {
-      const percent = Math.ceil((debt.balanceCents * rule.basisPoints) / BASIS_POINTS)
-      return Math.min(Math.max(percent, rule.floorCents), debt.balanceCents)
-    }
+      return Math.min(share(rule.basisPoints), owed)
+    case 'percent_with_floor':
+      return Math.min(Math.max(share(rule.basisPoints), rule.floorCents), owed)
   }
 }
 
 /**
+ * A month's interest on the balance at the rates in force on `on` (PRD D51):
+ * each live deal's part at its deal rate, the rest at the full rate, the
+ * same split and rounding as a month of `projectPayoff`. A balance on a 0%
+ * deal adds none.
+ */
+export function monthInterestCents(
+  debt: Pick<Debt, 'balanceCents' | 'aprBasisPoints' | 'promoRules'>,
+  on: CivilDate,
+): Cents {
+  const month = (cents: Cents, rate: number) => Math.round((cents * rate) / BASIS_POINTS / 12)
+  let standard = Math.max(0, debt.balanceCents)
+  let interest = 0
+  const live = debt.promoRules
+    .filter((rule) => compareDates(rule.untilDate, on) > 0)
+    .sort((a, b) => compareDates(a.untilDate, b.untilDate))
+  for (const rule of live) {
+    if (standard <= 0) break
+    const amount = rule.appliesTo === 'full' ? standard : Math.min(rule.amountCents ?? 0, standard)
+    if (amount <= 0) continue
+    interest += month(amount, rule.rateBasisPoints)
+    standard -= amount
+  }
+  return interest + month(standard, debt.aprBasisPoints)
+}
+
+/**
  * What actually goes at this debt each month: the household's planned
- * payment when it has one, else the lender's minimum, never more than the
- * balance. Every projection and every "is it on track" test uses this, so a
+ * payment when it has one, else the lender's minimum, never more than is
+ * owed. Every projection and every "is it on track" test uses this, so a
  * family paying well above the minimum is judged on what it does, not on
  * what the card would let it get away with.
  */
-export function monthlyPaymentCents(debt: Debt): Cents {
+export function monthlyPaymentCents(debt: Debt, today: CivilDate): Cents {
+  return paymentGivenInterest(debt, monthInterestCents(debt, today))
+}
+
+function paymentGivenInterest(debt: Debt, interestCents: Cents): Cents {
   const planned = Math.max(0, debt.plannedPaymentCents ?? 0)
-  return Math.min(debt.balanceCents, Math.max(minimumPaymentCents(debt), planned))
+  return Math.min(debt.balanceCents + interestCents, Math.max(minimumGivenInterest(debt, interestCents), planned))
+}
+
+/** What "Work it out from a statement" found (PRD D51). */
+export type StatementShare =
+  | {
+      ok: true
+      /** The share of the balance, in basis points: 100 is 1%. */
+      basisPoints: number
+      /** Within 0.1 point of a whole or half percent, and put at it. */
+      snapped: boolean
+      /** No interest was given, so a month at the card's rate was assumed. */
+      interestEstimated: boolean
+    }
+  | {
+      ok: false
+      /** The minimum is the floor, the whole balance, or does not cover the interest and fees. */
+      reason: 'floor' | 'whole_balance' | 'below_interest'
+    }
+
+const SNAP_TO_BASIS_POINTS = 50
+const SNAP_WITHIN_BASIS_POINTS = 10
+
+/**
+ * The percentage a card's minimum uses, worked back from one statement
+ * (PRD D51): (minimum - interest - fees) / (balance - interest - fees),
+ * the inverse of the minimum above with the statement's fees taken off too.
+ * Issuers round the minimum, so a share within 0.1 point of a whole or half
+ * percent is put at it. With no interest given, a month at the card's rate
+ * on the statement balance stands in for it. A minimum that is the floor or
+ * the whole balance says nothing about the share.
+ */
+export function shareFromStatement(args: {
+  balanceCents: Cents
+  minimumCents: Cents
+  interestCents: Cents | null
+  feesCents?: Cents | null
+  floorCents?: Cents | null
+  aprBasisPoints: number
+}): StatementShare {
+  const interestEstimated = args.interestCents === null
+  const interest =
+    args.interestCents ?? Math.round((args.balanceCents * args.aprBasisPoints) / BASIS_POINTS / 12)
+  const fees = args.feesCents ?? 0
+  if (args.minimumCents >= args.balanceCents) return { ok: false, reason: 'whole_balance' }
+  if (args.floorCents != null && args.minimumCents <= args.floorCents) return { ok: false, reason: 'floor' }
+  const base = args.balanceCents - interest - fees
+  const part = args.minimumCents - interest - fees
+  if (base <= 0 || part <= 0) return { ok: false, reason: 'below_interest' }
+  const exact = (part * BASIS_POINTS) / base
+  const round = Math.round(exact / SNAP_TO_BASIS_POINTS) * SNAP_TO_BASIS_POINTS
+  if (round > 0 && Math.abs(exact - round) <= SNAP_WITHIN_BASIS_POINTS) {
+    return { ok: true, basisPoints: round, snapped: true, interestEstimated }
+  }
+  return { ok: true, basisPoints: Math.round(exact), snapped: false, interestEstimated }
 }
 
 interface Tranche {
@@ -384,7 +486,7 @@ export function promoCliff(debt: Debt, today: CivilDate): PromoCliff | null {
     promoRateBasisPoints: next.rateBasisPoints,
     amountCents,
     monthsLeft,
-    shortCents: Math.max(0, amountCents - monthsLeft * monthlyPaymentCents(debt)),
+    shortCents: Math.max(0, amountCents - monthsLeft * monthlyPaymentCents(debt, today)),
   }
 }
 
@@ -398,7 +500,7 @@ export function promoCliff(debt: Debt, today: CivilDate): PromoCliff | null {
  * spreadsheet could not see, because a 0% APR scores zero long-term today.
  */
 function tranchesFor(debt: Debt, today: CivilDate, leadWeeks: number): Tranche[] {
-  const payment = monthlyPaymentCents(debt)
+  const payment = monthlyPaymentCents(debt, today)
   const tranches: Tranche[] = []
   let unallocated = debt.balanceCents
 
@@ -525,8 +627,8 @@ export function scoreDebts(args: {
   const rows = open.map((debt) => ({
     debt,
     effectiveAprBasisPoints: effectiveAprBasisPoints(debt, args.today, leadWeeks),
-    minimumPaymentCents: minimumPaymentCents(debt),
-    paymentPerMonthCents: monthlyPaymentCents(debt),
+    minimumPaymentCents: minimumPaymentCents(debt, args.today),
+    paymentPerMonthCents: monthlyPaymentCents(debt, args.today),
   }))
 
   const maxApr = Math.max(...rows.map((r) => r.effectiveAprBasisPoints))
@@ -718,14 +820,18 @@ function simulateMonths(args: {
     interest += charged
 
     const total = standard + tranches.reduce((sum, t) => sum + t.balance, 0)
-    const payment = Math.min(total, monthlyPaymentCents({ ...debt, balanceCents: total }) + extra)
+    // The minimum on the balance before this month's interest, plus that
+    // interest, charged back or not: what the statement would ask (D51).
+    const payment = Math.min(total, paymentGivenInterest({ ...debt, balanceCents: total - charged }, charged) + extra)
 
     // A payment that does not cover the interest never clears the balance.
     // Except at pocket change, where the last payment takes the lot: a debt
     // that got there shrank from real money, so it is paid off.
     // Interest charged back is a one-off, not a month's cost, so it is no
     // sign the payment cannot keep up.
-    if (payment <= charged - backCharged && extra === 0) {
+    // Inside a set number of months (the coming year) the months still
+    // count, so a debt that never ends is not said to cost one month.
+    if (payment <= charged - backCharged && extra === 0 && args.horizonMonths === undefined) {
       if (total <= POCKET_CHANGE_CENTS) return { paidOffAfterMonths: month, interestCents: interest, chargedBack }
       return { paidOffAfterMonths: null, interestCents: interest, chargedBack }
     }
