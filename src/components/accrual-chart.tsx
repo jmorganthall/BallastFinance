@@ -180,7 +180,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
           <path
             d={ownLine}
             fill="none"
-            stroke="var(--color-ink-soft)"
+            stroke="var(--color-chart-pace)"
             strokeDasharray="5 4"
             strokeWidth="1.5"
             strokeLinejoin="round"
@@ -279,7 +279,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
         </span>
         {ownLine ? (
           <span className="flex items-center gap-1.5">
-            <span aria-hidden className="inline-block w-4 border-t-2 border-dashed border-[var(--color-ink-soft)]" />
+            <span aria-hidden className="inline-block w-4 border-t-2 border-dashed border-[var(--color-chart-pace)]" />
             Saving it on its own
           </span>
         ) : null}

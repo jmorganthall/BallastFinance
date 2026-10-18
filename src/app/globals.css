@@ -57,6 +57,13 @@
    */
   --color-chart-paydown: oklch(0.52 0.14 235); /* #0073ad */
   --color-chart-interest: oklch(0.58 0.13 80); /* #a27000 */
+  /*
+   * The plan chart's dashed "Saving it on its own" line (D50), blue so it is
+   * never read as the plan's own line. Validated on the card (#ffffff)
+   * beside the after-the-fix green: CVD ΔE 17.4, contrast 3:1 or better,
+   * inside the light band; ΔE 40.2 from the ink line.
+   */
+  --color-chart-pace: oklch(0.62 0.12 235); /* #2591c4 */
 }
 
 /*
@@ -99,6 +106,8 @@
     /* On the dark card (#192028), inside the dark lightness band: CVD ΔE 22.7. */
     --color-chart-paydown: oklch(0.64 0.13 235); /* #1997cf */
     --color-chart-interest: oklch(0.66 0.13 80); /* #bb881a */
+    /* On the dark card (#192028), at the top of the dark band: CVD ΔE 15.8 from the green, 25.7 from the ink. */
+    --color-chart-pace: oklch(0.67 0.12 232); /* #33a1d2 */
   }
 }
 

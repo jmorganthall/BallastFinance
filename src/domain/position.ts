@@ -1701,12 +1701,16 @@ export interface StoryPhase {
   endCents: Cents
   /** The other plans the same transfers pay over the stretch, most first (at most three), each taking at least PHASE_MIN_RISE_CENTS a transfer. */
   others: StoryOther[]
+  /** How many more plans the same transfers pay beyond the three named: "and 3 more". */
+  othersMore: number
   /**
    * The plans the stretch before paid that this one no longer does: covered,
    * so their share of the transfer comes free (soonest due first, at most
    * three). Empty on the first stretch.
    */
   rolledOff: StoryOther[]
+  /** How many more rolled off beyond the three named. */
+  rolledOffMore: number
 }
 
 /**
@@ -1940,6 +1944,10 @@ export function planChart(args: {
       dueDate: nextDue(packageId),
       cents,
     })
+    const rolled = [...paidBefore.entries()]
+      .filter(([packageId]) => !paid.has(packageId))
+      .map(([packageId, cents]) => other(packageId, cents))
+      .sort((x, y) => compareDates(x.dueDate, y.dueDate))
     phases.push({
       kind: kinds[i]!,
       from: days[i]!,
@@ -1952,11 +1960,9 @@ export function planChart(args: {
         .sort((x, y) => y[1] - x[1])
         .slice(0, 3)
         .map(([packageId, cents]) => other(packageId, cents)),
-      rolledOff: [...paidBefore.entries()]
-        .filter(([packageId]) => !paid.has(packageId))
-        .map(([packageId, cents]) => other(packageId, cents))
-        .sort((x, y) => compareDates(x.dueDate, y.dueDate))
-        .slice(0, 3),
+      othersMore: Math.max(0, paid.size - 3),
+      rolledOff: rolled.slice(0, 3),
+      rolledOffMore: Math.max(0, rolled.length - 3),
     })
     paidBefore = paid
     i = j + 1

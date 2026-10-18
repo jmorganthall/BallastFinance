@@ -49,25 +49,41 @@ function Held({ other, today }: { other: StoryOther & { sooner: boolean }; today
  */
 function Stretch({ phase, n, first, today }: { phase: StoryPhase; n: number; first: boolean; today: CivilDate }) {
   const waiting = phase.kind === 'waiting'
-  const plans = (list: readonly { name: string }[]) => <strong className="font-semibold">{names(list)}</strong>
+  const plans = (list: readonly { name: string }[], more = 0) =>
+    more > 0 ? (
+      <>
+        <strong className="font-semibold">{list.map((p) => p.name).join(', ')}</strong> and {more} more
+      </>
+    ) : (
+      <strong className="font-semibold">{names(list)}</strong>
+    )
+  const until = phase.to !== phase.from ? ` to ${shortDate(phase.to, today)}` : ''
   return (
     <li className="flex gap-3">
       <StretchBadge n={n} waiting={waiting} />
       <div className="min-w-0">
         <p className="text-xs text-[var(--color-ink-soft)]">
-          <When date={phase.from} today={today} as="lead" /> · {shortDate(phase.from, today)}
-          {phase.to !== phase.from ? ` to ${shortDate(phase.to, today)}` : ''}
+          {/* The first stretch starts with the next transfer: it is now, until the next change. */}
+          {first ? (
+            `Now${until}`
+          ) : (
+            <>
+              <When date={phase.from} today={today} as="lead" /> · {shortDate(phase.from, today)}
+              {until}
+            </>
+          )}
         </p>
         {waiting ? (
           <p>
-            Money is focused on {phase.others.length > 0 ? plans(phase.others) : 'other plans'}.{' '}
+            Money is focused on {phase.others.length > 0 ? plans(phase.others, phase.othersMore) : 'other plans'}.{' '}
             {phase.addedCents === 0 ? 'Nothing comes here.' : 'Almost nothing comes here.'}
           </p>
         ) : (
           <p>
             {phase.rolledOff.length > 0 ? (
               <>
-                {plans(phase.rolledOff)} {phase.rolledOff.length === 1 ? 'is' : 'are'} covered, so money starts coming
+                {plans(phase.rolledOff, phase.rolledOffMore)}{' '}
+                {phase.rolledOff.length + phase.rolledOffMore === 1 ? 'is' : 'are'} covered, so money starts coming
                 here
               </>
             ) : first ? (
@@ -76,7 +92,7 @@ function Stretch({ phase, n, first, today }: { phase: StoryPhase; n: number; fir
               'Money starts coming here'
             )}
             : about <Money cents={phase.perWeekCents} /> a transfer, to <Money cents={phase.endCents} />.
-            {phase.others.length > 0 ? <> Shared with {plans(phase.others)}.</> : null}
+            {phase.others.length > 0 ? <> Shared with {plans(phase.others, phase.othersMore)}.</> : null}
           </p>
         )}
       </div>
