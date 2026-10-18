@@ -193,13 +193,18 @@ principles, and they are non-negotiable.
   falls back to Next due under the two figures it lacks.
 - **Smart saving is the headline, and a plan shows why it lands on time**
   (PRD D50, rev 96). This week opens with `SmartSavingCard`
-  (`src/components/smart-saving.tsx`): "$W a week covers all N plans" from
-  `smartSaving` in `position.ts`, W the accounts' `neededPerWeekCents`
-  against their `steadyPerWeekCents` (each plan saving on its own), and the
-  difference a week and × 52 a year (parts on or past their date left out
-  of on its own); when W is as much or more, or while any account with a
-  plan is Short, unconfirmed or asked for a one-time move
-  (`coversOnItsOwn` false), the weekly figure alone and nothing claimed. `planChart` also returns `onItsOwn`
+  (`src/components/smart-saving.tsx`), every figure from `smartSaving` in
+  `position.ts`: W the accounts' `neededPerWeekCents` against their
+  `steadyPerWeekCents` (each plan saving on its own; parts on or past their
+  date left out of on its own). The headline is the difference a month,
+  `lessPerMonthCents` (× 52 ÷ 12, rounded down so it never claims more), in
+  the on-track green, with it a week and a year under it, then the two bars,
+  then "$W a week covers all N plans" and each account's own weekly figure
+  (`SmartSaving.accounts`, adding up to W, with "the bank moves $Y" beside
+  one whose confirmed transfer differs). When W is as much or more, or
+  while any account with a plan is Short, unconfirmed or asked for a
+  one-time move (`coversOnItsOwn` false), the weekly figure leads, the
+  accounts are listed under it, and nothing is claimed. `planChart` also returns `onItsOwn`
   (each part's `evenPaceCents` from its Saving since, on the chart's own
   dates) and `story` (`PlanStory`, D50 (10), rev 98): what is below its
   own pace and where that money is (`heldBy`: other plans in the same
