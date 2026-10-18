@@ -24,7 +24,8 @@
  * point comes from the domain (`planChart`); this only draws it.
  */
 
-import { formatCents, type PlanChart, type PlanChartPoint } from '@/domain'
+import { Tip } from '@/components/tip'
+import { formatCents, type ChartDueMark, type PlanChart, type PlanChartPoint } from '@/domain'
 
 const WIDTH = 600
 const HEIGHT = 250
@@ -34,6 +35,26 @@ const FONT = 14
 const LABEL_GAP = 64
 /** The least room between two badge centres. */
 const BADGE_GAP = 22
+/** A due pin's centre above the axis, and how far a pin crowding the one before it is lifted. */
+const PIN_ABOVE = 13
+const PIN_LIFT = 22
+
+/** "Ian Birthday · $500.00 · Oct 1, 2027", one line a part. */
+function pinWords(mark: ChartDueMark): string {
+  return mark.parts.map((p) => `${p.label} · ${formatCents(p.cents)} · ${shortDate(mark.date)}`).join('\n')
+}
+
+/** A part's due pin, drawn the same on the timeline and in the caption. */
+export function DuePin({ n }: { n: number | string }) {
+  return (
+    <span
+      aria-hidden
+      className="inline-grid h-5 w-5 shrink-0 place-items-center rounded-full border-2 border-[var(--color-card)] bg-[var(--color-ahead)] text-[11px] font-semibold text-[var(--color-card)]"
+    >
+      {n}
+    </span>
+  )
+}
 
 function shortDate(iso: string, withYear = true): string {
   const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
@@ -124,10 +145,24 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
     }
   }
 
+  // A numbered pin on the axis where each part is due (multi-part plans
+  // only: the domain leaves the list empty otherwise). One that would
+  // crowd the pin before it sits higher, so each stays readable.
+  let lastPin = -Infinity
+  let lastLifted = false
+  const pins = chart.dueMarks.map((m) => {
+    const x = Math.min(Math.max(sx(m.date), PAD.left), WIDTH - PAD.right)
+    const lifted = x - lastPin < PIN_LIFT && !lastLifted
+    lastLifted = lifted
+    lastPin = x
+    return { mark: m, x, y: sy(0) - PIN_ABOVE - (lifted ? PIN_LIFT : 0) }
+  })
+
   return (
     <figure className="m-0">
       {/* On a phone the chart keeps a readable size and scrolls sideways inside its card. */}
       <div className="overflow-x-auto">
+      <div className="relative min-w-[520px]">
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         className="h-auto w-full min-w-[520px]"
@@ -267,7 +302,32 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
         <text x={WIDTH - PAD.right} y={HEIGHT - 8} fontSize={FONT} textAnchor="end" fill="var(--color-ink-soft)">
           {shortDate(last.date)}
         </text>
+        {pins.map((p) => (
+          <line
+            key={p.mark.n}
+            x1={p.x}
+            x2={p.x}
+            y1={p.y}
+            y2={sy(0)}
+            stroke="var(--color-ahead)"
+            strokeWidth="2"
+            strokeLinecap="round"
+          />
+        ))}
       </svg>
+      {/* The pins are HTML over the drawing, so their words open on a hover and on a tap. */}
+      {pins.map((p) => (
+        <span
+          key={p.mark.n}
+          className="absolute z-0 -translate-x-1/2 -translate-y-1/2 text-xs hover:z-20 focus-within:z-20"
+          style={{ left: `${(p.x / WIDTH) * 100}%`, top: `${(p.y / HEIGHT) * 100}%` }}
+        >
+          <Tip detail={pinWords(p.mark)} above plain>
+            <DuePin n={p.mark.n} />
+          </Tip>
+        </span>
+      ))}
+      </div>
       </div>
 
       {/* Direct labels rather than a legend box, so identity is never colour alone. */}
@@ -293,6 +353,12 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
           <span className="flex items-center gap-1.5">
             <span aria-hidden className="inline-block w-4 border-t-2 border-dashed border-[var(--color-ahead)]" />
             After the fix on This week
+          </span>
+        ) : null}
+        {pins.length > 0 ? (
+          <span className="flex items-center gap-1.5">
+            <DuePin n={1} />
+            When each part is due: hover or tap a pin
           </span>
         ) : null}
         {phases.length > 0 ? (

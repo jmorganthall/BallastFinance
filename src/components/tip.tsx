@@ -8,7 +8,19 @@
 
 import { useState, type ReactNode } from 'react'
 
-export function Tip({ children, detail }: { children: ReactNode; detail: string }) {
+export function Tip({
+  children,
+  detail,
+  above = false,
+  plain = false,
+}: {
+  children: ReactNode
+  detail: string
+  /** Open above, where below would be cut off (a pin on a chart's axis). */
+  above?: boolean
+  /** No dotted underline, for a mark that is not words. */
+  plain?: boolean
+}) {
   const [open, setOpen] = useState(false)
   return (
     <span
@@ -30,13 +42,13 @@ export function Tip({ children, detail }: { children: ReactNode; detail: string 
         }
         if (e.key === 'Escape') setOpen(false)
       }}
-      className="relative cursor-help underline decoration-dotted decoration-[var(--color-ink-soft)] underline-offset-4"
+      className={`relative cursor-help ${plain ? '' : 'underline decoration-dotted decoration-[var(--color-ink-soft)] underline-offset-4'}`}
     >
       {children}
       {open ? (
         <span
           role="tooltip"
-          className="absolute left-0 top-full z-10 mt-1 block w-max max-w-[16rem] rounded-lg border border-[var(--color-line)] bg-[var(--color-card)] px-2.5 py-1.5 text-xs font-normal text-[var(--color-ink)] no-underline shadow-lg"
+          className={`absolute z-10 block w-max max-w-[16rem] whitespace-pre-line rounded-lg border ${above ? 'bottom-full left-1/2 mb-1 -translate-x-1/2' : 'left-0 top-full mt-1'} border-[var(--color-line)] bg-[var(--color-card)] px-2.5 py-1.5 text-xs font-normal text-[var(--color-ink)] no-underline shadow-lg`}
         >
           {detail}
         </span>

@@ -216,7 +216,13 @@ principles, and they are non-negotiable.
   shaded and numbered badges over the stretches (`StretchBadge`); that line
   is `--color-chart-pace`, a blue validated with the dataviz skill's
   validator on both card surfaces beside the ink line and the green
-  after-the-fix line, so it is never read as the plan's own line; and
+  after-the-fix line, so it is never read as the plan's own line. On a
+  plan of more than one part, a numbered green pin (`DuePin`) stands on
+  the axis where each part is due (`dueMarks` from `dueMarksOf`: soonest
+  first, parts due the same day on one pin, none already past; empty for
+  one part, whose date is the chart's end), and hover or a tap says
+  "<part> · $X · <date>" through `Tip` (`above`, `plain`). The pins are
+  HTML over the SVG so the words open on a phone; and
   `PlanStory` (`src/components/plan-story.tsx`) says "Where the money is
   today" and "What happens next" with the same numbers (the first stretch "Now to <end>", since it
   always starts with the next transfer, each later one "In N · start to
@@ -498,7 +504,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 774 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 776 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

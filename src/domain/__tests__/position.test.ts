@@ -3,6 +3,7 @@ import {
   bankTransfersBetween,
   barOf,
   countTowardParts,
+  dueMarksOf,
   levelWeekly,
   moneySinceParts,
   moneySinceSentence,
@@ -846,6 +847,27 @@ describe('the plan chart beside saving it on its own (D50)', () => {
     expect(c.story.now.belowCents).toBe(0)
     expect(c.story.now.heldBy).toEqual([])
     expect(c.story.phases.every((x) => x.kind === 'filling')).toBe(true)
+  })
+})
+
+describe('the due pins on a plan timeline', () => {
+  const part = (id: string, dueDate: string, cents: number) =>
+    position(input({ lineItems: [li({ id, label: id, unitAmountCents: cents, dueDate })] })).accounts[0]!.parts[0]!
+  const ian = part('Ian', '2027-10-01', 50000)
+  const mia = part('Mia', '2027-03-12', 40000)
+  const zoe = part('Zoe', '2027-03-12', 30000)
+  const old = part('Old', '2027-01-01', 1000)
+  const past = { ...old, lineItem: { ...old.lineItem, dueDate: '2026-09-01' } }
+
+  it('draws none on a plan of one part: its date is the end of the chart', () => {
+    expect(dueMarksOf([ian], TODAY)).toEqual([])
+  })
+
+  it('numbers the rest soonest first, one pin for parts due the same day, none already past', () => {
+    expect(dueMarksOf([ian, zoe, past, mia], TODAY)).toEqual([
+      { n: 1, date: '2027-03-12', parts: [{ label: 'Mia', cents: 40000 }, { label: 'Zoe', cents: 30000 }] },
+      { n: 2, date: '2027-10-01', parts: [{ label: 'Ian', cents: 50000 }] },
+    ])
   })
 })
 

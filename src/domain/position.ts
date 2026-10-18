@@ -1668,6 +1668,18 @@ export interface PlanChart {
   dipsBelow: boolean
   /** The same story in words (D50 (3)-(5)). */
   story: PlanStory
+  /**
+   * When each part is due, for the numbered pins on the timeline: only on a
+   * plan of more than one part (one part's date is the end of the chart),
+   * soonest first, parts due the same day on one pin, none already past.
+   */
+  dueMarks: ChartDueMark[]
+}
+
+export interface ChartDueMark {
+  n: number
+  date: CivilDate
+  parts: { label: string; cents: Cents }[]
 }
 
 /** A plan named in the story: the plans people know, not their parts. */
@@ -1804,6 +1816,19 @@ function runSlots(args: {
  * story: where the money below its own pace is, the stretches of transfers
  * ahead and which other plans each one pays, and the day.
  */
+/** The pins on a plan's timeline (D50): see `PlanChart.dueMarks`. */
+export function dueMarksOf(parts: readonly PartPosition[], today: CivilDate): ChartDueMark[] {
+  if (parts.length < 2) return []
+  const byDate = new Map<CivilDate, { label: string; cents: Cents }[]>()
+  for (const p of [...parts].sort((a, b) => compareDates(a.lineItem.dueDate, b.lineItem.dueDate) || a.lineItem.label.localeCompare(b.lineItem.label))) {
+    if (compareDates(p.lineItem.dueDate, today) < 0) continue
+    const list = byDate.get(p.lineItem.dueDate) ?? []
+    list.push({ label: p.lineItem.label, cents: p.totalCents })
+    byDate.set(p.lineItem.dueDate, list)
+  }
+  return [...byDate.entries()].map(([date, list], i) => ({ n: i + 1, date, parts: list }))
+}
+
 export function planChart(args: {
   plan: PlanPosition
   household: Pick<HouseholdPosition, 'accounts' | 'fixes' | 'plans'>
@@ -1993,6 +2018,7 @@ export function planChart(args: {
     targetCents: plan.totalCents,
     onItsOwn,
     dipsBelow: onItsOwn.some((x, i) => x.cents > actual[i]!.cents),
+    dueMarks: dueMarksOf(plan.parts, today),
     story: {
       now: {
         cents: plan.countedCents,
