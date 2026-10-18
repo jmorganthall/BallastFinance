@@ -733,6 +733,7 @@ describe('the plan chart beside saving it on its own (D50)', () => {
     expect(first!.others[0]!.dueDate).toBe('2026-12-25')
     expect(compareDates(first!.to, '2026-12-25')).toBeLessThanOrEqual(0)
     expect(first!.rolledOff).toEqual([])
+    expect(first!.othersMore).toBe(0)
     expect(second!.kind).toBe('filling')
     // Christmas is covered, so money starts coming here: that is the turn.
     expect(second!.rolledOff.map((x) => x.name)).toEqual(['Christmas'])
@@ -744,6 +745,29 @@ describe('the plan chart beside saving it on its own (D50)', () => {
     expect(chart.story.full!.on).toBe(last.to)
     expect(chart.story.due).toEqual({ on: '2027-09-24', cents: 400000, totalCents: 400000, reachesTotal: true })
     expect(chart.story.onTrack).toBe(true)
+  })
+
+  it('counts the plans it does not name, so a plan said to be covered was said to be paid first', () => {
+    // Five small plans due before Christmas, then a trip: the first stretch
+    // pays all five, names three and counts the other two.
+    const small = ['A', 'B', 'C', 'D', 'E'].map((n) => pkg({ id: `pkg-${n}`, name: `Plan ${n}`, committedAt: '2026-09-25' }))
+    const trip2 = pkg({ id: 'pkg-trip2', name: 'Trip', committedAt: '2026-09-25' })
+    const items = [
+      ...small.map((x, i) => li({ id: `p-${x.id}`, packageId: x.id, unitAmountCents: 30000 + i * 1000, dueDate: '2026-12-11' })),
+      li({ id: 'trip2', packageId: trip2.id, unitAmountCents: 300000, dueDate: '2027-09-24' }),
+    ]
+    const f = input({ packages: [...small, trip2], lineItems: items, counts: [{ accountId: gifts.id, amountCents: 0, on: TODAY }] })
+    const w = position(f).accounts[0]!.weeklyCents
+    const hh = position({ ...f, transfers: [{ accountId: gifts.id, perWeekCents: w, confirmedOn: TODAY }] })
+    const c = planChart({ plan: hh.plans.find((x) => x.package.id === trip2.id)!, household: hh, today: TODAY, transferWeekday: FRIDAY })!
+    const first = c.story.phases[0]!
+    expect(first.kind).toBe('waiting')
+    expect(first.others).toHaveLength(3)
+    expect(first.othersMore).toBe(2)
+    const turn = c.story.phases.find((x) => x.rolledOff.length > 0)!
+    expect(turn.kind).toBe('filling')
+    expect(turn.rolledOff).toHaveLength(3)
+    expect(turn.rolledOffMore).toBe(2)
   })
 
   it('draws every stretch where it starts and ends, however coarsely the chart is drawn', () => {
@@ -1177,6 +1201,7 @@ describe('invariants over randomised households (D35)', () => {
             expect(x.kind).not.toBe(phases[i - 1]!.kind)
           // A plan that rolled off was paid the stretch before and is not paid in this one.
           for (const r of x.rolledOff) expect(x.others.map((o) => o.packageId)).not.toContain(r.packageId)
+          if (x.othersMore > 0) expect(x.others).toHaveLength(3)
           }
           expect(x.transfers).toBe(transferWeeksBetween(x.from, x.to, transferWeekday) + 1)
           if (x.kind === 'waiting') expect(x.transfers).toBeGreaterThanOrEqual(1)

@@ -210,12 +210,17 @@ principles, and they are non-negotiable.
   money comes here, `waiting` for two transfers or more that bring under
   `PHASE_MIN_RISE_CENTS` ($1), each naming the other plans the same
   transfers pay, and `rolledOff`, the ones the stretch before paid and this
-  one does not), the day it is full (`full`), and the day. The plan's page
+  one does not, three named and `othersMore` / `rolledOffMore` counting the
+  rest), the day it is full (`full`), and the day. The plan's page
   draws the dashed "Saving it on its own" line with the space below it
-  shaded and numbered badges over the stretches (`StretchBadge`), and
+  shaded and numbered badges over the stretches (`StretchBadge`); that line
+  is `--color-chart-pace`, a blue validated with the dataviz skill's
+  validator on both card surfaces beside the ink line and the green
+  after-the-fix line, so it is never read as the plan's own line; and
   `PlanStory` (`src/components/plan-story.tsx`) says "Where the money is
-  today" and "What happens next" with the same numbers (each stretch "In N
-  · start to end" and one line: where the money is focused while nothing
+  today" and "What happens next" with the same numbers (the first stretch "Now to <end>", since it
+  always starts with the next transfer, each later one "In N · start to
+  end", and one line: where the money is focused while nothing
   comes here, or which plans are covered so money starts coming here, about
   $X a transfer, to $Y), then "On track:
   all $X due in N" only when `story.onTrack` (the plan On track, every
@@ -493,7 +498,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 773 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 774 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
