@@ -16,6 +16,8 @@ import {
   validateDebtRates,
   type Debt,
   monthlyPaymentCents,
+  monthInterestCents,
+  shareFromStatement,
   promoCliff,
   chargedBackInterestCents,
 } from '../debt'
@@ -66,25 +68,129 @@ describe('how fresh a balance is', () => {
 
 describe('minimum payments', () => {
   it('handles a fixed monthly amount', () => {
-    expect(minimumPaymentCents(debt({ id: 'a', name: 'Card' }))).toBe(15000)
+    expect(minimumPaymentCents(debt({ id: 'a', name: 'Card' }), TODAY)).toBe(15000)
   })
 
-  it('handles a percentage of the balance', () => {
+  it('is the month\'s interest plus a percentage of the balance (D51)', () => {
+    // 2% of $5,000 is $100; a month at 24.99% on $5,000 is $104.13.
     expect(
       minimumPaymentCents(
         debt({ id: 'a', name: 'Card', balanceCents: 500000, minPaymentRule: { type: 'percent', basisPoints: 200 } }),
+        TODAY,
       ),
-    ).toBe(10000) // 2% of $5,000
+    ).toBe(10000 + 10413)
   })
 
-  it('applies a floor when the percentage falls below it', () => {
+  it('works out the Delta card the way its statement does', () => {
+    // $3,341.75 at 29.99%: 2% is $66.84, a month's interest $83.52.
+    const delta = debt({
+      id: 'd',
+      name: 'Delta',
+      balanceCents: 334175,
+      aprBasisPoints: 2999,
+      minPaymentRule: { type: 'percent_with_floor', basisPoints: 200, floorCents: 3000 },
+    })
+    expect(monthInterestCents(delta, TODAY)).toBe(8352)
+    expect(minimumPaymentCents(delta, TODAY)).toBe(6684 + 8352)
+  })
+
+  it('charges no interest on a balance at 0%, so the minimum is only the percentage', () => {
+    const d = debt({
+      id: 'a',
+      name: 'Balance transfer',
+      balanceCents: 500000,
+      minPaymentRule: { type: 'percent', basisPoints: 100 },
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-09-19' }],
+    })
+    expect(monthInterestCents(d, TODAY)).toBe(0)
+    expect(minimumPaymentCents(d, TODAY)).toBe(5000)
+    // Once the deal is over, the full rate is back in the minimum.
+    expect(minimumPaymentCents(d, '2027-09-19')).toBe(5000 + 10413)
+  })
+
+  it('charges interest only on the part of a balance that is not on a deal', () => {
+    const d = debt({
+      id: 'a',
+      name: 'Card',
+      balanceCents: 500000,
+      minPaymentRule: { type: 'percent', basisPoints: 100 },
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'amount', amountCents: 300000, untilDate: '2027-09-19' }],
+    })
+    // $2,000 at 24.99% is $41.65 a month.
+    expect(monthInterestCents(d, TODAY)).toBe(4165)
+  })
+
+  it('applies a floor when interest and the percentage fall below it', () => {
     const rule = { type: 'percent_with_floor' as const, basisPoints: 200, floorCents: 2500 }
-    expect(minimumPaymentCents(debt({ id: 'a', name: 'x', balanceCents: 500000, minPaymentRule: rule }))).toBe(10000)
-    expect(minimumPaymentCents(debt({ id: 'b', name: 'y', balanceCents: 50000, minPaymentRule: rule }))).toBe(2500)
+    expect(minimumPaymentCents(debt({ id: 'a', name: 'x', balanceCents: 500000, minPaymentRule: rule }), TODAY)).toBe(
+      10000 + 10413,
+    )
+    // $10 + $10.41 is under the $25 floor.
+    expect(minimumPaymentCents(debt({ id: 'b', name: 'y', balanceCents: 50000, minPaymentRule: rule }), TODAY)).toBe(2500)
   })
 
-  it('never demands more than the balance', () => {
-    expect(minimumPaymentCents(debt({ id: 'a', name: 'x', balanceCents: 5000 }))).toBe(5000)
+  it('never demands more than the balance and its month of interest', () => {
+    expect(minimumPaymentCents(debt({ id: 'a', name: 'x', balanceCents: 5000 }), TODAY)).toBe(5000 + 104)
+  })
+
+  it('pays off a card whose percentage alone is less than its interest', () => {
+    // 1% of $5,000 is $50, under the $104.13 of interest: as a flat 1% it
+    // would never be paid off. With the interest on top it always is.
+    const d = debt({ id: 'a', name: 'Card', balanceCents: 500000, minPaymentRule: { type: 'percent', basisPoints: 100 } })
+    expect(projectPayoff({ debt: d, today: TODAY }).months).not.toBeNull()
+  })
+})
+
+describe('the percentage, worked out from a statement (D51)', () => {
+  it('takes the interest and fees off both sides', () => {
+    // $3,341.75 owed, $83.52 of it interest, minimum $116.94: 1%.
+    expect(
+      shareFromStatement({ balanceCents: 334175, minimumCents: 11694, interestCents: 8352, aprBasisPoints: 2999 }),
+    ).toEqual({ ok: true, basisPoints: 100, snapped: true, interestEstimated: false })
+  })
+
+  it('snaps a rounded minimum to the nearest whole or half percent', () => {
+    // A $117 minimum (rounded up to the dollar) reads as 1.02%: it is 1%.
+    const got = shareFromStatement({ balanceCents: 334175, minimumCents: 11700, interestCents: 8352, aprBasisPoints: 2999 })
+    expect(got).toEqual({ ok: true, basisPoints: 100, snapped: true, interestEstimated: false })
+  })
+
+  it('keeps an exact figure that is nowhere near a round one', () => {
+    // $83.52 + 1.3% of $3,258.23 ($42.36) = $125.88.
+    const got = shareFromStatement({ balanceCents: 334175, minimumCents: 12588, interestCents: 8352, aprBasisPoints: 2999 })
+    expect(got).toEqual({ ok: true, basisPoints: 130, snapped: false, interestEstimated: false })
+  })
+
+  it('takes fees off as well, so an annual fee does not inflate the share', () => {
+    const got = shareFromStatement({
+      balanceCents: 334175 + 65000,
+      minimumCents: 11694 + 65000,
+      interestCents: 8352,
+      feesCents: 65000,
+      aprBasisPoints: 2999,
+    })
+    expect(got).toMatchObject({ ok: true, basisPoints: 100 })
+  })
+
+  it('estimates the interest from the rate when it is left blank, and says so', () => {
+    const got = shareFromStatement({ balanceCents: 334175, minimumCents: 11694, interestCents: null, aprBasisPoints: 2999 })
+    expect(got).toMatchObject({ ok: true, basisPoints: 100, interestEstimated: true })
+  })
+
+  it('cannot tell from a statement whose minimum is the floor or the whole balance', () => {
+    expect(
+      shareFromStatement({ balanceCents: 200000, minimumCents: 3500, interestCents: 2000, floorCents: 3500, aprBasisPoints: 2999 }),
+    ).toEqual({ ok: false, reason: 'floor' })
+    expect(shareFromStatement({ balanceCents: 3000, minimumCents: 3000, interestCents: 50, aprBasisPoints: 2999 })).toEqual({
+      ok: false,
+      reason: 'whole_balance',
+    })
+  })
+
+  it('cannot tell when the minimum does not even cover the interest and fees', () => {
+    expect(
+      shareFromStatement({ balanceCents: 334175, minimumCents: 6684, interestCents: 8352, aprBasisPoints: 2999 }),
+    ).toEqual({ ok: false, reason: 'below_interest' })
   })
 })
 
@@ -147,10 +253,11 @@ describe('promo-aware effective APR', () => {
       balanceCents: 20000,
       minPaymentRule: { type: 'fixed', amountCents: 5000 },
     })
-    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: null })).toBe(5000)
-    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: 2000 })).toBe(5000)
-    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: 12000 })).toBe(12000)
-    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: 50000 })).toBe(20000)
+    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: null }, TODAY)).toBe(5000)
+    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: 2000 }, TODAY)).toBe(5000)
+    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: 12000 }, TODAY)).toBe(12000)
+    // The balance and its month of interest ($200 at 24.99%: $4.17).
+    expect(monthlyPaymentCents({ ...d, plannedPaymentCents: 50000 }, TODAY)).toBe(20417)
   })
 
   it('ramps toward the real rate as a clearable promo nears expiry', () => {
@@ -326,8 +433,9 @@ describe('payoff projections', () => {
       name: 'Trap',
       balanceCents: 500000,
       aprBasisPoints: 2999,
-      // 1% of balance against ~2.5%/mo interest: it only ever grows.
-      minPaymentRule: { type: 'percent', basisPoints: 100 },
+      // $100 a month against $124.96 of interest: it only ever grows. (A
+      // percentage minimum always covers its interest now, D51.)
+      minPaymentRule: { type: 'fixed', amountCents: 10000 },
     })
     const projection = projectPayoff({ debt: d, today: TODAY })
     expect(projection.months).toBeNull()
@@ -335,15 +443,16 @@ describe('payoff projections', () => {
   })
 
   it('keeps counting when a shrinking balance takes longer than a lifetime', () => {
-    // 2% of the balance against ~1.7%/mo interest shrinks, slowly: the
-    // minimum falls with the balance, so it takes centuries -- but it ends,
-    // and the interest over that life is a real figure, not "never".
+    // Interest plus 0.5% of the balance shrinks it by half a percent a
+    // month: the minimum falls with the balance, so it takes centuries --
+    // but it ends, and the interest over that life is a real figure, not
+    // "never".
     const d = debt({
       id: 'a',
       name: 'Slow card',
       balanceCents: 1000000,
       aprBasisPoints: 2049,
-      minPaymentRule: { type: 'percent', basisPoints: 200 },
+      minPaymentRule: { type: 'percent', basisPoints: 50 },
     })
     const projection = projectPayoff({ debt: d, today: TODAY })
     expect(projection.months).not.toBeNull()
@@ -358,6 +467,12 @@ describe('payoff projections', () => {
 })
 
 describe('interest over the coming year', () => {
+  it('counts all twelve months on a debt its payment never clears', () => {
+    // $124.96 of interest a month against a $100 payment, growing.
+    const d = debt({ id: 'a', name: 'Trap', balanceCents: 500000, aprBasisPoints: 2999, minPaymentRule: { type: 'fixed', amountCents: 10000 } })
+    expect(interestOverNextYearCents(d, TODAY)).toBeGreaterThan(12 * 12495)
+  })
+
   it('is zero on a believable 0% promo', () => {
     const d = debt({
       id: 'a',

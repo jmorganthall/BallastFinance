@@ -20,6 +20,8 @@ import {
   type DebtFormField,
   type DebtFormValues,
 } from '@/domain/debt-form'
+import { shareFromStatement } from '@/domain/debt'
+import { parseAmountOrNull, parsePercentOrNull } from '@/domain/money'
 import type { DebtFormState } from '@/server/actions'
 
 type Problem = { field: string; message: string }
@@ -199,8 +201,8 @@ export function DebtForm({
             onChange={(e) => set('min_type', e.target.value)}
           >
             <option value="fixed">A set amount each month (a loan, or a card with a flat minimum)</option>
-            <option value="percent">A percentage of the balance</option>
-            <option value="percent_with_floor">A percentage, but never below a set amount</option>
+            <option value="percent">Interest plus a percentage of the balance</option>
+            <option value="percent_with_floor">Interest plus a percentage, but never below a set amount</option>
           </select>
         )}
       </Field>
@@ -220,7 +222,11 @@ export function DebtForm({
         </Field>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Percentage" problem={problemFor('min_percent')}>
+          <Field
+            label="Percentage"
+            hint="On top of the month's interest. Most cards use 1%."
+            problem={problemFor('min_percent')}
+          >
             {(a) => (
               <input
                 {...a}
@@ -228,7 +234,7 @@ export function DebtForm({
                 inputMode="decimal"
                 value={values.min_percent}
                 onChange={(e) => set('min_percent', e.target.value)}
-                placeholder="2"
+                placeholder="1"
               />
             )}
           </Field>
@@ -246,6 +252,11 @@ export function DebtForm({
               )}
             </Field>
           ) : null}
+          <ShareFromStatement
+            aprText={values.apr}
+            floorText={values.min_type === 'percent_with_floor' ? values.min_floor : ''}
+            onShare={(percent) => set('min_percent', percent)}
+          />
         </div>
       )}
 
@@ -386,6 +397,112 @@ export function DebtForm({
  * control its class and the aria wiring, so every box reports a problem the
  * same way to a screen reader as it does to the eye.
  */
+/**
+ * "Work it out from a statement" (PRD D51): the percentage a card's minimum
+ * uses, from one statement's balance, minimum, interest and fees. It fills
+ * the Percentage box and stores nothing; its boxes have no names, so the
+ * form never sends them. The arithmetic is the domain's `shareFromStatement`.
+ */
+function ShareFromStatement({
+  aprText,
+  floorText,
+  onShare,
+}: {
+  aprText: string
+  floorText: string
+  onShare: (percent: string) => void
+}) {
+  const [box, setBox] = useState({ balance: '', minimum: '', interest: '', fees: '' })
+  const [said, setSaid] = useState<string | null>(null)
+  const small = `${fieldClass} ${okBorder}`
+  const put = (field: keyof typeof box) => (e: { target: { value: string } }) =>
+    setBox((b) => ({ ...b, [field]: e.target.value }))
+
+  const workItOut = () => {
+    const balanceCents = parseAmountOrNull(box.balance)
+    const minimumCents = parseAmountOrNull(box.minimum)
+    if (balanceCents === null || minimumCents === null || balanceCents <= 0 || minimumCents <= 0) {
+      setSaid('Fill in the statement balance and its minimum payment due.')
+      return
+    }
+    const interestCents = box.interest.trim() === '' ? null : parseAmountOrNull(box.interest)
+    const feesCents = box.fees.trim() === '' ? 0 : parseAmountOrNull(box.fees)
+    if ((box.interest.trim() !== '' && interestCents === null) || feesCents === null) {
+      setSaid('Enter the interest and fees as amounts, like 83.52.')
+      return
+    }
+    const aprBasisPoints = parsePercentOrNull(aprText)
+    if (interestCents === null && aprBasisPoints === null) {
+      setSaid('Fill in the interest charged, or the interest rate above.')
+      return
+    }
+    const got = shareFromStatement({
+      balanceCents,
+      minimumCents,
+      interestCents,
+      feesCents,
+      floorCents: floorText.trim() === '' ? null : parseAmountOrNull(floorText),
+      aprBasisPoints: aprBasisPoints ?? 0,
+    })
+    if (!got.ok) {
+      setSaid(
+        got.reason === 'floor'
+          ? 'That minimum is the floor, so this statement does not show the percentage. Try one with a bigger balance.'
+          : got.reason === 'whole_balance'
+            ? 'That minimum is the whole balance, so this statement does not show the percentage.'
+            : 'That minimum does not cover the interest and fees, so the figures do not fit interest plus a percentage. Check them against the statement.',
+      )
+      return
+    }
+    const percent = (got.basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
+    onShare(percent)
+    setSaid(
+      `${got.snapped ? 'Looks like' : 'About'} ${percent}%, now in the Percentage box.` +
+        (got.interestEstimated
+          ? ' The interest was worked out from the rate above, so check it against the statement if you can.'
+          : ''),
+    )
+  }
+
+  return (
+    <details className="sm:col-span-2">
+      <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
+        Work it out from a statement
+      </summary>
+      <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block text-sm font-medium">
+          Statement balance
+          <input inputMode="decimal" value={box.balance} onChange={put('balance')} placeholder="3341.75" className={small} />
+        </label>
+        <label className="block text-sm font-medium">
+          Minimum payment due
+          <input inputMode="decimal" value={box.minimum} onChange={put('minimum')} placeholder="116.94" className={small} />
+        </label>
+        <label className="block text-sm font-medium">
+          Interest charged (optional)
+          <input inputMode="decimal" value={box.interest} onChange={put('interest')} placeholder="83.52" className={small} />
+        </label>
+        <label className="block text-sm font-medium">
+          Fees on this statement (optional)
+          <input inputMode="decimal" value={box.fees} onChange={put('fees')} placeholder="0" className={small} />
+        </label>
+      </div>
+      <button
+        type="button"
+        onClick={workItOut}
+        className="mt-3 min-h-11 w-full rounded-lg border border-[var(--color-line)] px-4 text-sm font-medium"
+      >
+        Work out the percentage
+      </button>
+      {said ? (
+        <p role="status" className="mt-2 text-sm text-[var(--color-ink-soft)]">
+          {said}
+        </p>
+      ) : null}
+    </details>
+  )
+}
+
 function Field({
   label,
   hint,

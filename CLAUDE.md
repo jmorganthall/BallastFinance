@@ -283,6 +283,17 @@ principles, and they are non-negotiable.
   regular one and replaces that month's assumed payment; a to-do's payment is
   a share-out's extra and comes off on top. `Debt.statedBalanceCents` carries
   the stated figure beside it ("likely" on Debts).
+- **A percentage minimum is interest plus that share** (PRD D51, rev 101).
+  `min_payment_rule` is stored as before; `percent` means the month's
+  interest (`monthInterestCents`: each live deal's part at its deal rate,
+  the rest at the full rate, so 0% adds none) plus the share of the balance
+  before that interest, `percent_with_floor` never below the floor, either
+  never more than everything owed. So `minimumPaymentCents` and
+  `monthlyPaymentCents` take `today`; inside a month of the projection or
+  the likely balance the interest is the month's own. A flat percentage
+  with no interest is not offered. "Work it out from a statement" on the
+  debt form is `shareFromStatement`, snapped to a whole or half percent
+  within 0.1 point, and stores nothing.
 - **One status per debt** (PRD D49 (4)-(7)). `debtStatuses` in
   `src/domain/debt-status.ts`, read through `Engine.debtStatuses()`, is the
   only place a debt's status, its words (`debtStatusLabel`,
@@ -509,7 +520,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 777 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 789 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

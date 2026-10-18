@@ -124,7 +124,7 @@ export function debtStatuses(args: {
           onDealCents: cliff.amountCents,
           monthsLeft: cliff.monthsLeft,
           owedAtEndCents: cliff.shortCents,
-          paymentNowCents: monthlyPaymentCents(debt),
+          paymentNowCents: monthlyPaymentCents(debt, args.today),
           clearPerMonthCents:
             cliff.monthsLeft <= 0 ? cliff.amountCents : Math.ceil(cliff.amountCents / cliff.monthsLeft),
           chargedBackCents: chargedBackInterestCents(debt, args.today),
