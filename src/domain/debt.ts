@@ -494,6 +494,16 @@ export interface DebtScore {
 }
 
 /**
+ * A debt with nothing left to pay: marked paid off, or at nothing today once
+ * the payments since its statement come off. Exactly the debts the payoff
+ * order leaves out, so the Debts screen can list them on their own and a
+ * person can bring one back by stating a new balance.
+ */
+export function isPaidOff(debt: Pick<Debt, 'state' | 'balanceCents'>): boolean {
+  return debt.state !== 'open' || debt.balanceCents <= 0
+}
+
+/**
  * Score every open debt (PRD §7).
  *
  * The long-term denominator is the highest effective APR currently in the
@@ -509,7 +519,7 @@ export function scoreDebts(args: {
 }): DebtScore[] {
   const weight = args.weight ?? DEFAULT_PRIORITY_WEIGHT
   const leadWeeks = args.promoLeadWeeks ?? DEFAULT_PROMO_LEAD_WEEKS
-  const open = args.debts.filter((d) => d.state === 'open' && d.balanceCents > 0)
+  const open = args.debts.filter((d) => !isPaidOff(d))
   if (open.length === 0) return []
 
   const rows = open.map((debt) => ({
