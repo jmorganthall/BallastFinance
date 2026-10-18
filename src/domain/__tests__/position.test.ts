@@ -160,6 +160,17 @@ describe('smart saving (D50)', () => {
     expect(s.lessPerWeekCents).toBe(s.onItsOwnPerWeekCents - s.withBallastPerWeekCents)
     expect(s.lessPerWeekCents).toBeGreaterThan(0)
     expect(s.lessPerYearCents).toBe(s.lessPerWeekCents * 52)
+    // A month is a twelfth of the year, rounded down so it never claims more.
+    expect(s.lessPerMonthCents).toBe(Math.floor((s.lessPerWeekCents * 52) / 12))
+    expect(s.lessPerMonthCents * 12).toBeLessThanOrEqual(s.lessPerYearCents)
+    // Each account's weekly figure, adding up to the headline; the bank moves what it asks.
+    expect(s.accounts.map((a) => [a.name, a.perWeekCents, a.bankPerWeekCents])).toEqual([
+      ['Annual Expenses', set.accounts[0]!.neededPerWeekCents, null],
+      ['Long Term Savings', set.accounts[1]!.neededPerWeekCents, null],
+    ])
+    expect(s.accounts.reduce((t, a) => t + a.perWeekCents, 0)).toBe(s.withBallastPerWeekCents)
+    // Before the transfers are set up there is no bank figure to set beside it.
+    expect(asked.accounts.every((a) => a.bankPerWeekCents === null)).toBe(true)
     expect(s.withBallastShare).toBeCloseTo(s.withBallastPerWeekCents / s.onItsOwnPerWeekCents, 4)
     expect(s.planCount).toBe(1)
   })

@@ -2059,6 +2059,15 @@ export interface SmartSaving {
   lessPerWeekCents: Cents
   /** That over a year of 52 transfers. */
   lessPerYearCents: Cents
+  /** That over an average month, a twelfth of the year, rounded down so it never claims more. */
+  lessPerMonthCents: Cents
+  /**
+   * Each account with a plan and what it needs a week (its card's figure),
+   * in the position's order: these add up to `withBallastPerWeekCents`.
+   * `bankPerWeekCents` is what the bank is set to move, when that differs
+   * (null when it is the same, or when no transfer is confirmed yet).
+   */
+  accounts: { accountId: Id; name: string; perWeekCents: Cents; bankPerWeekCents: Cents | null }[]
   /** With Ballast as a share of on its own, 0 to 1, for the bar: four decimals. */
   withBallastShare: number
   /** Live plans with at least one live part. */
@@ -2092,6 +2101,13 @@ export function smartSaving(p: Pick<HouseholdPosition, 'accounts' | 'plans' | 't
     onItsOwnPerWeekCents,
     lessPerWeekCents,
     lessPerYearCents: lessPerWeekCents * 52,
+    lessPerMonthCents: Math.floor((lessPerWeekCents * 52) / 12),
+    accounts: withPlans.map((a) => ({
+      accountId: a.account.id,
+      name: a.account.name,
+      perWeekCents: a.neededPerWeekCents,
+      bankPerWeekCents: a.bank && a.bank.perWeekCents !== a.neededPerWeekCents ? a.bank.perWeekCents : null,
+    })),
     withBallastShare:
       onItsOwnPerWeekCents <= 0
         ? 1
