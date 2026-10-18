@@ -12,11 +12,12 @@
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
-import { setPriorityWeightAction } from '@/server/actions'
+import { setPriorityWeightAction, updateDebtBalanceAction } from '@/server/actions'
 import {
   debtFormValuesOf,
   debtStatusLabel,
   debtStatusLine,
+  isPaidOff,
   parseAmountToCents,
   projectPayoff,
   shareOfLargest,
@@ -44,11 +45,14 @@ export default async function DebtsPage({
   const weight = w !== undefined && Number.isFinite(Number(w)) ? Number(w) : standingWeight
   const isPreview = Math.abs(weight - standingWeight) > 0.001
 
-  const [ladder, debtState, today] = await Promise.all([
+  const [ladder, debtState, debts, today] = await Promise.all([
     engine.debtLadder(weight),
     engine.debtStatuses(),
+    engine.listDebts(),
     Promise.resolve(engine.today()),
   ])
+  // The debts the payoff order leaves out, so one can be brought back.
+  const paidOff = debts.filter(isPaidOff).sort((a, b) => a.name.localeCompare(b.name))
   // Every debt's status, words and staleness come from the one place (D49 (4)-(5)).
   const viewOf = new Map(debtState.debts.map((view) => [view.debt.id, view]))
 
@@ -156,7 +160,7 @@ export default async function DebtsPage({
 
       {ladder.length === 0 ? (
         <>
-          <Empty title="No debts recorded.">
+          <Empty title={paidOff.length > 0 ? 'Nothing owed right now.' : 'No debts recorded.'}>
             <p>Add one below and Ballast will work out the payoff order.</p>
           </Empty>
           <div className="mt-4">
@@ -263,6 +267,54 @@ export default async function DebtsPage({
         </>
       )}
 
+      {paidOff.length > 0 ? (
+        <Card className="mt-8">
+          <details>
+            <summary className="cursor-pointer font-semibold">
+              Paid off ({paidOff.length})
+            </summary>
+            <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+              These are off the payoff order. If one has a balance again, type it in and it goes back
+              on.
+            </p>
+            <ul className="mt-3 divide-y divide-[var(--color-line)]">
+              {paidOff.map((debt) => (
+                <li key={debt.id} className="py-3 text-sm last:pb-0">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                    <Link href={`/debts/${debt.id}`} className="font-medium underline-offset-4 hover:underline">
+                      {debt.name}
+                    </Link>
+                    <span className="text-xs text-[var(--color-ink-soft)]">
+                      {KIND[debt.category] ?? debt.category} ·{' '}
+                      {debt.state === 'paid_off'
+                        ? `paid off ${humanDate(debt.balanceAsOf)}`
+                        : `nothing left after the payments since ${humanDate(debt.balanceAsOf)}`}
+                    </span>
+                  </div>
+                  <form action={updateDebtBalanceAction} className="mt-2 flex items-end gap-2">
+                    <input type="hidden" name="debt_id" value={debt.id} />
+                    <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+                      The statement says it is
+                      <input
+                        name="balance"
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-2 text-base text-[var(--color-ink)]"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="min-h-11 rounded-lg border border-[var(--color-line)] px-3 text-sm"
+                    >
+                      Bring it back
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </Card>
+      ) : null}
     </>
   )
 }

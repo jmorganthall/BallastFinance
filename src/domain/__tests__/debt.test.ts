@@ -10,6 +10,7 @@ import {
   projectPayoff,
   promoExpiryWarning,
   scoreDebts,
+  isPaidOff,
   snowballLadder,
   validateDebtInputs,
   validateDebtRates,
@@ -574,5 +575,17 @@ describe('interest charged back when a deal ends unpaid (PRD D49 (9))', () => {
     const withBack = projectPayoff({ debt: card, today: TODAY_HERE })
     const without = projectPayoff({ debt: notCharged, today: TODAY_HERE })
     expect(withBack.totalInterestCents - without.totalInterestCents).toBeGreaterThanOrEqual(18600)
+  })
+})
+
+describe('paid off', () => {
+  it('is a debt marked paid off, or one at nothing today, and never one the payoff order scores', () => {
+    const debts = [
+      debt({ id: 'open', name: 'Open' }),
+      debt({ id: 'marked', name: 'Marked', state: 'paid_off', balanceCents: 0 }),
+      debt({ id: 'zero', name: 'Paid down to zero', balanceCents: 0 }),
+    ]
+    expect(debts.filter(isPaidOff).map((d) => d.id)).toEqual(['marked', 'zero'])
+    expect(scoreDebts({ debts, today: TODAY }).map((s) => s.debt.id)).toEqual(['open'])
   })
 })
