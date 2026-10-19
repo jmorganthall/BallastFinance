@@ -147,6 +147,7 @@ describeDb('the recurring list and income', () => {
 
   it('works out a source from its paystub lines and checks it against Simplifi', async () => {
     const id = await engine.saveIncomeSource({
+      personUserId: null,
       person: 'Alex',
       name: 'Acme',
       frequency: 'biweekly',
@@ -166,6 +167,7 @@ describeDb('the recurring list and income', () => {
 
     await engine.saveIncomeSource(
       {
+        personUserId: null,
         person: 'Alex',
         name: 'Acme',
         frequency: 'biweekly',
@@ -211,5 +213,39 @@ describeDb('the recurring list and income', () => {
       .from(schema.events)
       .where(and(eq(schema.events.householdId, householdId), eq(schema.events.kind, 'income_received')))
     expect(received).toHaveLength(2)
+  })
+
+  it("names a household member's income from their own account, and refuses someone outside the household", async () => {
+    const [user] = await db
+      .insert(schema.users)
+      .values({ issuer: 'test', subject: crypto.randomUUID(), email: 'jo@example.com', displayName: 'Jo Smith' })
+      .returning()
+    await db.insert(schema.householdMembers).values({ householdId, userId: user!.id })
+    expect(await engine.householdMembers()).toEqual([{ userId: user!.id, name: 'Jo' }])
+
+    const base = {
+      name: 'Beta',
+      frequency: 'monthly' as const,
+      startedOn: null,
+      annualSalaryCents: null,
+      grossPerCheckCents: null,
+      pretax: [],
+      taxes: [],
+      netPerCheckCents: 400_000,
+      spendingShareBasisPoints: 2000,
+    }
+    const id = await engine.saveIncomeSource({ ...base, personUserId: user!.id, person: 'ignored' })
+    const saved = (await engine.listIncomeSources()).find((s) => s.id === id)!
+    expect(saved).toMatchObject({ personUserId: user!.id, person: 'Jo' })
+
+    await expect(engine.saveIncomeSource({ ...base, personUserId: crypto.randomUUID(), person: '' })).rejects.toThrow(
+      'not in this household',
+    )
+    await expect(engine.saveIncomeSource({ ...base, personUserId: null, person: ' ' })).rejects.toThrow('Say whose income')
+
+    await engine.endIncomeSource(id)
+    await db.delete(schema.incomeSources).where(eq(schema.incomeSources.id, id))
+    await db.delete(schema.householdMembers).where(eq(schema.householdMembers.userId, user!.id))
+    await db.delete(schema.users).where(eq(schema.users.id, user!.id))
   })
 })

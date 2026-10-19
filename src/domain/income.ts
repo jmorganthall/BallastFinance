@@ -38,7 +38,9 @@ export interface PaystubLine {
 
 export interface IncomeSource {
   id: Id
-  /** Whose income: a first name, as the sheet has a column per spouse. */
+  /** Whose income: a household member, or null for someone outside it. */
+  personUserId: Id | null
+  /** The name shown: the member's first name, or the name typed for someone outside the household. */
   person: string
   name: string
   frequency: Frequency
@@ -217,9 +219,10 @@ export function sourceView(source: IncomeSource, payments: readonly IncomePaymen
     source,
     paycheck,
     lines: {
-      pretax: paycheck.pretax.map((l) => ({ label: l.label, cols: year(l.cents) })),
+      // A line that comes to nothing is not shown; the paycheck's own sums still count every line.
+      pretax: paycheck.pretax.filter((l) => l.cents !== 0).map((l) => ({ label: l.label, cols: year(l.cents) })),
       afterPretax: paycheck.afterPretaxCents === null ? null : year(paycheck.afterPretaxCents),
-      taxes: paycheck.taxes.map((l) => ({ label: l.label, cols: year(l.cents) })),
+      taxes: paycheck.taxes.filter((l) => l.cents !== 0).map((l) => ({ label: l.label, cols: year(l.cents) })),
     },
     // The salary as a year, unless the stub's own gross per check was typed: then the checks are the truth.
     gross:
@@ -279,11 +282,19 @@ export function householdIncome(
   }
 }
 
+/** How a household member is named on Income: the first word of their name, else their email before the "@". */
+export function memberFirstName(member: { displayName: string | null; email: string }): string {
+  const first = member.displayName?.trim().split(/\s+/)[0]
+  return first || member.email.split('@')[0] || member.email
+}
+
 /** Plain-words check of a source a person is saving, or null when it is fine. */
 export function incomeSourceProblem(
-  source: Pick<IncomeSource, 'person' | 'name' | 'annualSalaryCents' | 'grossPerCheckCents' | 'netPerCheckCents' | 'spendingShareBasisPoints' | 'pretax' | 'taxes'>,
+  source: Pick<IncomeSource, 'person' | 'personUserId' | 'name' | 'annualSalaryCents' | 'grossPerCheckCents' | 'netPerCheckCents' | 'spendingShareBasisPoints' | 'pretax' | 'taxes'>,
 ): string | null {
-  if (!source.person.trim()) return 'Say whose income this is.'
+  if (source.personUserId === null && !source.person.trim()) {
+    return 'Say whose income this is: pick one of us, or type their name.'
+  }
   if (!source.name.trim()) return 'Give it a name, such as the employer.'
   const hasGross = source.annualSalaryCents !== null || source.grossPerCheckCents !== null
   if (!hasGross && source.netPerCheckCents === null) {

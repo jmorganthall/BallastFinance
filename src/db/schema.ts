@@ -798,8 +798,13 @@ export const incomeSources = pgTable(
     householdId: uuid('household_id')
       .notNull()
       .references(() => households.id, { onDelete: 'cascade' }),
-    /** Whose income, as a first name. */
-    person: text('person').notNull(),
+    /**
+     * Whose income: someone in the household (`person_user_id`, migration
+     * 0022), or a name typed for someone outside it (`person`, empty when a
+     * member is chosen). The member's own name is read from users, never copied.
+     */
+    personUserId: uuid('person_user_id').references(() => users.id, { onDelete: 'restrict' }),
+    person: text('person').notNull().default(''),
     name: text('name').notNull(),
     frequency: frequencyEnum('frequency').notNull(),
     /** The day the job started: the bonus figure is per day since. */
@@ -822,6 +827,7 @@ export const incomeSources = pgTable(
   (t) => [
     index('income_sources_household_idx').on(t.householdId),
     check('income_sources_state', sql`${t.state} in ('active', 'ended')`),
+    check('income_sources_whose', sql`${t.personUserId} is not null or btrim(${t.person}) <> ''`),
     check(
       'income_sources_has_pay',
       sql`${t.annualSalaryCents} is not null or ${t.grossPerCheckCents} is not null or ${t.netPerCheckCents} is not null`,

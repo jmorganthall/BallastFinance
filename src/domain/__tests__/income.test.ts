@@ -3,6 +3,7 @@ import {
   bonusFigure,
   householdIncome,
   incomeSourceProblem,
+  memberFirstName,
   paycheckOf,
   paymentView,
   sourceView,
@@ -17,6 +18,7 @@ import {
  */
 const salaried: IncomeSource = {
   id: 'a',
+  personUserId: null,
   person: 'Alex',
   name: 'Acme',
   frequency: 'biweekly',
@@ -82,6 +84,11 @@ describe('one paycheck', () => {
 })
 
 describe('the columns', () => {
+  it('leaves out a line that comes to nothing', () => {
+    const view = sourceView({ ...salaried, pretax: [...salaried.pretax, { label: 'FSA', cents: 0 }] }, [], '2026-10-19')
+    expect(view.lines.pretax.map((l) => l.label)).toEqual(['Benefits', '401k', 'Other'])
+  })
+
   it("are the year's figure divided down, rounded down", () => {
     const view = sourceView(salaried, [], '2026-10-19')
     expect(view.gross).toEqual({ yearly: 13_000_000, monthly: 1_083_333, semimonthly: 541_666, biweekly: 500_000, weekly: 250_000 })
@@ -126,11 +133,21 @@ describe('bonuses', () => {
   })
 })
 
+describe('naming a household member', () => {
+  it('uses the first word of their name, else their email before the @', () => {
+    expect(memberFirstName({ displayName: 'Josh Morganthall', email: 'j@example.com' })).toBe('Josh')
+    expect(memberFirstName({ displayName: null, email: 'shelby@example.com' })).toBe('shelby')
+    expect(memberFirstName({ displayName: '  ', email: 'sam@example.com' })).toBe('sam')
+  })
+})
+
 describe('checking a source before it is saved', () => {
   it('asks for a salary or a take-home, in plain words', () => {
     expect(incomeSourceProblem(salaried)).toBeNull()
     expect(incomeSourceProblem({ ...netOnly, netPerCheckCents: null })).toContain('annual salary')
-    expect(incomeSourceProblem({ ...salaried, person: ' ' })).toBe('Say whose income this is.')
+    expect(incomeSourceProblem({ ...salaried, person: ' ' })).toContain('Say whose income this is')
+    // A household member needs no typed name.
+    expect(incomeSourceProblem({ ...salaried, person: '', personUserId: 'u1' })).toBeNull()
     expect(incomeSourceProblem({ ...salaried, spendingShareBasisPoints: 12_000 })).toContain('0 to 100')
   })
 })
