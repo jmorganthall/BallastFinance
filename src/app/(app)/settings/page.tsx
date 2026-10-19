@@ -15,6 +15,7 @@ import {
   saveNudgeSettingsAction,
   saveTransferRoundingAction,
   saveTransferWeekdayAction,
+  setSimplifiNamesAction,
   signOutAction,
 } from '@/server/actions'
 import { formatCents, WEEKDAY_NAMES } from '@/domain'
@@ -33,7 +34,7 @@ export default async function SettingsPage({
   const { saved, error } = await searchParams
   const { engine, viewer } = await requireEngine()
 
-  const [rules, buffer, weight, accounts, nudgeWeeks, promoLead, prefs, roundUp, transferWeekday] =
+  const [rules, buffer, weight, accounts, nudgeWeeks, promoLead, prefs, roundUp, transferWeekday, targets] =
     await Promise.all([
       engine.allocationRules(),
       engine.bufferCents(),
@@ -44,7 +45,9 @@ export default async function SettingsPage({
       engine.getSetting<Record<string, boolean>>('notification_prefs', {}),
       engine.transferRoundUpCents(),
       engine.transferWeekday(),
+      engine.simplifiTargets(),
     ])
+  const simplifiNames = new Map(targets.filter((t) => t.kind === 'account').map((t) => [t.id, t.simplifiNames]))
   // Absent means subscribed: both spouses receive everything by default (PRD §8).
   const receives = prefs[viewer.userId] !== false
 
@@ -247,7 +250,7 @@ export default async function SettingsPage({
         {accounts.length > 0 ? (
           <ul className="mb-4 space-y-2 text-sm">
             {accounts.map((account) => (
-              <li key={account.id} className="flex items-start justify-between gap-3">
+              <li key={account.id} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-b border-[var(--color-line)] pb-3 last:border-0">
                 <span>
                   <span className="font-medium">{account.name}</span>
                   <span className="block text-xs text-[var(--color-ink-soft)]">
@@ -261,6 +264,24 @@ export default async function SettingsPage({
                 ) : (
                   <Pill tone="neutral">Shared</Pill>
                 )}
+                {account.writable ? (
+                  <form action={setSimplifiNamesAction} className="flex w-full items-center gap-2">
+                    <input type="hidden" name="target" value={`account:${account.id}`} />
+                    <input type="hidden" name="back" value="/settings" />
+                    <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+                      Known in Simplifi as
+                      <input
+                        name="names"
+                        defaultValue={(simplifiNames.get(account.id) ?? []).join(', ')}
+                        placeholder="The transfer's name in Simplifi"
+                        className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]"
+                      />
+                    </label>
+                    <button type="submit" className="mt-4 rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm">
+                      Save
+                    </button>
+                  </form>
+                ) : null}
               </li>
             ))}
           </ul>

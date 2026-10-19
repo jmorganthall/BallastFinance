@@ -1827,3 +1827,218 @@ export async function discardDvcPullAction(formData: FormData): Promise<void> {
   await engine.stashDvcPull(null)
   backToTrip(tripId, null)
 }
+
+// ---------------------------------------------------------------- the recurring list and income (PRD §14, D52)
+
+/**
+ * Run an engine call and go back to `path`: with the engine's own words when
+ * it refused, else with what the call said it did (or just "saved"). The
+ * redirect is outside the try, because redirect works by throwing.
+ */
+async function thenBack(path: string, run: (engine: Engine) => Promise<string | void>): Promise<never> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  let error: string | null = null
+  let saved: string | void = undefined
+  try {
+    saved = await run(engine)
+  } catch (e) {
+    if (!(e instanceof EngineError)) throw e
+    error = e.message
+  }
+  revalidatePath(path.split('#')[0]!)
+  backWith(path, error ? { error } : { saved: saved || '1' })
+}
+
+function backWith(path: string, query: { error: string } | { saved: string }): never {
+  const [base, hash] = path.split('#')
+  const [key, value] = 'error' in query ? ['error', query.error] : ['saved', query.saved]
+  redirect(`${base}?${key}=${encodeURIComponent(value)}${hash ? `#${hash}` : ''}`)
+}
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/
+
+function linkTargetOf(value: string): { kind: 'account' | 'debt' | 'income'; id: string } | null {
+  const [kind, id] = value.split(':')
+  if ((kind === 'account' || kind === 'debt' || kind === 'income') && id) return { kind, id }
+  return null
+}
+
+function namesFrom(text: string): string[] {
+  return text.split(/[\n,]/).map((n) => n.trim()).filter(Boolean)
+}
+
+export async function pasteSimplifiAction(formData: FormData): Promise<void> {
+  const text = String(formData.get('paste') ?? '')
+  if (text.trim() === '') backWith('/recurring', { error: "Paste Simplifi's recurring list first." })
+  await thenBack('/recurring', async (engine) => {
+    await engine.stashSimplifiPaste(text)
+  })
+}
+
+export async function discardSimplifiPasteAction(): Promise<void> {
+  await thenBack('/recurring', (engine) => engine.discardSimplifiPaste())
+}
+
+export async function keepSimplifiPasteAction(formData: FormData): Promise<void> {
+  const endIds = formData.getAll('end').map(String)
+  const names = formData.getAll('link_name').map(String)
+  const targets = formData.getAll('link_target').map(String)
+  const links = names.flatMap((name, i) => {
+    const target = linkTargetOf(targets[i] ?? '')
+    return target ? [{ name, ...target }] : []
+  })
+  await thenBack('/recurring', async (engine) => {
+    const done = await engine.keepSimplifiPaste({ endIds, links })
+    return `Kept: ${done.added} new, ${done.changed} changed, ${done.ended} removed.`
+  })
+}
+
+/** "Known in Simplifi as" on an account (Settings), a debt or an income source: one name per line or comma. */
+export async function setSimplifiNamesAction(formData: FormData): Promise<void> {
+  const target = linkTargetOf(String(formData.get('target') ?? ''))
+  const back = String(formData.get('back') ?? '/recurring')
+  const names = namesFrom(String(formData.get('names') ?? ''))
+  // Only a path on this site: "//elsewhere" would leave it.
+  await thenBack(/^\/(?!\/)/.test(back) ? back : '/recurring', async (engine) => {
+    if (target) await engine.setSimplifiNames(target.kind, target.id, names)
+  })
+}
+
+/** Link one Simplifi row: its name joins the chosen account's, debt's or source's names. */
+export async function linkSimplifiRowAction(formData: FormData): Promise<void> {
+  const target = linkTargetOf(String(formData.get('link_target') ?? ''))
+  const name = String(formData.get('link_name') ?? '')
+  await thenBack('/recurring', async (engine) => {
+    if (!target) return
+    const current = (await engine.simplifiTargets()).find((t) => t.kind === target.kind && t.id === target.id)
+    await engine.setSimplifiNames(target.kind, target.id, [...(current?.simplifiNames ?? []), name])
+  })
+}
+
+/** Take one Simplifi name off whatever it is linked to. */
+export async function unlinkSimplifiRowAction(formData: FormData): Promise<void> {
+  const { simplifiKey } = await import('@/domain')
+  const target = linkTargetOf(String(formData.get('link_target') ?? ''))
+  const name = simplifiKey(String(formData.get('link_name') ?? ''))
+  await thenBack('/recurring', async (engine) => {
+    if (!target) return
+    const current = (await engine.simplifiTargets()).find((t) => t.kind === target.kind && t.id === target.id)
+    const kept = (current?.simplifiNames ?? []).filter((n) => simplifiKey(n) !== name)
+    await engine.setSimplifiNames(target.kind, target.id, kept)
+  })
+}
+
+async function recurringFields(formData: FormData) {
+  const { parseAmountOrNull, isFrequency } = await import('@/domain')
+  const frequency = String(formData.get('frequency') ?? '')
+  return {
+    name: String(formData.get('name') ?? ''),
+    amountCents: parseAmountOrNull(String(formData.get('amount') ?? '')) ?? 0,
+    frequency: isFrequency(frequency) ? frequency : ('monthly' as const),
+  }
+}
+
+export async function addRecurringAction(formData: FormData): Promise<void> {
+  const fields = await recurringFields(formData)
+  await thenBack('/recurring', async (engine) => {
+    await engine.addRecurring(fields)
+  })
+}
+
+export async function updateRecurringAction(formData: FormData): Promise<void> {
+  const fields = await recurringFields(formData)
+  await thenBack('/recurring', (engine) => engine.updateRecurring(String(formData.get('id')), fields))
+}
+
+export async function endRecurringAction(formData: FormData): Promise<void> {
+  await thenBack('/recurring', (engine) => engine.endRecurring(String(formData.get('id'))))
+}
+
+/** Paystub lines typed as dollars ("830.54") or a percent of the check ("6%"); blank rows are skipped. */
+async function paystubLines(formData: FormData, prefix: 'pretax' | 'tax') {
+  const { parseAmountOrNull, parsePercentOrNull } = await import('@/domain')
+  const labels = formData.getAll(`${prefix}_label`).map(String)
+  const amounts = formData.getAll(`${prefix}_amount`).map(String)
+  const lines: { label: string; cents?: number | null; percentBasisPoints?: number | null }[] = []
+  const problems: string[] = []
+  labels.forEach((label, i) => {
+    const raw = (amounts[i] ?? '').trim()
+    if (!label.trim() && !raw) return
+    const name = label.trim() || 'Other'
+    if (raw.endsWith('%')) {
+      const bp = parsePercentOrNull(raw)
+      if (bp === null) problems.push(`"${raw}" is not a percent.`)
+      else lines.push({ label: name, percentBasisPoints: bp })
+    } else {
+      const cents = parseAmountOrNull(raw)
+      if (cents === null) problems.push(`"${name}" needs an amount, like 830.54, or a percent, like 6%.`)
+      else lines.push({ label: name, cents })
+    }
+  })
+  return { lines, problems }
+}
+
+export async function saveIncomeSourceAction(formData: FormData): Promise<void> {
+  const { parseAmountOrNull, parsePercentOrNull, isFrequency } = await import('@/domain')
+  const id = String(formData.get('id') ?? '') || undefined
+  const back = id ? `/income#source-${id}` : '/income'
+  const pretax = await paystubLines(formData, 'pretax')
+  const taxes = await paystubLines(formData, 'tax')
+  const startedOn = String(formData.get('started_on') ?? '').trim()
+  const shareText = String(formData.get('spending_share') ?? '').trim()
+  const share = shareText === '' ? 2000 : parsePercentOrNull(shareText)
+  const problem =
+    [...pretax.problems, ...taxes.problems][0] ??
+    (startedOn && !DATE.test(startedOn) ? 'Give the start date as a date.' : null) ??
+    (share === null ? 'The spending share is a percent, like 20.' : null)
+  if (problem) backWith(back, { error: problem })
+  const money = (field: string) => parseAmountOrNull(String(formData.get(field) ?? ''))
+  const frequency = String(formData.get('frequency') ?? '')
+  const names = namesFrom(String(formData.get('simplifi_names') ?? ''))
+  await thenBack(back, async (engine) => {
+    const saved = await engine.saveIncomeSource(
+      {
+        person: String(formData.get('person') ?? ''),
+        name: String(formData.get('name') ?? ''),
+        frequency: isFrequency(frequency) ? frequency : 'biweekly',
+        startedOn: startedOn || null,
+        annualSalaryCents: money('annual_salary'),
+        grossPerCheckCents: money('gross_per_check'),
+        pretax: pretax.lines,
+        taxes: taxes.lines,
+        netPerCheckCents: money('net_per_check'),
+        spendingShareBasisPoints: share ?? 2000,
+      },
+      id,
+    )
+    if (id || names.length > 0) await engine.setSimplifiNames('income', saved, names)
+  })
+}
+
+export async function endIncomeSourceAction(formData: FormData): Promise<void> {
+  await thenBack('/income', (engine) => engine.endIncomeSource(String(formData.get('id'))))
+}
+
+export async function addIncomePaymentAction(formData: FormData): Promise<void> {
+  const { parseAmountOrNull } = await import('@/domain')
+  const sourceId = String(formData.get('income_source_id'))
+  const back = `/income#source-${sourceId}`
+  const paidOn = String(formData.get('paid_on') ?? '').trim()
+  if (!DATE.test(paidOn)) backWith(back, { error: 'Give the day it landed.' })
+  await thenBack(back, async (engine) => {
+    await engine.addIncomePayment({
+      incomeSourceId: sourceId,
+      paidOn,
+      landedCents: parseAmountOrNull(String(formData.get('landed') ?? '')) ?? 0,
+      pretaxEstimateCents: parseAmountOrNull(String(formData.get('pretax_estimate') ?? '')),
+      note: String(formData.get('note') ?? ''),
+    })
+  })
+}
+
+export async function removeIncomePaymentAction(formData: FormData): Promise<void> {
+  await thenBack(`/income#source-${String(formData.get('income_source_id'))}`, (engine) =>
+    engine.removeIncomePayment(String(formData.get('id'))),
+  )
+}

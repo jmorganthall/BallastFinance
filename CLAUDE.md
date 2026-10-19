@@ -39,7 +39,7 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -512,6 +512,30 @@ principles, and they are non-negotiable.
   `timeline_start: { before, after }` beside them, each side a
   `TimelineStartRecord`. On screen the question is "Saving since" with three
   answers (`SavingSinceFields`, at commit and on the part's edit form).
+- **Income and the recurring list are intake for now** (PRD §14, D52, rev
+  102). What the figures are used for (the In/Out gap, what is left over,
+  anything feeding Share out) is not decided yet, so nothing reads them but
+  their own two screens. `src/domain/recurring.ts`: `parseSimplifiRecurring`
+  reads Simplifi's recurring page pasted as text (name, `Next:`, account,
+  account type, category, kind, amount, frequency; Simplifi's "Yearly" is
+  never read, because it does not match amount x frequency), `diffSimplifiPaste`
+  says what a paste changes, and `recurringView` links each row and checks it.
+  A paste is held in setting `simplifi_paste` and shown before it is kept
+  (`Engine.keepSimplifiPaste`); a row gone from Simplifi is ended only when a
+  person ticks it, and a paste never touches an item added by hand. Simplifi's
+  fields are read-only: the name is the key to the next paste. A reserve
+  account, a debt and an income source carry `simplifi_names` (migration
+  0021, "Known in Simplifi as"); a row with one of them is linked, the figure
+  is Ballast's (the confirmed transfer from the position, `monthlyPaymentCents`,
+  the take-home), and a difference is flagged, never corrected. A debt is
+  compared on Simplifi's usual amount, never its Next amount (Simplifi assumes
+  a card is paid in full). `src/domain/income.ts` follows the household's
+  income sheet: paystub lines per check (dollars, or a percent of the check
+  rounded to the cent as payroll does) give the take-home, every column is
+  the year divided down and rounded down, and the bonus log's yearly figure is
+  the estimates before tax / days since the job started x 365. There is no
+  tax engine (D10). Every change is an `expense_changed`, `income_changed` or
+  `income_received` event.
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software. The trip planner's
   usual figures are a constant in `src/domain/trip.ts`, laid over by a
@@ -520,7 +544,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 789 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 820 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

@@ -148,6 +148,13 @@
       "when": 1791947060176,
       "tag": "0020_debt_entered_on",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1792374985922,
+      "tag": "0021_income_recurring",
+      "breakpoints": true
     }
   ]
 }

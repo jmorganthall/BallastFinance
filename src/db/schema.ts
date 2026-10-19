@@ -119,6 +119,13 @@ export const eventKindEnum = pgEnum('event_kind', [
    * that wakes today. No figure reads it: the money stays held.
    */
   'close_out_snoozed',
+  // Income and the recurring list (migration 0021, PRD §14 D52).
+  /** A recurring item added, changed, ended or pasted from Simplifi; or the Simplifi names of an account, debt or income source changed. */
+  'expense_changed',
+  /** An income source added, changed or ended. */
+  'income_changed',
+  /** A bonus or commission payment that landed, or one taken back off the log. */
+  'income_received',
 ])
 
 export const tripLineCategoryEnum = pgEnum('trip_line_category', [
@@ -165,6 +172,16 @@ export const tripTaskKindEnum = pgEnum('trip_task_kind', ['book', 'pay', 'buy', 
  */
 export const confirmationSourceEnum = pgEnum('confirmation_source', ['manual', 'feed'])
 export const weatherHorizonEnum = pgEnum('weather_horizon', ['forecast', 'subseasonal', 'normal'])
+/** How often money comes or goes (PRD §14, D52). Each is a whole number of times a year. */
+export const frequencyEnum = pgEnum('frequency', [
+  'weekly',
+  'biweekly',
+  'semimonthly',
+  'monthly',
+  'quarterly',
+  'semiannual',
+  'yearly',
+])
 
 export const households = pgTable('households', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -230,6 +247,12 @@ export const reserveAccounts = pgTable(
     /** Set only for an individual account; that user alone may write to it. */
     ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'restrict' }),
     active: boolean('active').notNull().default(true),
+    /**
+     * The names Simplifi knows this by in its recurring list (PRD D52). A
+     * pasted row with one of them is linked here, and Ballast's figure is the
+     * one that counts.
+     */
+    simplifiNames: text('simplifi_names').array().notNull().default(sql`'{}'::text[]`),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -397,6 +420,12 @@ export const debts = pgTable(
     state: debtStateEnum('state').notNull().default('open'),
     /** The home or vehicle this debt is secured on (PRD §15). Removing the asset unlinks it. */
     assetId: uuid('asset_id').references(() => assets.id, { onDelete: 'set null' }),
+    /**
+     * The names Simplifi knows this by in its recurring list (PRD D52). A
+     * pasted row with one of them is linked here, and Ballast's figure is the
+     * one that counts.
+     */
+    simplifiNames: text('simplifi_names').array().notNull().default(sql`'{}'::text[]`),
   },
   (t) => [
     index('debts_household_idx').on(t.householdId, t.state),
@@ -715,6 +744,111 @@ export const waitObservations = pgTable(
     uniqueIndex('wait_observations_key_idx').on(t.source, t.parkId, t.rideId, t.observedAt),
     index('wait_observations_park_time_idx').on(t.parkName, t.observedAt),
     check('wait_observations_minutes_range', sql`${t.waitMinutes} is null or ${t.waitMinutes} between 0 and 1440`),
+  ],
+)
+
+/**
+ * The recurring list (PRD §14 object #8, D52): what comes round again, as
+ * Simplifi lists it or as a person added it. A Simplifi row's fields are
+ * Simplifi's and never edited here; its name is what ties it to the next
+ * paste. Ending an item sets `ended_on`; the row stays.
+ */
+export const recurringExpenses = pgTable(
+  'recurring_expenses',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** 'simplifi' (from a paste) or 'manual' (added here: "not in Simplifi"). */
+    source: text('source').notNull(),
+    /** 'out' or 'in': Simplifi lists paychecks among its recurring items. */
+    direction: text('direction').notNull().default('out'),
+    /** The usual amount, positive. */
+    amountCents: cents('amount_cents').notNull(),
+    frequency: frequencyEnum('frequency').notNull(),
+    nextAmountCents: cents('next_amount_cents'),
+    nextDate: date('next_date'),
+    /** Simplifi's account, its type, its category and kind (Bill, Subscription, Transfer, Income). */
+    account: text('account').notNull().default(''),
+    accountType: text('account_type').notNull().default(''),
+    category: text('category').notNull().default(''),
+    kind: text('kind').notNull().default(''),
+    endedOn: date('ended_on'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('recurring_expenses_household_idx').on(t.householdId),
+    check('recurring_expenses_source', sql`${t.source} in ('simplifi', 'manual')`),
+    check('recurring_expenses_direction', sql`${t.direction} in ('out', 'in')`),
+    check('recurring_expenses_amount_not_negative', sql`${t.amountCents} >= 0`),
+  ],
+)
+
+/**
+ * Where income comes from (PRD §14 object #7, D10, D52): one job's pay, as
+ * its paystub states it. Every line is a figure read off a real stub; the
+ * take-home and every column are worked out, never stored.
+ */
+export const incomeSources = pgTable(
+  'income_sources',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    /** Whose income, as a first name. */
+    person: text('person').notNull(),
+    name: text('name').notNull(),
+    frequency: frequencyEnum('frequency').notNull(),
+    /** The day the job started: the bonus figure is per day since. */
+    startedOn: date('started_on'),
+    annualSalaryCents: cents('annual_salary_cents'),
+    /** As the stub says, when it differs from the salary divided down. */
+    grossPerCheckCents: cents('gross_per_check_cents'),
+    /** [{label, cents?, percent_basis_points?}] taken out before taxes. */
+    pretaxLines: jsonb('pretax_lines').notNull().default(sql`'[]'::jsonb`),
+    /** [{label, cents?, percent_basis_points?}] taxes and withholding. */
+    taxLines: jsonb('tax_lines').notNull().default(sql`'[]'::jsonb`),
+    /** Take-home per check, for a source given only that way. */
+    netPerCheckCents: cents('net_per_check_cents'),
+    /** Of each bonus, the share that goes to spending: basis points, 2000 = 20%. */
+    spendingShareBasisPoints: integer('spending_share_basis_points').notNull().default(2000),
+    state: text('state').notNull().default('active'),
+    simplifiNames: text('simplifi_names').array().notNull().default(sql`'{}'::text[]`),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('income_sources_household_idx').on(t.householdId),
+    check('income_sources_state', sql`${t.state} in ('active', 'ended')`),
+    check(
+      'income_sources_has_pay',
+      sql`${t.annualSalaryCents} is not null or ${t.grossPerCheckCents} is not null or ${t.netPerCheckCents} is not null`,
+    ),
+    check('income_sources_share_in_range', sql`${t.spendingShareBasisPoints} between 0 and 10000`),
+  ],
+)
+
+/** A bonus or commission payment that landed (PRD D11): the log the bonus figure is worked out from. */
+export const incomePayments = pgTable(
+  'income_payments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    incomeSourceId: uuid('income_source_id')
+      .notNull()
+      .references(() => incomeSources.id, { onDelete: 'restrict' }),
+    paidOn: date('paid_on').notNull(),
+    landedCents: cents('landed_cents').notNull(),
+    pretaxEstimateCents: cents('pretax_estimate_cents'),
+    note: text('note').notNull().default(''),
+  },
+  (t) => [
+    index('income_payments_source_idx').on(t.householdId, t.incomeSourceId),
+    check('income_payments_landed_not_negative', sql`${t.landedCents} >= 0`),
   ],
 )
 
