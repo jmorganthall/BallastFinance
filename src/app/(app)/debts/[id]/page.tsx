@@ -17,6 +17,7 @@ import { notFound } from 'next/navigation'
 import { requireEngine } from '@/server/session'
 import { Card, Hint, humanDate, Money, PageHeader, Pill, When } from '@/components/ui'
 import { BalanceChart, PaymentSplitChart } from '@/components/debt-charts'
+import { setSimplifiNamesAction } from '@/server/actions'
 import {
   debtStatusLabel,
   debtStatusLine,
@@ -57,16 +58,18 @@ export default async function DebtPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ extra?: string; once?: string }>
+  searchParams: Promise<{ extra?: string; once?: string; saved?: string; error?: string }>
 }) {
-  const [{ id }, { extra, once }] = await Promise.all([params, searchParams])
+  const [{ id }, { extra, once, saved, error }] = await Promise.all([params, searchParams])
   const { engine } = await requireEngine()
-  const [debts, debtState, ladder, history] = await Promise.all([
+  const [debts, debtState, ladder, history, targets] = await Promise.all([
     engine.listDebts(),
     engine.debtStatuses(),
     engine.debtLadder(),
     engine.debtHistory(id),
+    engine.simplifiTargets(),
   ])
+  const simplifiNames = targets.find((t) => t.kind === 'debt' && t.id === id)?.simplifiNames ?? []
   const debt = debts.find((d) => d.id === id)
   if (!debt) notFound()
   const today = engine.today()
@@ -317,6 +320,27 @@ export default async function DebtPage({
       ) : null}
 
       {/* What has happened to it. */}
+      {/* The payment's name in Simplifi's recurring list (D52): its figure is then checked against this debt's. */}
+      <Card className="mb-4">
+        <form action={setSimplifiNamesAction} className="flex items-end gap-2">
+          <input type="hidden" name="target" value={`debt:${debt.id}`} />
+          <input type="hidden" name="back" value={`/debts/${debt.id}`} />
+          <label className="flex-1 text-sm font-medium">
+            Known in Simplifi as
+            <input
+              name="names"
+              defaultValue={simplifiNames.join(', ')}
+              placeholder="The payment's name in Simplifi"
+              className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base font-normal text-[var(--color-ink)]"
+            />
+          </label>
+          <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium">
+            Save
+          </button>
+        </form>
+        {error ? <p className="mt-2 text-sm text-[var(--color-behind)]">{error}</p> : saved ? <p className="mt-2 text-sm text-[var(--color-ahead)]">Saved.</p> : null}
+      </Card>
+
       <section className="mb-4">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
           History

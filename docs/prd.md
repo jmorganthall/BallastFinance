@@ -50,7 +50,7 @@ repo still has to know them. Everything else: read the document.
 | B | Check-ins, drift, close-out, instructions, n8n notifications, weekly digest | Built |
 | C | Simulate → commit, what-if overlay, Allocate screen | Built |
 | D | Debt inventory, scoring + slider, ladder, projections, lump-sum optimizer | Built |
-| E | Income and recurring expenses (§14) | Specified, not built |
+| E | Income and recurring expenses (§14). D52 (PRD rev 102) builds the intake first: the Simplifi paste with "Known in Simplifi as" links, and income from paystub lines with the bonus log. The In/Out gap and what feeds Share out are not decided yet | Intake built |
 | F | Equity and next home: homes and vehicles, weekly mortgage rate, "What could we buy?" (§15, PRD rev 26) | Built |
 | Trip-A/B | Trip planner, Disney first: trips, ways to do it, the usual figures, the drive and gas-price fetches, "Add to Plans" (§16, PRD rev 35) | Built |
 | Trip-C | Favourite dining list (§16) | Not built |

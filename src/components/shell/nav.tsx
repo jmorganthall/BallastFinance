@@ -34,6 +34,8 @@ export const EVERY_WEEK_ITEMS: readonly NavItem[] = [
 
 /** Opened now and then: behind the More tab on a phone, the second group in the sidebar. */
 export const MORE_ITEMS: readonly NavItem[] = [
+  { href: '/income', label: 'Income', icon: 'income' },
+  { href: '/recurring', label: 'Recurring', icon: 'recurring' },
   { href: '/trips', label: 'Trips', icon: 'trips' },
   { href: '/debts/equity', label: 'What could we buy?', icon: 'house' },
   { href: '/settings', label: 'Settings', icon: 'settings' },
@@ -48,6 +50,10 @@ const ICONS = {
   share: 'M12 3v12M8 11l4 4 4-4M5 21h14',
   debts: 'M3 7h18v10H3zM3 11h18M7 15h3',
   plans: 'M4 4h11l5 5v11H4zM15 4v5h5M8 13h8M8 17h5',
+  // A banknote.
+  income: 'M3 7h18v10H3zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 10v4M18 10v4',
+  // Two arrows chasing round.
+  recurring: 'M17 2l4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4M21 13v2a3 3 0 0 1-3 3H3',
   // A suitcase.
   trips: 'M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M4 7h16v12H4zM8 7v12M16 7v12',
   // A house.

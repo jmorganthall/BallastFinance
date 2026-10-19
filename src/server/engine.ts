@@ -26,6 +26,9 @@ import {
   parkHours as parkHoursTable,
   parkWeather as parkWeatherTable,
   waitObservations as waitObservationsTable,
+  recurringExpenses as recurringExpensesTable,
+  incomeSources as incomeSourcesTable,
+  incomePayments as incomePaymentsTable,
   schoolDaysOff as schoolDaysOffTable,
   tripDays as tripDaysTable,
   tripLines as tripLinesTable,
@@ -267,6 +270,30 @@ import {
   type WaitObservation,
   type WaitParkNames,
   type WeatherHorizon,
+} from '@/domain'
+import {
+  cleanSimplifiNames,
+  diffSimplifiPaste,
+  householdIncome,
+  incomeSourceProblem,
+  isFrequency,
+  monthlyPaymentCents,
+  paycheckOf,
+  parseSimplifiRecurring,
+  recurringView,
+  type Direction,
+  type Frequency,
+  type HouseholdIncome,
+  type IncomePayment,
+  type IncomeSource,
+  type LinkKind,
+  type PasteDiff,
+  type PaystubLine,
+  type RecurringItem,
+  type RecurringView,
+  type SimplifiPaste,
+  type SimplifiRow,
+  type SimplifiTarget,
 } from '@/domain'
 import { fetchSchoolCalendarIcal, pullCrowdCalendar, pullDvcListings } from '@/server/trip-fetch'
 import {
@@ -4854,6 +4881,410 @@ export class Engine {
     })
   }
 
+
+  // ---------------------------------------------------------------- the recurring list (PRD §14, D52)
+
+  /** Every recurring item, live and ended. */
+  async listRecurring(): Promise<RecurringItem[]> {
+    const rows = await this.db
+      .select()
+      .from(recurringExpensesTable)
+      .where(eq(recurringExpensesTable.householdId, this.householdId))
+    return rows.map(toRecurringItem).sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /** What a Simplifi row can be known as: live accounts, open debts, live income sources, each with its names. */
+  async simplifiTargets(): Promise<SimplifiTarget[]> {
+    const [accounts, debts, sources] = await Promise.all([
+      this.db.select().from(reserveAccountsTable).where(eq(reserveAccountsTable.householdId, this.householdId)),
+      this.db.select().from(debtsTable).where(eq(debtsTable.householdId, this.householdId)),
+      this.listIncomeSources(),
+    ])
+    return [
+      ...accounts.filter((a) => a.active).map((a) => ({ kind: 'account' as const, id: a.id, name: a.name, simplifiNames: a.simplifiNames })),
+      ...debts.filter((d) => d.state === 'open').map((d) => ({ kind: 'debt' as const, id: d.id, name: d.name, simplifiNames: d.simplifiNames })),
+      ...sources.filter((s) => s.state === 'active').map((s) => ({ kind: 'income' as const, id: s.id, name: `${s.person}: ${s.name}`, simplifiNames: s.simplifiNames })),
+    ]
+  }
+
+  /**
+   * Set the names Simplifi knows an account, debt or income source by. A name
+   * another one already has is refused. An individual account's names are
+   * its owner's to change, like everything else written to it.
+   */
+  async setSimplifiNames(kind: LinkKind, id: Id, input: readonly string[]): Promise<void> {
+    const targets = await this.simplifiTargets()
+    const target = targets.find((t) => t.kind === kind && t.id === id)
+    if (!target) throw new EngineError('Nothing to link that name to in this household')
+    if (kind === 'account') await this.assertCanWriteAccount(id)
+    const cleaned = cleanSimplifiNames(input, { kind, id }, targets)
+    if (!cleaned.ok) throw new EngineError(cleaned.problem)
+    await this.db.transaction(async (tx) => {
+      await this.writeSimplifiNames(tx, target, cleaned.names)
+    })
+  }
+
+  private async writeSimplifiNames(tx: Tx, target: SimplifiTarget, names: string[]): Promise<void> {
+    const where = (table: typeof reserveAccountsTable | typeof debtsTable | typeof incomeSourcesTable) =>
+      and(eq(table.id, target.id), eq(table.householdId, this.householdId))
+    if (target.kind === 'account') {
+      await tx.update(reserveAccountsTable).set({ simplifiNames: names }).where(where(reserveAccountsTable))
+    } else if (target.kind === 'debt') {
+      await tx.update(debtsTable).set({ simplifiNames: names }).where(where(debtsTable))
+    } else {
+      await tx.update(incomeSourcesTable).set({ simplifiNames: names }).where(where(incomeSourcesTable))
+    }
+    await this.recordEvent(tx, 'expense_changed', {
+      action: 'simplifi_names',
+      target: { kind: target.kind, id: target.id },
+      before: target.simplifiNames,
+      after: names,
+    })
+  }
+
+  /**
+   * The live list with its links and checks, every figure from the domain:
+   * an account's confirmed transfer from the one position (D35), a debt's
+   * monthly payment, a source's take-home.
+   */
+  async recurringView(): Promise<RecurringView & { lastPastedOn: CivilDate | null }> {
+    const today = this.today()
+    const [items, targets, p, debts, sources, pasted] = await Promise.all([
+      this.listRecurring(),
+      this.simplifiTargets(),
+      this.position(),
+      this.listDebts(),
+      this.listIncomeSources(),
+      this.db
+        .select({ on: sql<string | null>`max(${events.occurredAt})` })
+        .from(events)
+        .where(
+          and(
+            eq(events.householdId, this.householdId),
+            eq(events.kind, 'expense_changed'),
+            sql`${events.payload}->>'action' = 'pasted'`,
+          ),
+        ),
+    ])
+    const view = recurringView(items, targets, {
+      accountPerWeekCents: new Map(p.accounts.map((a) => [a.account.id, a.bank?.perWeekCents ?? null])),
+      debtPerMonthCents: new Map(debts.filter((d) => d.state !== 'paid_off').map((d) => [d.id, monthlyPaymentCents(d, today)])),
+      incomePerCheck: new Map(sources.map((s) => [s.id, { cents: paycheckOf(s).netCents, frequency: s.frequency }])),
+    })
+    return { ...view, lastPastedOn: (pasted[0]?.on as CivilDate | null) ?? null }
+  }
+
+  /** Read a paste and hold it to be looked at; nothing is kept yet. */
+  async stashSimplifiPaste(text: string): Promise<SimplifiPaste> {
+    const paste = parseSimplifiRecurring(text)
+    await this.putSetting('simplifi_paste', paste.rows.length > 0 || paste.problems.length > 0 ? paste : false)
+    return paste
+  }
+
+  async discardSimplifiPaste(): Promise<void> {
+    await this.putSetting('simplifi_paste', false)
+  }
+
+  /** The paste waiting to be looked at, with what it would change; null when there is none. */
+  async pendingSimplifiPaste(): Promise<{ paste: SimplifiPaste; diff: PasteDiff } | null> {
+    const held = await this.getSetting<SimplifiPaste | false>('simplifi_paste', false)
+    if (!held || !Array.isArray(held.rows)) return null
+    return { paste: held, diff: diffSimplifiPaste(await this.listRecurring(), held.rows) }
+  }
+
+  /**
+   * Keep the paste. New rows are added, changed rows take Simplifi's fields,
+   * every row takes its next date and amount; a row gone from the paste is
+   * ended only when its id is in `endIds` (a person confirmed it). `links`
+   * gives a new or unlinked row's name to an account, debt or income source.
+   * The difference is worked out again here from what is stored, so it is
+   * always against the list as it stands.
+   */
+  async keepSimplifiPaste(input: {
+    endIds: readonly Id[]
+    links?: readonly { name: string; kind: LinkKind; id: Id }[]
+  }): Promise<{ added: number; changed: number; ended: number }> {
+    const pending = await this.pendingSimplifiPaste()
+    if (!pending) throw new EngineError('There is no paste waiting. Paste the list again.')
+    const { diff } = pending
+    const today = this.today()
+    const endIds = new Set(input.endIds)
+    const targets = await this.simplifiTargets()
+
+    // Links first, refused before anything is written if a name is taken.
+    const namesFor = new Map<string, { target: SimplifiTarget; names: string[] }>()
+    for (const link of input.links ?? []) {
+      const target = targets.find((t) => t.kind === link.kind && t.id === link.id)
+      if (!target) throw new EngineError('Nothing to link that name to in this household')
+      if (link.kind === 'account') await this.assertCanWriteAccount(link.id)
+      const key = `${link.kind}:${link.id}`
+      const entry = namesFor.get(key) ?? { target, names: [...target.simplifiNames] }
+      entry.names.push(link.name)
+      namesFor.set(key, entry)
+    }
+    for (const { target, names } of namesFor.values()) {
+      const cleaned = cleanSimplifiNames(names, target, targets)
+      if (!cleaned.ok) throw new EngineError(cleaned.problem)
+      namesFor.get(`${target.kind}:${target.id}`)!.names = cleaned.names
+    }
+
+    const ended = diff.gone.filter((item) => endIds.has(item.id))
+    await this.db.transaction(async (tx) => {
+      for (const row of diff.added) {
+        await tx.insert(recurringExpensesTable).values({ householdId: this.householdId, source: 'simplifi', ...rowColumns(row) })
+      }
+      for (const { item, row } of [...diff.changed, ...diff.unchanged]) {
+        await tx
+          .update(recurringExpensesTable)
+          .set(rowColumns(row))
+          .where(and(eq(recurringExpensesTable.id, item.id), eq(recurringExpensesTable.householdId, this.householdId)))
+      }
+      for (const item of ended) {
+        await tx
+          .update(recurringExpensesTable)
+          .set({ endedOn: today })
+          .where(and(eq(recurringExpensesTable.id, item.id), eq(recurringExpensesTable.householdId, this.householdId)))
+      }
+      for (const { target, names } of namesFor.values()) await this.writeSimplifiNames(tx, target, names)
+      await this.recordEvent(tx, 'expense_changed', {
+        action: 'pasted',
+        added: diff.added.map((r) => r.name),
+        changed: diff.changed.map((c) => ({
+          recurring_expense_id: c.item.id,
+          name: c.item.name,
+          before: Object.fromEntries(c.fields.map((f) => [f, c.item[f]])),
+          after: Object.fromEntries(c.fields.map((f) => [f, c.row[f]])),
+        })),
+        ended: ended.map((i) => ({ recurring_expense_id: i.id, name: i.name })),
+      })
+    })
+    await this.discardSimplifiPaste()
+    return { added: diff.added.length, changed: diff.changed.length, ended: ended.length }
+  }
+
+  /** Add an item Simplifi does not have ("not in Simplifi"). */
+  async addRecurring(input: { name: string; amountCents: Cents; frequency: Frequency; direction?: Direction }): Promise<Id> {
+    const name = input.name.trim()
+    if (!name) throw new EngineError('Give it a name.')
+    if (!(input.amountCents > 0)) throw new EngineError('The amount has to be above zero.')
+    if (!isFrequency(input.frequency)) throw new EngineError('Say how often.')
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(recurringExpensesTable)
+        .values({
+          householdId: this.householdId,
+          source: 'manual',
+          name,
+          direction: input.direction ?? 'out',
+          amountCents: input.amountCents,
+          frequency: input.frequency,
+        })
+        .returning({ id: recurringExpensesTable.id })
+      if (!row) throw new EngineError('Could not add it')
+      await this.recordEvent(tx, 'expense_changed', { action: 'added', recurring_expense_id: row.id, name })
+      return row.id
+    })
+  }
+
+  /** Change an item added here. A Simplifi item is Simplifi's: change it there and paste again. */
+  async updateRecurring(id: Id, patch: { name: string; amountCents: Cents; frequency: Frequency }): Promise<void> {
+    const item = await this.manualRecurring(id)
+    const name = patch.name.trim()
+    if (!name) throw new EngineError('Give it a name.')
+    if (!(patch.amountCents > 0)) throw new EngineError('The amount has to be above zero.')
+    if (!isFrequency(patch.frequency)) throw new EngineError('Say how often.')
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(recurringExpensesTable)
+        .set({ name, amountCents: patch.amountCents, frequency: patch.frequency })
+        .where(and(eq(recurringExpensesTable.id, id), eq(recurringExpensesTable.householdId, this.householdId)))
+      await this.recordEvent(tx, 'expense_changed', {
+        action: 'changed',
+        recurring_expense_id: id,
+        before: { name: item.name, amount_cents: item.amountCents, frequency: item.frequency },
+        after: { name, amount_cents: patch.amountCents, frequency: patch.frequency },
+      })
+    })
+  }
+
+  /** End an item added here. Its row stays, with the day it ended. */
+  async endRecurring(id: Id): Promise<void> {
+    const item = await this.manualRecurring(id)
+    if (item.endedOn) return
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(recurringExpensesTable)
+        .set({ endedOn: this.today() })
+        .where(and(eq(recurringExpensesTable.id, id), eq(recurringExpensesTable.householdId, this.householdId)))
+      await this.recordEvent(tx, 'expense_changed', { action: 'ended', recurring_expense_id: id, name: item.name })
+    })
+  }
+
+  private async manualRecurring(id: Id): Promise<RecurringItem> {
+    const item = (await this.listRecurring()).find((i) => i.id === id)
+    if (!item) throw new EngineError('No such item in this household')
+    if (item.source !== 'manual') {
+      throw new EngineError(`"${item.name}" comes from Simplifi. Change it there and paste the list again.`)
+    }
+    return item
+  }
+
+  // ---------------------------------------------------------------- income (PRD §14, D10-D11, D52)
+
+  async listIncomeSources(): Promise<IncomeSource[]> {
+    const rows = await this.db
+      .select()
+      .from(incomeSourcesTable)
+      .where(eq(incomeSourcesTable.householdId, this.householdId))
+    return rows.map(toIncomeSource).sort((a, b) => a.person.localeCompare(b.person) || a.name.localeCompare(b.name))
+  }
+
+  async listIncomePayments(): Promise<IncomePayment[]> {
+    const rows = await this.db
+      .select()
+      .from(incomePaymentsTable)
+      .where(eq(incomePaymentsTable.householdId, this.householdId))
+    return rows.map((r) => ({
+      id: r.id,
+      incomeSourceId: r.incomeSourceId,
+      paidOn: r.paidOn as CivilDate,
+      landedCents: r.landedCents,
+      pretaxEstimateCents: r.pretaxEstimateCents,
+      note: r.note,
+    }))
+  }
+
+  /** Every live source with its paycheck and columns, by person, and the household's take-home. */
+  async householdIncome(): Promise<HouseholdIncome> {
+    const [sources, payments] = await Promise.all([this.listIncomeSources(), this.listIncomePayments()])
+    return householdIncome(sources, payments, this.today())
+  }
+
+  /** Add a source, or change one when `id` is given. Every change is an `income_changed` event with before and after. */
+  async saveIncomeSource(input: IncomeSourceInput, id?: Id): Promise<Id> {
+    const problem = incomeSourceProblem(input)
+    if (problem) throw new EngineError(problem)
+    if (!isFrequency(input.frequency)) throw new EngineError('Say how often pay lands.')
+    const values = {
+      person: input.person.trim(),
+      name: input.name.trim(),
+      frequency: input.frequency,
+      startedOn: input.startedOn,
+      annualSalaryCents: input.annualSalaryCents,
+      grossPerCheckCents: input.grossPerCheckCents,
+      pretaxLines: input.pretax.map(lineToJson),
+      taxLines: input.taxes.map(lineToJson),
+      netPerCheckCents: input.netPerCheckCents,
+      spendingShareBasisPoints: input.spendingShareBasisPoints,
+    }
+    return this.db.transaction(async (tx) => {
+      if (!id) {
+        const [row] = await tx
+          .insert(incomeSourcesTable)
+          .values({ householdId: this.householdId, ...values })
+          .returning({ id: incomeSourcesTable.id })
+        if (!row) throw new EngineError('Could not add the income')
+        await this.recordEvent(tx, 'income_changed', { action: 'added', income_source_id: row.id, after: values })
+        return row.id
+      }
+      const [before] = await tx
+        .select()
+        .from(incomeSourcesTable)
+        .where(and(eq(incomeSourcesTable.id, id), eq(incomeSourcesTable.householdId, this.householdId)))
+      if (!before) throw new EngineError('No such income in this household')
+      await tx.update(incomeSourcesTable).set(values).where(eq(incomeSourcesTable.id, id))
+      const { householdId: _h, createdAt: _c, simplifiNames: _n, ...was } = before
+      await this.recordEvent(tx, 'income_changed', { action: 'changed', income_source_id: id, before: was, after: values })
+      return id
+    })
+  }
+
+  /** A job that has ended. The row and its bonus log stay. */
+  async endIncomeSource(id: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .update(incomeSourcesTable)
+        .set({ state: 'ended' })
+        .where(and(eq(incomeSourcesTable.id, id), eq(incomeSourcesTable.householdId, this.householdId)))
+        .returning({ id: incomeSourcesTable.id })
+      if (!row) throw new EngineError('No such income in this household')
+      await this.recordEvent(tx, 'income_changed', { action: 'ended', income_source_id: id })
+    })
+  }
+
+  /** Log a bonus or commission payment that landed (D11). */
+  async addIncomePayment(input: {
+    incomeSourceId: Id
+    paidOn: CivilDate
+    landedCents: Cents
+    pretaxEstimateCents: Cents | null
+    note?: string
+  }): Promise<Id> {
+    if (!(input.landedCents > 0)) throw new EngineError('Say how much landed.')
+    if (input.pretaxEstimateCents !== null && input.pretaxEstimateCents < 0) {
+      throw new EngineError('The estimate before tax cannot be below zero.')
+    }
+    if (input.paidOn > this.today()) throw new EngineError('Log a payment once it has landed.')
+    const source = (await this.listIncomeSources()).find((s) => s.id === input.incomeSourceId)
+    if (!source) throw new EngineError('No such income in this household')
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(incomePaymentsTable)
+        .values({
+          householdId: this.householdId,
+          incomeSourceId: input.incomeSourceId,
+          paidOn: input.paidOn,
+          landedCents: input.landedCents,
+          pretaxEstimateCents: input.pretaxEstimateCents,
+          note: input.note?.trim() ?? '',
+        })
+        .returning({ id: incomePaymentsTable.id })
+      if (!row) throw new EngineError('Could not log the payment')
+      await this.recordEvent(tx, 'income_received', {
+        income_payment_id: row.id,
+        income_source_id: input.incomeSourceId,
+        paid_on: input.paidOn,
+        landed_cents: input.landedCents,
+        pretax_estimate_cents: input.pretaxEstimateCents,
+      })
+      return row.id
+    })
+  }
+
+  /** Take a payment off the log (entered by mistake). The event log keeps what it was. */
+  async removeIncomePayment(id: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .delete(incomePaymentsTable)
+        .where(and(eq(incomePaymentsTable.id, id), eq(incomePaymentsTable.householdId, this.householdId)))
+        .returning()
+      if (!row) throw new EngineError('No such payment in this household')
+      await this.recordEvent(tx, 'income_received', {
+        removed: true,
+        income_payment_id: row.id,
+        income_source_id: row.incomeSourceId,
+        paid_on: row.paidOn,
+        landed_cents: row.landedCents,
+        pretax_estimate_cents: row.pretaxEstimateCents,
+      })
+    })
+  }
+
+  private async recordEvent(
+    tx: Tx,
+    kind: 'expense_changed' | 'income_changed' | 'income_received',
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    await tx.insert(events).values({
+      householdId: this.householdId,
+      kind,
+      occurredAt: this.today(),
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload,
+    })
+  }
+
   /** Settings are versioned by effective_from; a change adds a row, never edits one. */
   async putSetting(key: string, value: unknown): Promise<void> {
     await this.db
@@ -4868,6 +5299,85 @@ export class Engine {
         target: [settingsTable.householdId, settingsTable.key, settingsTable.effectiveFrom],
         set: { value },
       })
+  }
+}
+
+/** What a person gives for an income source; the engine checks it and records it. */
+export interface IncomeSourceInput {
+  person: string
+  name: string
+  frequency: Frequency
+  startedOn: CivilDate | null
+  annualSalaryCents: Cents | null
+  grossPerCheckCents: Cents | null
+  pretax: PaystubLine[]
+  taxes: PaystubLine[]
+  netPerCheckCents: Cents | null
+  spendingShareBasisPoints: number
+}
+
+function lineToJson(line: PaystubLine): { label: string; cents: Cents | null; percent_basis_points: number | null } {
+  return { label: line.label.trim(), cents: line.cents ?? null, percent_basis_points: line.percentBasisPoints ?? null }
+}
+
+function linesFromJson(raw: unknown): PaystubLine[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((l: { label?: unknown; cents?: unknown; percent_basis_points?: unknown }) => ({
+    label: typeof l.label === 'string' ? l.label : '',
+    cents: typeof l.cents === 'number' ? l.cents : null,
+    percentBasisPoints: typeof l.percent_basis_points === 'number' ? l.percent_basis_points : null,
+  }))
+}
+
+function toIncomeSource(r: typeof incomeSourcesTable.$inferSelect): IncomeSource {
+  return {
+    id: r.id,
+    person: r.person,
+    name: r.name,
+    frequency: r.frequency,
+    startedOn: (r.startedOn as CivilDate | null) ?? null,
+    annualSalaryCents: r.annualSalaryCents,
+    grossPerCheckCents: r.grossPerCheckCents,
+    pretax: linesFromJson(r.pretaxLines),
+    taxes: linesFromJson(r.taxLines),
+    netPerCheckCents: r.netPerCheckCents,
+    spendingShareBasisPoints: r.spendingShareBasisPoints,
+    state: r.state === 'ended' ? 'ended' : 'active',
+    simplifiNames: r.simplifiNames,
+  }
+}
+
+function toRecurringItem(r: typeof recurringExpensesTable.$inferSelect): RecurringItem {
+  return {
+    id: r.id,
+    name: r.name,
+    source: r.source === 'manual' ? 'manual' : 'simplifi',
+    direction: r.direction === 'in' ? 'in' : 'out',
+    amountCents: r.amountCents,
+    frequency: r.frequency,
+    nextAmountCents: r.nextAmountCents,
+    nextDate: (r.nextDate as CivilDate | null) ?? null,
+    account: r.account,
+    accountType: r.accountType,
+    category: r.category,
+    kind: r.kind,
+    endedOn: (r.endedOn as CivilDate | null) ?? null,
+  }
+}
+
+/** A pasted row's columns, as written on an add or over a live item. */
+function rowColumns(row: SimplifiRow) {
+  return {
+    name: row.name,
+    direction: row.direction,
+    amountCents: row.amountCents,
+    frequency: row.frequency,
+    nextAmountCents: row.nextAmountCents,
+    nextDate: row.nextDate,
+    account: row.account,
+    accountType: row.accountType,
+    category: row.category,
+    kind: row.kind,
   }
 }
 
