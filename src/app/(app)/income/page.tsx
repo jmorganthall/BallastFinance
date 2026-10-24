@@ -18,6 +18,7 @@ import {
   INCOME_COLUMNS,
   INCOME_COLUMN_WORDS,
   formatCents,
+  formatRate,
   type IncomeColumns,
   type LinkCheck,
   type SourceView,
@@ -115,12 +116,23 @@ function SourceCard({
             ))}
             {view.lines.afterPretax ? <SheetRow label="After taken out before taxes" cols={view.lines.afterPretax} strong /> : null}
             {view.lines.taxes.map((l, i) => (
-              <SheetRow key={`t${i}`} label={l.label} cols={l.cols} minus />
+              <SheetRow
+                key={`t${i}`}
+                label={paycheck.taxRateBasisPoints !== null && view.lines.taxes.length === 1 ? `${l.label} (${formatRate(paycheck.taxRateBasisPoints)})` : l.label}
+                cols={l.cols}
+                minus
+              />
             ))}
           </>
         ) : null}
         <SheetRow label="Take-home" cols={view.net} strong />
       </SheetTable>
+      {paycheck.taxRateBasisPoints !== null && source.netPerCheckCents !== null ? (
+        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+          Taxes and withholding take {formatRate(paycheck.taxRateBasisPoints)} of the pay left after the deductions,
+          worked out from the take-home on the stub.
+        </p>
+      ) : null}
 
       {check ? (
         <p className={`mt-3 text-sm ${check.differs ? 'text-[var(--color-caution)]' : 'text-[var(--color-ink-soft)]'}`}>
@@ -197,7 +209,7 @@ function SourceCard({
       <details className="mt-4 border-t border-[var(--color-line)] pt-3">
         <summary className="cursor-pointer text-sm underline">Change</summary>
         <div className="mt-3">
-          <SourceForm source={source} members={members} viewerId={viewerId} />
+          <SourceForm source={source} takeHomeCents={paycheck.netCents} members={members} viewerId={viewerId} />
           <form action={endIncomeSourceAction} className="mt-2">
             <input type="hidden" name="id" value={source.id} />
             <button type="submit" className="text-sm text-[var(--color-behind)] underline">

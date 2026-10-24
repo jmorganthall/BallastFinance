@@ -155,13 +155,13 @@ describeDb('the recurring list and income', () => {
       annualSalaryCents: 13_000_000,
       grossPerCheckCents: null,
       pretax: [{ label: '401k', percentBasisPoints: 600 }],
-      taxes: [{ label: 'Federal / State / SS', cents: 170_000 }],
-      netPerCheckCents: null,
+      taxes: [],
+      netPerCheckCents: 300_000,
       spendingShareBasisPoints: 2000,
     })
     await engine.setSimplifiNames('income', id, ['Acme Payroll'])
 
-    // $5,000 a check less $300 and $1,700 is $3,000; Simplifi says $2,000.
+    // $5,000 a check, $300 to the 401k, $3,000 home (so $1,700 of taxes); Simplifi says $2,000.
     let check = (await engine.recurringView()).checks.find((c) => c.target.id === id)!
     expect(check).toMatchObject({ differs: true, ballast: { cents: 300_000, frequency: 'biweekly' } })
 
@@ -175,8 +175,8 @@ describeDb('the recurring list and income', () => {
         annualSalaryCents: 13_000_000,
         grossPerCheckCents: null,
         pretax: [{ label: '401k', percentBasisPoints: 600 }],
-        taxes: [{ label: 'Federal / State / SS', cents: 270_000 }],
-        netPerCheckCents: null,
+        taxes: [],
+        netPerCheckCents: 200_000,
         spendingShareBasisPoints: 2000,
       },
       id,

@@ -25,7 +25,7 @@
  */
 
 import { toDayNumber, type CivilDate } from './dates'
-import type { Cents } from './money'
+import { formatCents, type Cents } from './money'
 import { PERIODS_PER_YEAR, type Frequency } from './recurring'
 import type { Id } from './types'
 
@@ -80,9 +80,15 @@ export interface Paycheck {
   grossCents: Cents | null
   pretax: PaycheckLine[]
   afterPretaxCents: Cents | null
+  /** What comes off between pay after deductions and take-home: one line, worked out from the take-home (D52). */
   taxes: PaycheckLine[]
   netCents: Cents
+  /** Taxes as a share of pay after deductions, in basis points (2893 = 28.93%); null with no gross. */
+  taxRateBasisPoints: number | null
 }
+
+/** The one tax line a stated take-home leaves. */
+export const TAXES_LABEL = 'Taxes and withholding'
 
 /** A percent line rounds to the nearest cent, as payroll does; a dollar line is as typed. */
 function lineCents(line: PaystubLine, grossCents: Cents): Cents {
@@ -98,21 +104,47 @@ export function grossPerCheckCents(source: Pick<IncomeSource, 'annualSalaryCents
 }
 
 /** One check, line by line. */
+/**
+ * One check, line by line. The take-home is a fact off the stub, and the
+ * taxes are what is left between pay after deductions and it: Ballast never
+ * works tax out from tax law (D10), it reads the rate off what was withheld,
+ * as the household's sheet does. A source saved before this, with its tax
+ * lines typed and no take-home, still works its take-home down from them.
+ */
 export function paycheckOf(source: IncomeSource): Paycheck {
   const gross = grossPerCheckCents(source)
   if (gross === null) {
-    return { grossCents: null, pretax: [], afterPretaxCents: null, taxes: [], netCents: source.netPerCheckCents ?? 0 }
+    return {
+      grossCents: null,
+      pretax: [],
+      afterPretaxCents: null,
+      taxes: [],
+      netCents: source.netPerCheckCents ?? 0,
+      taxRateBasisPoints: null,
+    }
   }
   const pretax = source.pretax.map((l) => ({ label: l.label, cents: lineCents(l, gross) }))
   const afterPretax = gross - pretax.reduce((s, l) => s + l.cents, 0)
-  const taxes = source.taxes.map((l) => ({ label: l.label, cents: lineCents(l, gross) }))
+  const taxes =
+    source.netPerCheckCents !== null
+      ? [{ label: TAXES_LABEL, cents: afterPretax - source.netPerCheckCents }]
+      : source.taxes.map((l) => ({ label: l.label, cents: lineCents(l, gross) }))
+  const taxCents = taxes.reduce((s, l) => s + l.cents, 0)
   return {
     grossCents: gross,
     pretax,
     afterPretaxCents: afterPretax,
     taxes,
-    netCents: afterPretax - taxes.reduce((s, l) => s + l.cents, 0),
+    netCents: afterPretax - taxCents,
+    taxRateBasisPoints: afterPretax > 0 ? Math.round((taxCents * 10000) / afterPretax) : null,
   }
+}
+
+/** "28.93%": a rate in basis points, as a person reads it. */
+export function formatRate(basisPoints: number): string {
+  const whole = Math.floor(Math.abs(basisPoints) / 100)
+  const frac = String(Math.abs(basisPoints) % 100).padStart(2, '0').replace(/0+$/, '')
+  return `${basisPoints < 0 ? '-' : ''}${whole}${frac ? `.${frac}` : ''}%`
 }
 
 /** The sheet's columns, in its order. */
@@ -289,17 +321,12 @@ export function memberFirstName(member: { displayName: string | null; email: str
 }
 
 /** Plain-words check of a source a person is saving, or null when it is fine. */
-export function incomeSourceProblem(
-  source: Pick<IncomeSource, 'person' | 'personUserId' | 'name' | 'annualSalaryCents' | 'grossPerCheckCents' | 'netPerCheckCents' | 'spendingShareBasisPoints' | 'pretax' | 'taxes'>,
-): string | null {
+export function incomeSourceProblem(source: Omit<IncomeSource, 'id' | 'state' | 'simplifiNames' | 'startedOn'>): string | null {
   if (source.personUserId === null && !source.person.trim()) {
     return 'Say whose income this is: pick one of us, or type their name.'
   }
   if (!source.name.trim()) return 'Give it a name, such as the employer.'
-  const hasGross = source.annualSalaryCents !== null || source.grossPerCheckCents !== null
-  if (!hasGross && source.netPerCheckCents === null) {
-    return 'Give the annual salary (with the paystub lines), or just the take-home per check.'
-  }
+  if (source.netPerCheckCents === null) return 'Give the take-home per check, as the stub says.'
   for (const v of [source.annualSalaryCents, source.grossPerCheckCents, source.netPerCheckCents]) {
     if (v !== null && v < 0) return 'Amounts cannot be below zero.'
   }
@@ -308,6 +335,10 @@ export function incomeSourceProblem(
   }
   if (source.spendingShareBasisPoints < 0 || source.spendingShareBasisPoints > 10000) {
     return 'The spending share is a percent from 0 to 100.'
+  }
+  const check = paycheckOf({ ...source, id: '', state: 'active', simplifiNames: [], startedOn: null })
+  if (check.afterPretaxCents !== null && check.taxes.some((l) => l.cents < 0)) {
+    return `The take-home is more than the pay left after the deductions taken out before taxes (${formatCents(check.afterPretaxCents)}). Check the gross and those lines against the stub.`
   }
   return null
 }

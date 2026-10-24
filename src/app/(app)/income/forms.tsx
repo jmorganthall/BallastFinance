@@ -46,7 +46,18 @@ function Problem({ state }: { state: IncomeFormState }) {
   ) : null
 }
 
-export function SourceForm({ source, members, viewerId }: { source?: IncomeSource; members: Member[]; viewerId: string }) {
+export function SourceForm({
+  source,
+  takeHomeCents,
+  members,
+  viewerId,
+}: {
+  source?: IncomeSource
+  /** The take-home as worked out now, for a source saved with its tax lines typed: filled in so a save keeps it. */
+  takeHomeCents?: number
+  members: Member[]
+  viewerId: string
+}) {
   const [state, formAction, pending] = useActionState(saveIncomeSourceAction, EMPTY)
   const { one, lines } = typed(state)
   // Editing: whoever it is now. Adding: the person signed in, if they are a member.
@@ -118,16 +129,20 @@ export function SourceForm({ source, members, viewerId }: { source?: IncomeSourc
         <PaystubLines prefix="pretax" initial={lines('pretax', (source?.pretax ?? []).map((l) => ({ label: l.label, amount: lineInput(l) })))} placeholder="Health insurance, 401k, HSA…" />
       </fieldset>
 
-      <fieldset>
-        <legend className="font-medium">Taxes, per check</legend>
-        <PaystubLines prefix="tax" initial={lines('tax', (source?.taxes ?? []).map((l) => ({ label: l.label, amount: lineInput(l) })))} placeholder="Federal, state, Social Security…" />
-      </fieldset>
-
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block font-medium">
-          Or just the take-home per check
-          <input name="net_per_check" inputMode="decimal" defaultValue={one('net_per_check', dollars(source?.netPerCheckCents))} className={`mt-1 ${small}`} />
-          <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">Only used when there is no salary.</span>
+          Take-home per check
+          <input
+            name="net_per_check"
+            required
+            inputMode="decimal"
+            defaultValue={one('net_per_check', dollars(source?.netPerCheckCents ?? takeHomeCents))}
+            className={`mt-1 ${small}`}
+          />
+          <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+            What lands in checking, off the stub. Ballast works the taxes out from it: whatever is left
+            after the deductions above.
+          </span>
         </label>
         <label className="block font-medium">
           Of each bonus, to spending
