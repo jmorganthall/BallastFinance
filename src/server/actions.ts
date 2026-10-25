@@ -1955,7 +1955,48 @@ export async function endRecurringAction(formData: FormData): Promise<void> {
   await thenBack('/recurring', (engine) => engine.endRecurring(String(formData.get('id'))))
 }
 
-/** Paystub lines typed as dollars ("830.54") or a percent of the check ("6%"); blank rows are skipped. */
+/** A form on Income: refused, it gets back what was posted and why, so nothing typed is lost. */
+export interface IncomeFormState {
+  error: string | null
+  values: Record<string, string[]>
+  attempt: number
+}
+
+function postedValues(formData: FormData): Record<string, string[]> {
+  const values: Record<string, string[]> = {}
+  for (const [key, value] of formData.entries()) {
+    if (key.startsWith('$') || typeof value !== 'string') continue
+    ;(values[key] ??= []).push(value)
+  }
+  return values
+}
+
+/** Run an engine call for a form on Income: back to the form with the reason if refused, else on to `back`. */
+async function onIncomeForm(
+  previous: IncomeFormState,
+  formData: FormData,
+  back: string,
+  run: (engine: Engine) => Promise<string | null>,
+): Promise<IncomeFormState> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  let error: string | null
+  try {
+    error = await run(engine)
+  } catch (e) {
+    if (!(e instanceof EngineError)) throw e
+    error = e.message
+  }
+  if (error) return { error, values: postedValues(formData), attempt: previous.attempt + 1 }
+  revalidatePath('/income')
+  backWith(back, { saved: '1' })
+}
+
+/**
+ * Paystub lines typed as dollars ("830.54") or a percent of the check ("6%").
+ * A line without an amount is dropped, whatever its label: not every line on
+ * a form applies to every stub.
+ */
 async function paystubLines(formData: FormData, prefix: 'pretax' | 'tax') {
   const { parseAmountOrNull, parsePercentOrNull } = await import('@/domain')
   const labels = formData.getAll(`${prefix}_label`).map(String)
@@ -1964,7 +2005,7 @@ async function paystubLines(formData: FormData, prefix: 'pretax' | 'tax') {
   const problems: string[] = []
   labels.forEach((label, i) => {
     const raw = (amounts[i] ?? '').trim()
-    if (!label.trim() && !raw) return
+    if (!raw) return
     const name = label.trim() || 'Other'
     if (raw.endsWith('%')) {
       const bp = parsePercentOrNull(raw)
@@ -1972,33 +2013,35 @@ async function paystubLines(formData: FormData, prefix: 'pretax' | 'tax') {
       else lines.push({ label: name, percentBasisPoints: bp })
     } else {
       const cents = parseAmountOrNull(raw)
-      if (cents === null) problems.push(`"${name}" needs an amount, like 830.54, or a percent, like 6%.`)
+      if (cents === null) problems.push(`"${name}": "${raw}" is not an amount. Use dollars, like 830.54, or a percent, like 6%.`)
       else lines.push({ label: name, cents })
     }
   })
   return { lines, problems }
 }
 
-export async function saveIncomeSourceAction(formData: FormData): Promise<void> {
+export async function saveIncomeSourceAction(previous: IncomeFormState, formData: FormData): Promise<IncomeFormState> {
   const { parseAmountOrNull, parsePercentOrNull, isFrequency } = await import('@/domain')
   const id = String(formData.get('id') ?? '') || undefined
-  const back = id ? `/income#source-${id}` : '/income'
   const pretax = await paystubLines(formData, 'pretax')
   const taxes = await paystubLines(formData, 'tax')
   const startedOn = String(formData.get('started_on') ?? '').trim()
   const shareText = String(formData.get('spending_share') ?? '').trim()
   const share = shareText === '' ? 2000 : parsePercentOrNull(shareText)
-  const problem =
-    [...pretax.problems, ...taxes.problems][0] ??
-    (startedOn && !DATE.test(startedOn) ? 'Give the start date as a date.' : null) ??
-    (share === null ? 'The spending share is a percent, like 20.' : null)
-  if (problem) backWith(back, { error: problem })
   const money = (field: string) => parseAmountOrNull(String(formData.get(field) ?? ''))
   const frequency = String(formData.get('frequency') ?? '')
   const names = namesFrom(String(formData.get('simplifi_names') ?? ''))
-  await thenBack(back, async (engine) => {
+  // One of us ("user:<id>"), or someone else, named in the box beside it.
+  const whose = String(formData.get('whose') ?? '')
+  return onIncomeForm(previous, formData, id ? `/income#source-${id}` : '/income', async (engine) => {
+    const problem =
+      [...pretax.problems, ...taxes.problems][0] ??
+      (startedOn && !DATE.test(startedOn) ? 'Give the start date as a date.' : null) ??
+      (share === null ? 'The spending share is a percent, like 20.' : null)
+    if (problem) return problem
     const saved = await engine.saveIncomeSource(
       {
+        personUserId: whose.startsWith('user:') ? whose.slice('user:'.length) : null,
         person: String(formData.get('person') ?? ''),
         name: String(formData.get('name') ?? ''),
         frequency: isFrequency(frequency) ? frequency : 'biweekly',
@@ -2013,6 +2056,7 @@ export async function saveIncomeSourceAction(formData: FormData): Promise<void> 
       id,
     )
     if (id || names.length > 0) await engine.setSimplifiNames('income', saved, names)
+    return null
   })
 }
 
@@ -2020,20 +2064,23 @@ export async function endIncomeSourceAction(formData: FormData): Promise<void> {
   await thenBack('/income', (engine) => engine.endIncomeSource(String(formData.get('id'))))
 }
 
-export async function addIncomePaymentAction(formData: FormData): Promise<void> {
+export async function addIncomePaymentAction(previous: IncomeFormState, formData: FormData): Promise<IncomeFormState> {
   const { parseAmountOrNull } = await import('@/domain')
   const sourceId = String(formData.get('income_source_id'))
-  const back = `/income#source-${sourceId}`
   const paidOn = String(formData.get('paid_on') ?? '').trim()
-  if (!DATE.test(paidOn)) backWith(back, { error: 'Give the day it landed.' })
-  await thenBack(back, async (engine) => {
+  const landedText = String(formData.get('landed') ?? '')
+  const landed = parseAmountOrNull(landedText)
+  return onIncomeForm(previous, formData, `/income#source-${sourceId}`, async (engine) => {
+    if (!DATE.test(paidOn)) return 'Give the day it landed.'
+    if (landed === null) return `"${landedText}" is not an amount.`
     await engine.addIncomePayment({
       incomeSourceId: sourceId,
       paidOn,
-      landedCents: parseAmountOrNull(String(formData.get('landed') ?? '')) ?? 0,
+      landedCents: landed,
       pretaxEstimateCents: parseAmountOrNull(String(formData.get('pretax_estimate') ?? '')),
       note: String(formData.get('note') ?? ''),
     })
+    return null
   })
 }
 

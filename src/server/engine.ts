@@ -29,6 +29,8 @@ import {
   recurringExpenses as recurringExpensesTable,
   incomeSources as incomeSourcesTable,
   incomePayments as incomePaymentsTable,
+  householdMembers as householdMembersTable,
+  users as usersTable,
   schoolDaysOff as schoolDaysOffTable,
   tripDays as tripDaysTable,
   tripLines as tripLinesTable,
@@ -276,6 +278,7 @@ import {
   diffSimplifiPaste,
   householdIncome,
   incomeSourceProblem,
+  memberFirstName,
   isFrequency,
   monthlyPaymentCents,
   paycheckOf,
@@ -5131,12 +5134,28 @@ export class Engine {
 
   // ---------------------------------------------------------------- income (PRD §14, D10-D11, D52)
 
-  async listIncomeSources(): Promise<IncomeSource[]> {
+  /** The people signed in to this household, each with the name Income shows for them. */
+  async householdMembers(): Promise<{ userId: Id; name: string }[]> {
     const rows = await this.db
-      .select()
-      .from(incomeSourcesTable)
-      .where(eq(incomeSourcesTable.householdId, this.householdId))
-    return rows.map(toIncomeSource).sort((a, b) => a.person.localeCompare(b.person) || a.name.localeCompare(b.name))
+      .select({ userId: usersTable.id, displayName: usersTable.displayName, email: usersTable.email })
+      .from(householdMembersTable)
+      .innerJoin(usersTable, eq(usersTable.id, householdMembersTable.userId))
+      .where(eq(householdMembersTable.householdId, this.householdId))
+    return rows
+      .map((r) => ({ userId: r.userId, name: memberFirstName(r) }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /** Every source, a member's named from their own account, someone else's by the name typed. */
+  async listIncomeSources(): Promise<IncomeSource[]> {
+    const [rows, members] = await Promise.all([
+      this.db.select().from(incomeSourcesTable).where(eq(incomeSourcesTable.householdId, this.householdId)),
+      this.householdMembers(),
+    ])
+    const nameOf = new Map(members.map((m) => [m.userId, m.name]))
+    return rows
+      .map((r) => toIncomeSource(r, r.personUserId ? (nameOf.get(r.personUserId) ?? r.person) : r.person))
+      .sort((a, b) => a.person.localeCompare(b.person) || a.name.localeCompare(b.name))
   }
 
   async listIncomePayments(): Promise<IncomePayment[]> {
@@ -5165,8 +5184,12 @@ export class Engine {
     const problem = incomeSourceProblem(input)
     if (problem) throw new EngineError(problem)
     if (!isFrequency(input.frequency)) throw new EngineError('Say how often pay lands.')
+    if (input.personUserId !== null && !(await this.householdMembers()).some((m) => m.userId === input.personUserId)) {
+      throw new EngineError('That person is not in this household. Type their name instead.')
+    }
     const values = {
-      person: input.person.trim(),
+      personUserId: input.personUserId,
+      person: input.personUserId === null ? input.person.trim() : '',
       name: input.name.trim(),
       frequency: input.frequency,
       startedOn: input.startedOn,
@@ -5304,6 +5327,8 @@ export class Engine {
 
 /** What a person gives for an income source; the engine checks it and records it. */
 export interface IncomeSourceInput {
+  /** A household member, or null with `person` typed for someone outside it. */
+  personUserId: Id | null
   person: string
   name: string
   frequency: Frequency
@@ -5329,10 +5354,11 @@ function linesFromJson(raw: unknown): PaystubLine[] {
   }))
 }
 
-function toIncomeSource(r: typeof incomeSourcesTable.$inferSelect): IncomeSource {
+function toIncomeSource(r: typeof incomeSourcesTable.$inferSelect, person: string): IncomeSource {
   return {
     id: r.id,
-    person: r.person,
+    personUserId: r.personUserId,
+    person,
     name: r.name,
     frequency: r.frequency,
     startedOn: (r.startedOn as CivilDate | null) ?? null,

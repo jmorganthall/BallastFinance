@@ -8,22 +8,19 @@
 
 import { requireEngine } from '@/server/session'
 import { Card, Hint, Money, PageHeader, Pill, humanDate } from '@/components/ui'
+import { PaymentForm, SourceForm, type Member } from './forms'
 import {
-  addIncomePaymentAction,
   endIncomeSourceAction,
   removeIncomePaymentAction,
-  saveIncomeSourceAction,
 } from '@/server/actions'
 import {
-  FREQUENCIES,
   FREQUENCY_WORDS,
   INCOME_COLUMNS,
   INCOME_COLUMN_WORDS,
   formatCents,
+  formatRate,
   type IncomeColumns,
-  type IncomeSource,
   type LinkCheck,
-  type PaystubLine,
   type SourceView,
 } from '@/domain'
 
@@ -80,111 +77,19 @@ function SheetTable({ children }: { children: React.ReactNode }) {
   )
 }
 
-function lineInput(line: PaystubLine | undefined): string {
-  if (!line) return ''
-  if (line.percentBasisPoints !== null && line.percentBasisPoints !== undefined) return `${line.percentBasisPoints / 100}%`
-  return line.cents !== null && line.cents !== undefined ? (line.cents / 100).toFixed(2) : ''
-}
-
-const dollars = (c: number | null) => (c === null ? '' : (c / 100).toFixed(2))
-
-const PRETAX_DEFAULTS = ['Benefits', '401k', 'Other']
-const TAX_DEFAULTS = ['Additional withholding', 'Federal / State / SS']
-
-function SourceForm({ source }: { source?: IncomeSource }) {
-  const pretax = source?.pretax ?? []
-  const taxes = source?.taxes ?? []
-  const pretaxRows = Math.max(pretax.length + 1, PRETAX_DEFAULTS.length)
-  const taxRows = Math.max(taxes.length + 1, TAX_DEFAULTS.length)
-  return (
-    <form action={saveIncomeSourceAction} className="space-y-3 text-sm">
-      {source ? <input type="hidden" name="id" value={source.id} /> : null}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block font-medium">
-          Whose
-          <input name="person" required defaultValue={source?.person} placeholder="Josh" className={`mt-1 ${small}`} />
-        </label>
-        <label className="block font-medium">
-          Job
-          <input name="name" required defaultValue={source?.name} placeholder="The employer" className={`mt-1 ${small}`} />
-        </label>
-        <label className="block font-medium">
-          Paid
-          <select name="frequency" defaultValue={source?.frequency ?? 'biweekly'} className={`mt-1 ${small}`}>
-            {FREQUENCIES.map((f) => (
-              <option key={f} value={f}>
-                {FREQUENCY_WORDS[f]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block font-medium">
-          Started
-          <input type="date" name="started_on" defaultValue={source?.startedOn ?? ''} className={`mt-1 ${small}`} />
-          <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">The bonus figure is per day since.</span>
-        </label>
-        <label className="block font-medium">
-          Annual salary
-          <input name="annual_salary" inputMode="decimal" defaultValue={dollars(source?.annualSalaryCents ?? null)} placeholder="85000" className={`mt-1 ${small}`} />
-        </label>
-        <label className="block font-medium">
-          Gross per check, if the stub differs
-          <input name="gross_per_check" inputMode="decimal" defaultValue={dollars(source?.grossPerCheckCents ?? null)} placeholder="Salary ÷ checks a year" className={`mt-1 ${small}`} />
-        </label>
-      </div>
-
-      <fieldset>
-        <legend className="font-medium">Taken out before taxes, per check</legend>
-        <p className="text-xs text-[var(--color-ink-soft)]">Dollars, or a percent of the check like 6%.</p>
-        <div className="mt-1 space-y-1">
-          {Array.from({ length: pretaxRows }, (_, i) => (
-            <div key={i} className="grid grid-cols-[1fr_8rem] gap-2">
-              <input name="pretax_label" defaultValue={pretax[i]?.label ?? (source ? '' : PRETAX_DEFAULTS[i] ?? '')} className={small} aria-label="What" />
-              <input name="pretax_amount" defaultValue={lineInput(pretax[i])} inputMode="decimal" className={small} aria-label="Amount" />
-            </div>
-          ))}
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <legend className="font-medium">Taxes, per check</legend>
-        <div className="mt-1 space-y-1">
-          {Array.from({ length: taxRows }, (_, i) => (
-            <div key={i} className="grid grid-cols-[1fr_8rem] gap-2">
-              <input name="tax_label" defaultValue={taxes[i]?.label ?? (source ? '' : TAX_DEFAULTS[i] ?? '')} className={small} aria-label="What" />
-              <input name="tax_amount" defaultValue={lineInput(taxes[i])} inputMode="decimal" className={small} aria-label="Amount" />
-            </div>
-          ))}
-        </div>
-      </fieldset>
-
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block font-medium">
-          Or just the take-home per check
-          <input name="net_per_check" inputMode="decimal" defaultValue={dollars(source?.netPerCheckCents ?? null)} className={`mt-1 ${small}`} />
-          <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">Only used when there is no salary.</span>
-        </label>
-        <label className="block font-medium">
-          Of each bonus, to spending
-          <input name="spending_share" inputMode="decimal" defaultValue={`${(source?.spendingShareBasisPoints ?? 2000) / 100}%`} className={`mt-1 ${small}`} />
-        </label>
-      </div>
-      <label className="block font-medium">
-        Known in Simplifi as
-        <input name="simplifi_names" defaultValue={source?.simplifiNames.join(', ') ?? ''} placeholder="Acme Payroll" className={`mt-1 ${small}`} />
-        <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
-          The paycheck&apos;s name in Simplifi&apos;s recurring list; several with commas. Simplifi&apos;s figure is then
-          checked against this one.
-        </span>
-      </label>
-      <button type="submit" className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white">
-        {source ? 'Save' : 'Add this income'}
-      </button>
-    </form>
-  )
-}
-
-function SourceCard({ view, today, check }: { view: SourceView; today: string; check?: LinkCheck }) {
+function SourceCard({
+  view,
+  today,
+  check,
+  members,
+  viewerId,
+}: {
+  view: SourceView
+  today: string
+  check?: LinkCheck
+  members: Member[]
+  viewerId: string
+}) {
   const { source, paycheck } = view
   return (
     <Card className="mb-4">
@@ -211,12 +116,23 @@ function SourceCard({ view, today, check }: { view: SourceView; today: string; c
             ))}
             {view.lines.afterPretax ? <SheetRow label="After taken out before taxes" cols={view.lines.afterPretax} strong /> : null}
             {view.lines.taxes.map((l, i) => (
-              <SheetRow key={`t${i}`} label={l.label} cols={l.cols} minus />
+              <SheetRow
+                key={`t${i}`}
+                label={paycheck.taxRateBasisPoints !== null && view.lines.taxes.length === 1 ? `${l.label} (${formatRate(paycheck.taxRateBasisPoints)})` : l.label}
+                cols={l.cols}
+                minus
+              />
             ))}
           </>
         ) : null}
         <SheetRow label="Take-home" cols={view.net} strong />
       </SheetTable>
+      {paycheck.taxRateBasisPoints !== null && source.netPerCheckCents !== null ? (
+        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+          Taxes and withholding take {formatRate(paycheck.taxRateBasisPoints)} of the pay left after the deductions,
+          worked out from the take-home on the stub.
+        </p>
+      ) : null}
 
       {check ? (
         <p className={`mt-3 text-sm ${check.differs ? 'text-[var(--color-caution)]' : 'text-[var(--color-ink-soft)]'}`}>
@@ -286,35 +202,14 @@ function SourceCard({ view, today, check }: { view: SourceView; today: string; c
         )}
         <details className="mt-2">
           <summary className="cursor-pointer text-sm underline">Log one that landed</summary>
-          <form action={addIncomePaymentAction} className="mt-2 grid gap-2 sm:grid-cols-2">
-            <input type="hidden" name="income_source_id" value={source.id} />
-            <label className="text-xs font-medium">
-              Landed on
-              <input type="date" name="paid_on" required max={today} defaultValue={today} className={`mt-1 ${small}`} />
-            </label>
-            <label className="text-xs font-medium">
-              Amount that landed
-              <input name="landed" required inputMode="decimal" className={`mt-1 ${small}`} />
-            </label>
-            <label className="text-xs font-medium">
-              Before tax (estimate)
-              <input name="pretax_estimate" inputMode="decimal" className={`mt-1 ${small}`} />
-            </label>
-            <label className="text-xs font-medium">
-              Note
-              <input name="note" placeholder="Q3 commission" className={`mt-1 ${small}`} />
-            </label>
-            <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium sm:col-span-2">
-              Log it
-            </button>
-          </form>
+          <PaymentForm sourceId={source.id} today={today} />
         </details>
       </div>
 
       <details className="mt-4 border-t border-[var(--color-line)] pt-3">
         <summary className="cursor-pointer text-sm underline">Change</summary>
         <div className="mt-3">
-          <SourceForm source={source} />
+          <SourceForm source={source} takeHomeCents={paycheck.netCents} members={members} viewerId={viewerId} />
           <form action={endIncomeSourceAction} className="mt-2">
             <input type="hidden" name="id" value={source.id} />
             <button type="submit" className="text-sm text-[var(--color-behind)] underline">
@@ -333,9 +228,13 @@ export default async function IncomePage({
   searchParams: Promise<{ saved?: string; error?: string }>
 }) {
   const { saved, error } = await searchParams
-  const { engine } = await requireEngine()
+  const { engine, viewer } = await requireEngine()
   const today = engine.today()
-  const [income, view] = await Promise.all([engine.householdIncome(), engine.recurringView()])
+  const [income, view, members] = await Promise.all([
+    engine.householdIncome(),
+    engine.recurringView(),
+    engine.householdMembers(),
+  ])
   const checkOf = new Map(view.checks.filter((c) => c.target.kind === 'income').map((c) => [c.target.id, c]))
 
   return (
@@ -373,7 +272,14 @@ export default async function IncomePage({
           <section key={p.person} className="mb-2">
             <h2 className={heading}>{p.person}</h2>
             {p.sources.map((s) => (
-              <SourceCard key={s.source.id} view={s} today={today} check={checkOf.get(s.source.id)} />
+              <SourceCard
+                key={s.source.id}
+                view={s}
+                today={today}
+                check={checkOf.get(s.source.id)}
+                members={members}
+                viewerId={viewer.userId}
+              />
             ))}
           </section>
         ))}
@@ -383,7 +289,7 @@ export default async function IncomePage({
           <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
             One per job. Type the lines off a real paystub: Ballast only adds and subtracts them, it never works out tax.
           </p>
-          <SourceForm />
+          <SourceForm members={members} viewerId={viewer.userId} />
         </Card>
         {income.people.length === 0 ? null : (
           <p className="mb-6 text-xs text-[var(--color-ink-soft)]">

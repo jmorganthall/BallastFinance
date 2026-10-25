@@ -530,12 +530,21 @@ principles, and they are non-negotiable.
   the take-home), and a difference is flagged, never corrected. A debt is
   compared on Simplifi's usual amount, never its Next amount (Simplifi assumes
   a card is paid in full). `src/domain/income.ts` follows the household's
-  income sheet: paystub lines per check (dollars, or a percent of the check
-  rounded to the cent as payroll does) give the take-home, every column is
-  the year divided down and rounded down, and the bonus log's yearly figure is
+  income sheet: the deductions taken out before taxes (dollars, or a percent
+  of the check rounded to the cent as payroll does) and the take-home off
+  the stub are typed; the taxes are what is left between them, one
+  `TAXES_LABEL` line with `taxRateBasisPoints` (PRD D52, rev 103; a source
+  saved earlier with its tax lines typed and no take-home still works down
+  from them, and its form fills the take-home in so a save converts it).
+  Every column is the year divided down and rounded down, and the bonus log's yearly figure is
   the estimates before tax / days since the job started x 365. There is no
   tax engine (D10). Every change is an `expense_changed`, `income_changed` or
-  `income_received` event.
+  `income_received` event. Whose income is a household member
+  (`person_user_id`, migration 0022, named from their own account by
+  `memberFirstName`) or a name typed for someone outside the household. A
+  paystub line without an amount is dropped, and one that comes to $0 is not
+  shown. The income forms keep what was typed when the engine refuses
+  (`IncomeFormState`): an error never costs a person their input.
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software. The trip planner's
   usual figures are a constant in `src/domain/trip.ts`, laid over by a
@@ -544,7 +553,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 820 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 824 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

@@ -3,6 +3,9 @@ import {
   bonusFigure,
   householdIncome,
   incomeSourceProblem,
+  formatRate,
+  memberFirstName,
+  TAXES_LABEL,
   paycheckOf,
   paymentView,
   sourceView,
@@ -12,11 +15,12 @@ import {
 
 /**
  * Made-up figures in the shape of the household's income sheet: a salaried
- * job paid every two weeks with its paystub lines, one paid twice a month
- * given only as take-home, and a log of bonuses.
+ * job paid every two weeks with its deductions and its take-home off the
+ * stub, one paid twice a month given only as take-home, and a log of bonuses.
  */
 const salaried: IncomeSource = {
   id: 'a',
+  personUserId: null,
   person: 'Alex',
   name: 'Acme',
   frequency: 'biweekly',
@@ -28,11 +32,8 @@ const salaried: IncomeSource = {
     { label: '401k', percentBasisPoints: 600 },
     { label: 'Other', cents: 500 },
   ],
-  taxes: [
-    { label: 'Additional withholding', cents: 10_000 },
-    { label: 'Federal / State / SS', cents: 120_000 },
-  ],
-  netPerCheckCents: null,
+  taxes: [],
+  netPerCheckCents: 299_500,
   spendingShareBasisPoints: 2000,
   state: 'active',
   simplifiNames: [],
@@ -51,13 +52,32 @@ const netOnly: IncomeSource = {
 }
 
 describe('one paycheck', () => {
-  it('works down from gross to take-home line by line', () => {
+  it('reads the taxes off the take-home: what is left after the deductions', () => {
     const check = paycheckOf(salaried)
     // $130,000 / 26 = $5,000.00; 6% of it is $300.00.
     expect(check.grossCents).toBe(500_000)
     expect(check.pretax.map((l) => l.cents)).toEqual([40_000, 30_000, 500])
-    expect(check.afterPretaxCents).toBe(500_000 - 70_500)
-    expect(check.netCents).toBe(500_000 - 70_500 - 130_000)
+    expect(check.afterPretaxCents).toBe(429_500)
+    // $4,295.00 after deductions, $2,995.00 home: $1,300.00 of taxes.
+    expect(check.taxes).toEqual([{ label: TAXES_LABEL, cents: 130_000 }])
+    expect(check.netCents).toBe(299_500)
+    // 1,300 / 4,295 = 30.267...%
+    expect(check.taxRateBasisPoints).toBe(3027)
+    expect(formatRate(3027)).toBe('30.27%')
+    expect(formatRate(2890)).toBe('28.9%')
+    expect(formatRate(2800)).toBe('28%')
+  })
+
+  it('still works a source saved with its tax lines typed down to take-home', () => {
+    const typed = {
+      ...salaried,
+      netPerCheckCents: null,
+      taxes: [
+        { label: 'Additional withholding', cents: 10_000 },
+        { label: 'Federal / State / SS', cents: 120_000 },
+      ],
+    }
+    expect(paycheckOf(typed)).toMatchObject({ netCents: 299_500, taxRateBasisPoints: 3027 })
   })
 
   it('rounds the salary divided down, unless the stub says otherwise', () => {
@@ -77,11 +97,16 @@ describe('one paycheck', () => {
   })
 
   it('takes a take-home-only source at its word', () => {
-    expect(paycheckOf(netOnly)).toEqual({ grossCents: null, pretax: [], afterPretaxCents: null, taxes: [], netCents: 250_000 })
+    expect(paycheckOf(netOnly)).toEqual({ grossCents: null, pretax: [], afterPretaxCents: null, taxes: [], netCents: 250_000, taxRateBasisPoints: null })
   })
 })
 
 describe('the columns', () => {
+  it('leaves out a line that comes to nothing', () => {
+    const view = sourceView({ ...salaried, pretax: [...salaried.pretax, { label: 'FSA', cents: 0 }] }, [], '2026-10-19')
+    expect(view.lines.pretax.map((l) => l.label)).toEqual(['Benefits', '401k', 'Other'])
+  })
+
   it("are the year's figure divided down, rounded down", () => {
     const view = sourceView(salaried, [], '2026-10-19')
     expect(view.gross).toEqual({ yearly: 13_000_000, monthly: 1_083_333, semimonthly: 541_666, biweekly: 500_000, weekly: 250_000 })
@@ -126,11 +151,23 @@ describe('bonuses', () => {
   })
 })
 
+describe('naming a household member', () => {
+  it('uses the first word of their name, else their email before the @', () => {
+    expect(memberFirstName({ displayName: 'Josh Morganthall', email: 'j@example.com' })).toBe('Josh')
+    expect(memberFirstName({ displayName: null, email: 'shelby@example.com' })).toBe('shelby')
+    expect(memberFirstName({ displayName: '  ', email: 'sam@example.com' })).toBe('sam')
+  })
+})
+
 describe('checking a source before it is saved', () => {
   it('asks for a salary or a take-home, in plain words', () => {
     expect(incomeSourceProblem(salaried)).toBeNull()
-    expect(incomeSourceProblem({ ...netOnly, netPerCheckCents: null })).toContain('annual salary')
-    expect(incomeSourceProblem({ ...salaried, person: ' ' })).toBe('Say whose income this is.')
+    expect(incomeSourceProblem({ ...netOnly, netPerCheckCents: null })).toContain('take-home per check')
+    // A take-home above the pay left after deductions would mean taxes below zero.
+    expect(incomeSourceProblem({ ...salaried, netPerCheckCents: 430_000 })).toContain('more than the pay left')
+    expect(incomeSourceProblem({ ...salaried, person: ' ' })).toContain('Say whose income this is')
+    // A household member needs no typed name.
+    expect(incomeSourceProblem({ ...salaried, person: '', personUserId: 'u1' })).toBeNull()
     expect(incomeSourceProblem({ ...salaried, spendingShareBasisPoints: 12_000 })).toContain('0 to 100')
   })
 })
