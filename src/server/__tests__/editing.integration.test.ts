@@ -398,19 +398,20 @@ describeDb('editing plans and debts', () => {
       expect(todos).toEqual([])
     })
 
-    it('rolls a recurring part forward when confirmed spent, and starts again at $0', async () => {
+    it('moves a recurring part on once its round is spent, the next round saving from the old date (D53)', async () => {
       pin('2027-01-20') // past the 2027-01-16 due date
       expect((await engine.closeOutPrompts()).some((p) => p.lineItemId === insuranceId)).toBe(true)
 
-      await engine.confirmSpend({ lineItemId: insuranceId, actualAmountCents: 60000 })
+      await engine.recordSpend({ lineItemId: insuranceId, amountCents: 60000 })
 
       const after = (await engine.listLineItems()).find((i) => i.id === insuranceId)!
       expect(after.state).toBe('accruing')
       expect(after.dueDate).toBe('2027-07-16') // six months on
       const { a } = await standing(engine, accountId)
       const insurance = part(a, insuranceId)
-      // Its steady line starts again on the day it was spent.
-      expect(insurance.savingSince).toEqual({ date: '2027-01-20', reason: 'spent' })
+      // The next round started saving on the old due date, answered or not
+      // (D53 (1)): no Saturday has come since, so it has $0 to its name.
+      expect(insurance.savingSince).toEqual({ date: '2027-01-16', reason: 'last_occurrence' })
       expect(insurance.savedForCents).toBe(0)
       // The spend comes out of the money: the $400 opening, 17 Saturdays of
       // $30 (26 Sep to 16 Jan), less the $600 paid.
@@ -424,7 +425,7 @@ describeDb('editing plans and debts', () => {
 
       // The one-off registration, confirmed, retires as before.
       await engine.updateLineItem(registrationId, { recurrence: null })
-      await engine.confirmSpend({ lineItemId: registrationId, actualAmountCents: 20000 })
+      await engine.recordSpend({ lineItemId: registrationId, amountCents: 20000 })
       expect((await engine.listLineItems()).find((i) => i.id === registrationId)!.state).toBe('retired')
     })
 
@@ -810,14 +811,14 @@ describeDb('editing plans and debts', () => {
       expect(failure!.cause?.constraint_name ?? failure!.message).toMatch(/line_items_one_off_starts_at_commit/)
     })
 
-    it('starts the steady line again at the spend date once confirmed spent, and rolls forward', async () => {
+    it('starts the next round on the old due date, not the day it was spent (D53)', async () => {
       pin('2026-11-20')
-      await engine.confirmSpend({ lineItemId: insuranceId, actualAmountCents: 120000 })
+      await engine.recordSpend({ lineItemId: insuranceId, amountCents: 120000 })
       const insurance = part((await standing(engine, homeAccountId)).a, insuranceId)
       expect(insurance.lineItem.dueDate).toBe('2027-11-15')
-      expect(insurance.savingSince).toEqual({ date: '2026-11-20', reason: 'spent' })
+      expect(insurance.savingSince).toEqual({ date: '2026-11-15', reason: 'last_occurrence' })
       expect(insurance.savedForCents).toBe(0)
-      // 52 Saturdays from Friday 20 Nov 2026 to Monday 15 Nov 2027.
+      // 52 Saturdays from Sunday 15 Nov 2026 to Monday 15 Nov 2027.
       expect(insurance.steadyPerWeekCents).toBe(2308) // ceil(120000 / 52)
       pin('2026-09-19')
     })

@@ -461,30 +461,99 @@ export async function endInstructionAction(formData: FormData): Promise<void> {
   revalidatePath('/check-in')
 }
 
-export async function confirmSpendAction(formData: FormData): Promise<void> {
-  const { engine } = await requireEngine()
+/** The round a "did this get spent?" form names (D53): the part and the round's due date. */
+function roundOf(formData: FormData): { lineItemId: string; roundDue: string | null; key: string } {
   const lineItemId = String(formData.get('line_item_id'))
-  const raw = String(formData.get('actual_amount') ?? '').trim()
+  const due = String(formData.get('round_due') ?? '').trim()
+  const roundDue = /^\d{4}-\d{2}-\d{2}$/.test(due) ? due : null
+  return { lineItemId, roundDue, key: roundDue ? `${lineItemId}@${roundDue}` : lineItemId }
+}
 
-  // Left blank, the engine records the part's own total; it is never read
-  // from a figure the form posted. A box that does not read as an amount is
-  // said back under the card, not quietly swapped for the plan's figure.
-  let actualAmountCents: number | undefined
-  if (raw !== '') {
-    try {
-      const { parseAmountToCents } = await import('@/domain')
-      actualAmountCents = parseAmountToCents(raw)
-    } catch {
-      redirect(
-        `${snoozeBack(formData)}?snooze_error=${encodeURIComponent('Enter what went out, like 350 or 349.99.')}&item=${lineItemId}`,
-      )
-    }
-  }
-
-  await engine.confirmSpend({ lineItemId, actualAmountCents })
+/** After a round changes, every screen that reads the position is stale. */
+function revalidateRounds(): void {
   revalidatePath('/')
   revalidatePath('/packages')
   revalidatePath('/check-in')
+}
+
+/**
+ * "Record spend" (D53 (2)): money that went out against a round, any time.
+ * Left blank, the engine records what the round still holds; it is never
+ * read from a figure the form posted. A box that does not read as an amount
+ * is said back under the card, not quietly swapped for the plan's figure.
+ */
+export async function recordSpendAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  const { lineItemId, roundDue, key } = roundOf(formData)
+  const raw = String(formData.get('actual_amount') ?? '').trim()
+  const back = snoozeBack(formData)
+
+  let amountCents: number | undefined
+  if (raw !== '') {
+    try {
+      const { parseAmountToCents } = await import('@/domain')
+      amountCents = parseAmountToCents(raw)
+    } catch {
+      redirect(`${back}?snooze_error=${encodeURIComponent('Enter what went out, like 350 or 349.99.')}&item=${key}`)
+    }
+  }
+  try {
+    await engine.recordSpend({ lineItemId, roundDue, amountCents })
+  } catch (error) {
+    if (!(error instanceof EngineError)) throw error
+    redirect(`${back}?snooze_error=${encodeURIComponent(error.message)}&item=${key}`)
+  }
+  revalidateRounds()
+  redirect(back)
+}
+
+/** "Finish" (D53 (3)): the round is done; whatever it still held stays in the account. */
+export async function finishRoundAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  const { lineItemId, roundDue, key } = roundOf(formData)
+  const back = snoozeBack(formData)
+  try {
+    await engine.finishRound({ lineItemId, roundDue })
+  } catch (error) {
+    if (!(error instanceof EngineError)) throw error
+    redirect(`${back}?snooze_error=${encodeURIComponent(error.message)}&item=${key}`)
+  }
+  revalidateRounds()
+  redirect(back)
+}
+
+/** "Save back up to $X" (D53 (5)): the round's target goes back to its full total. */
+export async function saveRoundBackUpAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  const { lineItemId, roundDue, key } = roundOf(formData)
+  const back = snoozeBack(formData)
+  try {
+    if (!roundDue) throw new EngineError('Pick which one to save back up.')
+    await engine.saveRoundBackUp({ lineItemId, roundDue })
+  } catch (error) {
+    if (!(error instanceof EngineError)) throw error
+    redirect(`${back}?snooze_error=${encodeURIComponent(error.message)}&item=${key}`)
+  }
+  revalidateRounds()
+  redirect(back)
+}
+
+/** "Undo" in a plan's history (D53 (6)): a correcting event, never an edit. */
+export async function undoRoundEventAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  const back = snoozeBack(formData)
+  try {
+    await engine.undoRoundEvent({ eventId: String(formData.get('event_id')) })
+  } catch (error) {
+    if (!(error instanceof EngineError)) throw error
+    redirect(`${back}?error=${encodeURIComponent(error.message)}`)
+  }
+  revalidateRounds()
+  redirect(back)
 }
 
 /** Where a snooze form sends a person back to: This week, or a plan's page. */
@@ -502,7 +571,7 @@ export async function snoozeCloseOutAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const { EngineError } = await import('@/server/engine')
   const { isSnoozeChoice } = await import('@/domain')
-  const lineItemId = String(formData.get('line_item_id'))
+  const { lineItemId, roundDue, key } = roundOf(formData)
   const choice = formData.get('choice')
   const picked = String(formData.get('snooze_date') ?? '').trim()
   const back = snoozeBack(formData)
@@ -512,6 +581,7 @@ export async function snoozeCloseOutAction(formData: FormData): Promise<void> {
     if (picked !== '' && choice === 'date') assertCivilDate(picked)
     until = await engine.snoozeCloseOut({
       lineItemId,
+      roundDue,
       choice,
       pickedDate: choice === 'date' && picked !== '' ? picked : null,
     })
@@ -522,11 +592,11 @@ export async function snoozeCloseOutAction(formData: FormData): Promise<void> {
         : choice === 'date'
           ? 'Pick the day to ask again.'
           : 'That did not save. Try again.'
-    redirect(`${back}?snooze_error=${encodeURIComponent(message)}&item=${lineItemId}`)
+    redirect(`${back}?snooze_error=${encodeURIComponent(message)}&item=${key}`)
   }
   revalidatePath('/')
   revalidatePath('/packages')
-  redirect(`${back}?snoozed=${lineItemId}&until=${until}`)
+  redirect(`${back}?snoozed=${key}&until=${until}`)
 }
 
 /** "Wake it up" and "undo" (D38): the question asks again from today. */
@@ -534,7 +604,8 @@ export async function wakeCloseOutAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const { EngineError } = await import('@/server/engine')
   try {
-    await engine.snoozeCloseOut({ lineItemId: String(formData.get('line_item_id')), wake: true })
+    const { lineItemId, roundDue } = roundOf(formData)
+    await engine.snoozeCloseOut({ lineItemId, roundDue, wake: true })
   } catch (error) {
     // Answered in the meantime: there is nothing left to wake.
     if (!(error instanceof EngineError)) throw error

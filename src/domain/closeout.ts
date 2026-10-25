@@ -6,6 +6,11 @@
  * expected-balance totals until a human confirms. An item that fell out of the
  * math on a date alone would make every account total a guess: the money might
  * still be sitting there, or it might be gone.
+ *
+ * Since D53 the question is asked per round: a repeating part moves on to its
+ * next round on the due date, and the round left behind keeps asking, with
+ * what has gone out so far, until its spends reach its total or a person
+ * finishes it (`rounds.ts`).
  */
 
 import {
@@ -17,14 +22,32 @@ import {
   type Weekday,
 } from './dates'
 import type { Cents } from './money'
+import { roundKey, roundLabel, roundsOf, type RoundEvent } from './rounds'
 import type { Id, LineItem, LineItemState } from './types'
 
+/**
+ * One round on or past its date that nobody has finished (D53 (7)). A part
+ * left unanswered round after round has one of these per round, oldest
+ * first, each with its own question and snooze.
+ */
 export interface CloseOutPrompt {
+  /** The part's own id: what the forms post, with `dueDate` naming the round. */
   lineItemId: Id
+  /** The round's id in the position: the part's own for its only open round of a one-off, else `roundKey`. */
+  roundId: Id
+  /** The part's name, with the round's suffix while another round of it is open. */
   label: string
   reserveAccountId: Id
+  /** The round's due date. */
   dueDate: CivilDate
+  /** The part's total. */
   plannedCents: Cents
+  /** Every spend recorded against the round so far. */
+  spentCents: Cents
+  /** What the round still holds back: its total less the spends that count against it. */
+  needsCents: Cents
+  /** Spends that lowered the target, which "Save back up" would put back. */
+  countedSpentCents: Cents
   daysOverdue: number
   /**
    * The day the question comes back while it is snoozed (D38), else null.
@@ -60,26 +83,36 @@ export function closeOutPrompts(args: {
   today: CivilDate
   /** Only items in committed packages are prompted about. */
   isLive: (item: LineItem) => boolean
-  /** Every snooze recorded, oldest first; the latest for a part's due date decides. */
+  /** Every snooze recorded, oldest first; the latest for a round decides. */
   snoozes?: readonly CloseOutSnooze[]
+  /** Spends, finishes and saves back up, undone ones left out (D53). */
+  roundEvents?: readonly RoundEvent[]
 }): CloseOutPrompt[] {
   const latest = new Map<Id, CloseOutSnooze>()
   for (const s of args.snoozes ?? []) latest.set(`${s.lineItemId}:${s.dueDate}`, s)
   return args.lineItems
-    .filter((item) => args.isLive(item) && dueState(item, args.today) === 'due')
-    .map((item) => ({
-      lineItemId: item.id,
-      label: item.label,
-      reserveAccountId: item.reserveAccountId,
-      dueDate: item.dueDate,
-      plannedCents: item.unitAmountCents * item.quantity,
-      daysOverdue: Math.max(0, Math.round(compareDates(args.today, item.dueDate))),
-      snoozedUntil: (() => {
-        const snooze = latest.get(`${item.id}:${item.dueDate}`)
-        return snooze && compareDates(snooze.until, args.today) > 0 ? snooze.until : null
-      })(),
-    }))
-    .sort((a, b) => b.daysOverdue - a.daysOverdue)
+    .filter((item) => args.isLive(item) && item.state !== 'retired' && item.state !== 'planned')
+    .flatMap((item) => {
+      const rounds = roundsOf({ lineItem: item, events: args.roundEvents ?? [], today: args.today })
+      const openRounds = rounds.past.length + (rounds.current ? 1 : 0)
+      return rounds.past.map((round) => ({
+        lineItemId: item.id,
+        roundId: item.recurrence ? roundKey(item.id, round.dueDate) : item.id,
+        label: roundLabel({ label: item.label, dueDate: round.dueDate, recurrence: item.recurrence, openRounds, today: args.today }),
+        reserveAccountId: item.reserveAccountId,
+        dueDate: round.dueDate,
+        plannedCents: round.fullCents,
+        spentCents: round.spentCents,
+        needsCents: round.needsCents,
+        countedSpentCents: round.countedSpentCents,
+        daysOverdue: Math.max(0, Math.round(compareDates(args.today, round.dueDate))),
+        snoozedUntil: (() => {
+          const snooze = latest.get(`${item.id}:${round.dueDate}`)
+          return snooze && compareDates(snooze.until, args.today) > 0 ? snooze.until : null
+        })(),
+      }))
+    })
+    .sort((a, b) => b.daysOverdue - a.daysOverdue || a.label.localeCompare(b.label))
 }
 
 /**

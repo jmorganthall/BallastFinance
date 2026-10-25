@@ -19,7 +19,9 @@ import {
 } from '../position'
 import { formatCents } from '../money'
 import { addDays, compareDates, transferWeeksBetween, type CivilDate, type Weekday } from '../dates'
-import type { LineItem, LineItemCycle, Package, ReserveAccount } from '../types'
+import { lineItemTotalCents, type LineItem, type LineItemCycle, type Package, type ReserveAccount } from '../types'
+import { nextOccurrence } from '../recurrence'
+import type { RoundEvent } from '../rounds'
 
 // Monday. The household's money moves on Fridays.
 const TODAY: CivilDate = '2026-09-28'
@@ -934,6 +936,50 @@ describe('what an account likely holds, in words (D34, D35)', () => {
   })
 })
 
+describe('a repeating plan moves on by itself, and money goes out a bit at a time (D53)', () => {
+  // Ian's party, $500 every 4 October, three weeks gone and not answered.
+  const party = li({ id: 'party', label: 'Ian Birthday Party', unitAmountCents: 50000, dueDate: '2026-10-04', recurrence: yearly, timelineStart: 'last_occurrence' })
+  const facts = (roundEvents: PositionInput['roundEvents'] = [], spent = 0): PositionInput =>
+    input({
+      today: '2026-10-25',
+      lineItems: [party],
+      counts: [{ accountId: gifts.id, amountCents: 50000, on: '2026-10-01' }],
+      transfers: [{ accountId: gifts.id, perWeekCents: 1000, confirmedOn: '2026-09-01' }],
+      spendsSinceCount: spent ? [{ accountId: gifts.id, amountCents: spent }] : [],
+      roundEvents,
+    })
+  const spend = (amountCents: number, roundDue = '2026-10-04') =>
+    ({ eventId: `s${amountCents}`, kind: 'spend' as const, lineItemId: 'party', roundDue, amountCents, on: '2026-10-25' })
+
+  it('starts saving for next year on the date, while this year stays open and held', () => {
+    const p = position(facts())
+    const [old, next] = p.plans[0]!.parts
+    expect(old!.lineItem.label).toBe('Ian Birthday Party (2026)')
+    expect(old!.round).toMatchObject({ lineItemId: 'party', dueDate: '2026-10-04', past: true, openRounds: 2 })
+    expect(old!.totalCents).toBe(50000)
+    expect(old!.status).toBe('ready_to_spend')
+    expect(next!.lineItem.id).toBe('party')
+    expect(next!.lineItem.label).toBe('Ian Birthday Party (2027)')
+    expect(next!.lineItem.dueDate).toBe('2027-10-04')
+    expect(next!.savingSince).toEqual({ date: '2026-10-04', reason: 'last_occurrence' })
+  })
+
+  it('takes a spend off what the round still holds, and leaves the weekly amount where it was', () => {
+    const before = position(facts()).accounts[0]!
+    const after = position(facts([spend(10000)], 10000))
+    expect(after.plans[0]!.parts[0]!.totalCents).toBe(40000)
+    expect(after.plans[0]!.parts[0]!.round.spentCents).toBe(10000)
+    expect(after.accounts[0]!.weeklyExactCents).toBe(before.weeklyExactCents)
+  })
+
+  it('once the spends reach the total, only next year is left, under its own name', () => {
+    const p = position(facts([spend(30000), spend(20000)], 50000))
+    expect(p.plans[0]!.parts.map((x) => [x.lineItem.label, x.lineItem.dueDate])).toEqual([
+      ['Ian Birthday Party', '2027-10-04'],
+    ])
+  })
+})
+
 describe('invariants over randomised households (D35)', () => {
   // A small deterministic PRNG so a failure is reproducible.
   function rng(seed: number) {
@@ -987,6 +1033,25 @@ describe('invariants over randomised households (D35)', () => {
           .filter(() => random() < 0.8)
           .map((a) => ({ accountId: a.id, perWeekCents: int(60000), confirmedOn: addDays(today, -int(90)) })),
       }
+      // Spends, finishes and saves back up against a part's rounds (D53):
+      // its stored round or the one after, before or after its date.
+      const roundEvents: RoundEvent[] = []
+      for (const item of lineItems) {
+        if (random() < 0.6) continue
+        const dates = [item.dueDate, nextOccurrence(item.dueDate, item.recurrence)].filter((d): d is CivilDate => d !== null)
+        for (let k = 1 + int(3); k > 0; k -= 1) {
+          const r = random()
+          roundEvents.push({
+            eventId: `r-${roundEvents.length}`,
+            kind: r < 0.6 ? 'spend' : r < 0.8 ? 'finish' : 'save_back_up',
+            lineItemId: item.id,
+            roundDue: dates[int(dates.length)]!,
+            amountCents: r < 0.6 ? 1 + int(lineItemTotalCents(item)) : 0,
+            on: today,
+          })
+        }
+      }
+      facts.roundEvents = roundEvents
       // Moves in and out and spends marked done since the count (D34), one
       // entry each. What goes out is bounded by what the account held before
       // it, as at a bank: a likely balance below zero is not generated here.
@@ -1254,6 +1319,61 @@ describe('invariants over randomised households (D35)', () => {
         if (saving && saving.lessPerWeekCents > 0) {
           for (const a of p.accounts.filter((x) => x.parts.length > 0)) expect(a.oneTimeMove).toBeNull()
         }
+      }
+      // 9. Rounds (D53). A spend on a round on or past its date takes the
+      // same money out of the account as it takes off what the round still
+      // needs, so it moves no weekly amount, move or status. Finishing a
+      // round, before its date or after, never asks for more a week than
+      // leaving it open. Saving a round back up never asks for less.
+      const accountOf = (id: string) => p.accounts.find((x) => x.account.id === id)!
+      const with_ = (extra: RoundEvent[], spendCents = 0, accountId = '') =>
+        position({
+          ...facts,
+          roundEvents: [...roundEvents, ...extra],
+          spendsSinceCount: spendCents > 0 ? [...spendsSinceCount, { accountId, amountCents: spendCents }] : spendsSinceCount,
+        })
+      const parts = p.accounts.flatMap((a) => a.parts)
+      for (const a of p.accounts) {
+        for (const x of a.parts) {
+          // A round is its own part with what it still needs, never more than the part's total.
+          expect(x.totalCents).toBe(Math.max(0, x.round.fullCents - x.round.countedSpentCents))
+          expect(x.round.openRounds).toBe(parts.filter((y) => y.round.lineItemId === x.round.lineItemId).length)
+        }
+      }
+      const pastRound = parts.find((x) => x.round.past && x.totalCents > 0)
+      if (pastRound) {
+        const amount = 1 + int(pastRound.totalCents)
+        const after = with_(
+          [{ eventId: 'spend-now', kind: 'spend', lineItemId: pastRound.round.lineItemId, roundDue: pastRound.round.dueDate, amountCents: amount, on: today }],
+          amount,
+          pastRound.accountId,
+        )
+        const was = accountOf(pastRound.accountId)
+        const now = after.accounts.find((x) => x.account.id === pastRound.accountId)!
+        expect(now.weeklyExactCents).toBe(was.weeklyExactCents)
+        expect(now.oneTimeMove?.amountCents ?? 0).toBe(was.oneTimeMove?.amountCents ?? 0)
+        expect(now.status).toBe(was.status)
+      }
+      // A one-off finished before its date ends the plan, like taking the part
+      // out; the promise is about a repeating part moving on, and any round past its date.
+      const finishable = parts.filter((x) => x.round.past || x.lineItem.recurrence !== null)
+      const anyRound = finishable.length > 0 ? finishable[int(finishable.length)]! : null
+      if (anyRound) {
+        const after = with_([
+          { eventId: 'finish-now', kind: 'finish', lineItemId: anyRound.round.lineItemId, roundDue: anyRound.round.dueDate, amountCents: 0, on: today },
+        ])
+        const was = accountOf(anyRound.accountId)
+        const now = after.accounts.find((x) => x.account.id === anyRound.accountId)!
+        expect(now.weeklyExactCents).toBeLessThanOrEqual(was.weeklyExactCents)
+      }
+      const lowered = parts.find((x) => x.round.countedSpentCents > 0)
+      if (lowered) {
+        const after = with_([
+          { eventId: 'save-now', kind: 'save_back_up', lineItemId: lowered.round.lineItemId, roundDue: lowered.round.dueDate, amountCents: 0, on: today },
+        ])
+        const was = accountOf(lowered.accountId)
+        const now = after.accounts.find((x) => x.account.id === lowered.accountId)!
+        expect(now.weeklyExactCents).toBeGreaterThanOrEqual(was.weeklyExactCents)
       }
       if (p.allCaughtUp) {
         for (const a of p.accounts.filter((x) => x.parts.length > 0)) expect(a.status).toBe('on_track')

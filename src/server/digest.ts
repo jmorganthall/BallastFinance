@@ -138,7 +138,10 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
     lines.push('', '## Did these get spent?', '')
     for (const prompt of closeOuts) {
       lines.push(
-        `- **${prompt.label}** (${formatCents(prompt.plannedCents)}) was due ${prompt.dueDate}`,
+        `- **${prompt.label}** (${formatCents(prompt.plannedCents)}) was due ${prompt.dueDate}` +
+          (prompt.spentCents > 0
+            ? `: ${formatCents(prompt.spentCents)} spent so far, ${formatCents(prompt.needsCents)} still held`
+            : ''),
       )
     }
   }
@@ -251,9 +254,9 @@ export async function buildDueDatePrompts(input: DigestInput): Promise<Notificat
     summary: `Ballast: did the ${prompt.label} money get spent from ${accountName(prompt.reserveAccountId)}?`,
     body: `**${prompt.label}** was due ${prompt.dueDate}${
       prompt.daysOverdue > 0 ? ` (${prompt.daysOverdue} days ago)` : ''
-    }.\n\nThe plan set aside ${formatCents(prompt.plannedCents)} in ${accountName(
-      prompt.reserveAccountId,
-    )}. Until you confirm, it stays counted in your totals.`,
+    }.\n\nThe plan set aside ${formatCents(prompt.plannedCents)} in ${accountName(prompt.reserveAccountId)}${
+      prompt.spentCents > 0 ? `, and ${formatCents(prompt.spentCents)} of it has gone out so far` : ''
+    }. Until it is finished, the ${formatCents(prompt.needsCents)} still held stays counted in your totals.`,
     link: `${input.baseUrl}/`,
     detail: { line_item_id: prompt.lineItemId, days_overdue: prompt.daysOverdue },
   }))

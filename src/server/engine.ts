@@ -50,7 +50,9 @@ import {
   type DebtPaymentMade,
   canWriteAccount,
   closeOutPrompts,
-  dueState,
+  oldestOpenRound,
+  roundsOf,
+  type RoundEvent,
   resolveSnoozeUntil,
   type CloseOutSnooze,
   type SnoozeChoice,
@@ -91,6 +93,7 @@ import {
   type ConfirmedTransfer,
   type CivilDate,
   type EndedInstruction,
+  minDate,
   type OpenCommitments,
   type Id,
   type IntakeProblem,
@@ -323,6 +326,19 @@ interface DoneInstructionInput {
 }
 
 export class EngineError extends Error {}
+
+/** One spend, finish or save back up on a plan's page (D53 (6)), with whether it was taken back. */
+export interface RoundHistoryEntry {
+  eventId: Id
+  kind: RoundEvent['kind']
+  lineItemId: Id
+  label: string
+  recurrence: Recurrence | null
+  roundDue: CivilDate
+  amountCents: Cents
+  on: CivilDate
+  undone: boolean
+}
 
 /** One account's line in "If you commit this today" (D35). */
 export interface CommitPreview {
@@ -1332,6 +1348,7 @@ export class Engine {
       issued,
       outstanding,
       rows,
+      rounds,
     ] = await Promise.all([
       this.listReserveAccounts(),
       this.listPackages(),
@@ -1348,10 +1365,11 @@ export class Engine {
         .where(
           and(
             eq(events.householdId, this.householdId),
-            inArray(events.kind, ['balance_confirmed', 'instruction_confirmed', 'spend_confirmed']),
+            inArray(events.kind, ['balance_confirmed', 'instruction_confirmed', 'spend_confirmed', 'spend_recorded']),
           ),
         )
         .orderBy(events.recordedAt, events.id),
+      this.roundEvents(),
     ])
 
     const issuedById = new Map(issued.map((i) => [i.instructionId, i]))
@@ -1376,6 +1394,14 @@ export class Engine {
         const p = row.payload as { line_item_id: Id; actual_amount_cents: Cents }
         const accountId = accountOfItem.get(p.line_item_id)
         if (accountId) add(spends, accountId, p.actual_amount_cents)
+        continue
+      }
+      // A spend against a round (D53), unless it was taken back.
+      if (row.kind === 'spend_recorded') {
+        if (rounds.undone.has(row.id)) continue
+        const p = row.payload as { line_item_id: Id; amount_cents: Cents }
+        const accountId = accountOfItem.get(p.line_item_id)
+        if (accountId) add(spends, accountId, p.amount_cents)
         continue
       }
       const p = row.payload as { instruction_id: Id; actual_amount_cents: Cents | null }
@@ -1424,6 +1450,7 @@ export class Engine {
       openMovesIn,
       transferRoundUpCents,
       transferWeekday,
+      roundEvents: rounds.events,
     }
   }
 
@@ -1665,16 +1692,18 @@ export class Engine {
   // ---------------------------------------------------------------- close-out
 
   /**
-   * Passed due dates awaiting "did this get spent?" (PRD §5, capability 4),
-   * each with the day it wakes while snoozed (D38). Every caller that asks
-   * the question shows only the awake ones (`awakeCloseOuts`); the plan page
-   * shows the snoozed ones too, so they can be answered early.
+   * Rounds on or past their date awaiting "did this get spent?" (PRD §5,
+   * capability 4; D53 (7)), each with what has gone out so far and the day
+   * it wakes while snoozed (D38). Every caller that asks the question shows
+   * only the awake ones (`awakeCloseOuts`); the plan page shows the snoozed
+   * ones too, so they can be answered early.
    */
   async closeOutPrompts(): Promise<CloseOutPrompt[]> {
-    const [lineItems, packages, snoozes] = await Promise.all([
+    const [lineItems, packages, snoozes, rounds] = await Promise.all([
       this.listLineItems(),
       this.listPackages(),
       this.closeOutSnoozes(),
+      this.roundEvents(),
     ])
     const byId = new Map(packages.map((p) => [p.id, p]))
     return closeOutPrompts({
@@ -1682,6 +1711,7 @@ export class Engine {
       today: this.today(),
       isLive: (item) => byId.get(item.packageId)?.state === 'active',
       snoozes,
+      roundEvents: rounds.events,
     })
   }
 
@@ -1699,23 +1729,21 @@ export class Engine {
   }
 
   /**
-   * Snooze "did this get spent?" (D38) until a day, or wake it today. Either
-   * spouse may: it moves no money and changes no figure, so account scope
-   * (which restricts money writes) does not apply. Only a question that is
-   * asking can be snoozed.
+   * Snooze "did this get spent?" (D38) for one round until a day, or wake it
+   * today. Either spouse may: it moves no money and changes no figure, so
+   * account scope (which restricts money writes) does not apply. Only a
+   * round that is asking can be snoozed; with no round named, the oldest.
    */
   async snoozeCloseOut(
-    input: { lineItemId: Id } & (
+    input: { lineItemId: Id; roundDue?: CivilDate | null } & (
       | { choice: SnoozeChoice; pickedDate?: CivilDate | null }
       | { wake: true }
     ),
   ): Promise<CivilDate> {
     const today = this.today()
-    const item = (await this.listLineItems()).find((li) => li.id === input.lineItemId)
-    if (!item) throw new EngineError('No such line item in this household')
-    if (dueState(item, today) !== 'due') {
-      throw new EngineError('That one is not waiting on "did this get spent?"')
-    }
+    const asking = (await this.closeOutPrompts()).filter((p) => p.lineItemId === input.lineItemId)
+    const prompt = input.roundDue ? asking.find((p) => p.dueDate === input.roundDue) : asking[asking.length - 1]
+    if (!prompt) throw new EngineError('That one is not waiting on "did this get spent?"')
     let until: CivilDate = today
     if (!('wake' in input)) {
       const resolved = resolveSnoozeUntil({
@@ -1733,63 +1761,263 @@ export class Engine {
       occurredAt: today,
       actorUserId: this.actorUserId,
       source: 'manual',
-      payload: { line_item_id: item.id, due_date: item.dueDate, until },
+      payload: { line_item_id: input.lineItemId, due_date: prompt.dueDate, until },
     })
     return until
   }
 
+  // ---------------------------------------------------------------- rounds (D53)
+
   /**
-   * Confirm a line item's money was spent. The actual amount may differ from the
-   * plan, and the difference is recorded rather than discarded -- it is either
-   * money still sitting in the account or money that came from elsewhere.
+   * Every spend, finish and save back up recorded against a round (D53), in
+   * the order recorded, with the ones taken back by an `event_undone` left
+   * out -- and the ids of those taken back, for the money and the history.
    */
-  async confirmSpend(input: { lineItemId: Id; actualAmountCents?: Cents }): Promise<void> {
-    if (input.actualAmountCents !== undefined && (!Number.isInteger(input.actualAmountCents) || input.actualAmountCents < 0)) {
-      throw new EngineError('What was spent must be a whole number of cents, zero or more')
+  async roundEvents(db: Pick<Db, 'select'> = this.db): Promise<{ events: RoundEvent[]; undone: Set<Id> }> {
+    const rows = await db
+      .select()
+      .from(events)
+      .where(
+        and(
+          eq(events.householdId, this.householdId),
+          inArray(events.kind, ['spend_recorded', 'round_finished', 'round_saved_back_up', 'event_undone']),
+        ),
+      )
+      .orderBy(events.recordedAt, events.id)
+    const undone = new Set(
+      rows.filter((r) => r.kind === 'event_undone').map((r) => (r.payload as { event_id: Id }).event_id),
+    )
+    const kinds = { spend_recorded: 'spend', round_finished: 'finish', round_saved_back_up: 'save_back_up' } as const
+    const out: RoundEvent[] = []
+    for (const row of rows) {
+      if (row.kind === 'event_undone' || undone.has(row.id)) continue
+      const p = row.payload as { line_item_id: Id; round_due: CivilDate; amount_cents?: Cents }
+      out.push({
+        eventId: row.id,
+        kind: kinds[row.kind as keyof typeof kinds],
+        lineItemId: p.line_item_id,
+        roundDue: p.round_due,
+        amountCents: p.amount_cents ?? 0,
+        on: row.occurredAt as CivilDate,
+      })
     }
-    const today = this.today()
+    return { events: out, undone }
+  }
+
+  /**
+   * A part's rows and its open rounds, read inside a write so the round the
+   * write names is checked against what is there now. The part must be in a
+   * live plan.
+   */
+  private async roundsForWrite(tx: Tx, lineItemId: Id) {
+    const [row] = await tx
+      .select()
+      .from(lineItemsTable)
+      .where(and(eq(lineItemsTable.id, lineItemId), eq(lineItemsTable.householdId, this.householdId)))
+    if (!row) throw new EngineError('No such line item in this household')
+    const [pkg] = await tx.select().from(packagesTable).where(eq(packagesTable.id, row.packageId))
+    if (pkg?.state !== 'active') throw new EngineError('Only a plan being saved for has money going out')
+    const item = toLineItem(row)
+    const { events: recorded } = await this.roundEvents(tx)
+    return { row, item, recorded, rounds: roundsOf({ lineItem: item, events: recorded, today: this.today() }) }
+  }
+
+  /** An open round of the part by its date, or the oldest open one when none is named. */
+  private openRound(rounds: ReturnType<typeof roundsOf>, roundDue: CivilDate | null | undefined) {
+    const open = [...rounds.past, ...(rounds.current ? [rounds.current] : [])]
+    const round = roundDue ? open.find((r) => r.dueDate === roundDue) : open[0]
+    if (!round) {
+      throw new EngineError(open.length === 0 ? 'That one is already finished' : 'That round is not open any more')
+    }
+    return round
+  }
+
+  /**
+   * Keep a part's stored row where its rounds are (D53 (9)): a repeating
+   * part's due date at its oldest open round; a one-off retired once its
+   * round is finished, and back to saving when an undo reopens it.
+   */
+  private async settleRounds(tx: Tx, item: LineItem, from: CivilDate): Promise<void> {
+    const { events: recorded } = await this.roundEvents(tx)
+    const oldest = oldestOpenRound({ lineItem: item, from, events: recorded, today: this.today() })
+    if (item.recurrence) {
+      if (oldest && oldest !== item.dueDate) {
+        await tx.update(lineItemsTable).set({ dueDate: oldest, state: 'accruing' }).where(eq(lineItemsTable.id, item.id))
+      }
+      return
+    }
+    const state = oldest ? 'accruing' : 'retired'
+    if (state !== item.state) await tx.update(lineItemsTable).set({ state }).where(eq(lineItemsTable.id, item.id))
+  }
+
+  /**
+   * Record money that went out against a round (D53 (2)): any time, before
+   * or after its date, as often as needed. It comes off what the account
+   * holds and off what the round still needs; once the spends reach its
+   * total the round is finished, and more than that is allowed -- the extra
+   * came out of what the account holds for other plans. With no round
+   * named, the oldest open one; with no amount, what the round still
+   * holds, read here and never a figure a form posted.
+   */
+  async recordSpend(input: { lineItemId: Id; roundDue?: CivilDate | null; amountCents?: Cents }): Promise<void> {
+    if (input.amountCents !== undefined && (!Number.isInteger(input.amountCents) || input.amountCents <= 0)) {
+      throw new EngineError('What went out must be more than zero, in whole cents')
+    }
+    await this.db.transaction(async (tx) => {
+      const { item, rounds } = await this.roundsForWrite(tx, input.lineItemId)
+      const round = this.openRound(rounds, input.roundDue)
+      const amountCents = input.amountCents ?? round.needsCents
+      if (amountCents <= 0) throw new EngineError('Nothing is held for that one: use Finish')
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'spend_recorded',
+        occurredAt: this.today(),
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { line_item_id: item.id, round_due: round.dueDate, amount_cents: amountCents },
+      })
+      await this.settleRounds(tx, item, item.dueDate)
+    })
+  }
+
+  /**
+   * Finish a round (D53 (3)): whatever it still held stays in the account,
+   * part of the one pile. A one-off is then done; a repeating part goes on
+   * with its next round, at once if this one is finished before its date.
+   */
+  async finishRound(input: { lineItemId: Id; roundDue?: CivilDate | null }): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const { item, rounds } = await this.roundsForWrite(tx, input.lineItemId)
+      const round = this.openRound(rounds, input.roundDue)
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'round_finished',
+        occurredAt: this.today(),
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { line_item_id: item.id, round_due: round.dueDate },
+      })
+      await this.settleRounds(tx, item, item.dueDate)
+    })
+  }
+
+  /**
+   * "Save back up to $X" (D53 (5)): the round's target goes back to its full
+   * total; the spends so far stay spent, and the account saves the money
+   * again. Only for a round still ahead of its date -- it undoes an early
+   * withdrawal -- and only while spends have lowered it.
+   */
+  async saveRoundBackUp(input: { lineItemId: Id; roundDue: CivilDate }): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const { item, rounds } = await this.roundsForWrite(tx, input.lineItemId)
+      const round = this.openRound(rounds, input.roundDue)
+      if (round.past) throw new EngineError('Only a round still ahead of its date can be saved back up')
+      if (round.countedSpentCents <= 0) throw new EngineError('Nothing spent has lowered that one')
+      await tx.insert(events).values({
+        householdId: this.householdId,
+        kind: 'round_saved_back_up',
+        occurredAt: this.today(),
+        actorUserId: this.actorUserId,
+        source: 'manual',
+        payload: { line_item_id: item.id, round_due: round.dueDate },
+      })
+    })
+  }
+
+  /**
+   * Take back a spend, a finish or a save back up (D53 (6)) with a
+   * correcting event, never an edit: events are append-only. A spend taken
+   * back gives the money back to the account (unless a count has seen the
+   * account since, which is the truth about what it holds), and a finished
+   * round whose spends fall below its total again opens again. Every figure
+   * and to-do is worked out again from the events.
+   */
+  async undoRoundEvent(input: { eventId: Id }): Promise<void> {
     await this.db.transaction(async (tx) => {
       const [row] = await tx
         .select()
-        .from(lineItemsTable)
+        .from(events)
         .where(
           and(
-            eq(lineItemsTable.id, input.lineItemId),
-            eq(lineItemsTable.householdId, this.householdId),
+            eq(events.id, input.eventId),
+            eq(events.householdId, this.householdId),
+            inArray(events.kind, ['spend_recorded', 'round_finished', 'round_saved_back_up']),
           ),
         )
-      if (!row) throw new EngineError('No such line item in this household')
-      if (row.state === 'retired') throw new EngineError('That one is already closed out')
-
-      // A one-off retires. A recurring part rolls its due date to the next
-      // occurrence in place and starts a fresh cycle from today at $0 saved
-      // (PRD D8, superseded); the settled cycle stays in the log.
-      const recurrence = recurrenceOf(row.recurEvery, row.recurUnit)
-      const rolledTo = recurrence
-        ? rollToFuture(row.dueDate as CivilDate, recurrence, today)
-        : null
-
-      await tx
-        .update(lineItemsTable)
-        .set(rolledTo ? { dueDate: rolledTo, state: 'accruing' } : { state: 'retired' })
-        .where(eq(lineItemsTable.id, input.lineItemId))
-
+      if (!row) throw new EngineError('There is nothing like that to take back')
+      const { undone } = await this.roundEvents(tx)
+      if (undone.has(row.id)) throw new EngineError('That was already taken back')
+      const p = row.payload as { line_item_id: Id; round_due: CivilDate }
+      const { row: itemRow, item } = await this.roundsForWrite(tx, p.line_item_id)
+      if (itemRow.state === 'retired') {
+        // A one-off finished by its spends is retired by them; one taken out
+        // of the plan by hand stays out.
+        const [takenOut] = await tx
+          .select({ id: events.id })
+          .from(events)
+          .where(
+            and(
+              eq(events.householdId, this.householdId),
+              eq(events.kind, 'line_item_retired'),
+              sql`${events.payload}->>'line_item_id' = ${item.id}`,
+            ),
+          )
+        if (takenOut) throw new EngineError('That part was taken out of the plan')
+      }
       await tx.insert(events).values({
         householdId: this.householdId,
-        kind: 'spend_confirmed',
-        occurredAt: today,
+        kind: 'event_undone',
+        occurredAt: this.today(),
         actorUserId: this.actorUserId,
         source: 'manual',
-        payload: {
-          line_item_id: input.lineItemId,
-          rolled_to: rolledTo,
-          planned_cents: lineItemTotalCents(row),
-          // Left blank, it is the part's own total, read here and never from
-          // a figure the form posted.
-          actual_amount_cents: input.actualAmountCents ?? lineItemTotalCents(row),
-        },
+        payload: { event_id: row.id, kind: row.kind, line_item_id: item.id, round_due: p.round_due },
       })
+      await this.settleRounds(tx, item, minDate(item.dueDate, p.round_due))
     })
+  }
+
+  /**
+   * A plan's spends, finishes and saves back up, newest first (D53 (6)), each
+   * with whether it was taken back, for the history on the plan's page.
+   */
+  async roundHistory(packageId: Id): Promise<RoundHistoryEntry[]> {
+    const items = (await this.listLineItems()).filter((li) => li.packageId === packageId)
+    const byId = new Map(items.map((li) => [li.id, li]))
+    const rows = await this.db
+      .select()
+      .from(events)
+      .where(
+        and(
+          eq(events.householdId, this.householdId),
+          inArray(events.kind, ['spend_recorded', 'round_finished', 'round_saved_back_up', 'event_undone']),
+        ),
+      )
+      .orderBy(events.recordedAt, events.id)
+    const undone = new Set(
+      rows.filter((r) => r.kind === 'event_undone').map((r) => (r.payload as { event_id: Id }).event_id),
+    )
+    const kinds = { spend_recorded: 'spend', round_finished: 'finish', round_saved_back_up: 'save_back_up' } as const
+    return rows
+      .flatMap((row): RoundHistoryEntry[] => {
+        if (row.kind === 'event_undone') return []
+        const p = row.payload as { line_item_id: Id; round_due: CivilDate; amount_cents?: Cents }
+        const item = byId.get(p.line_item_id)
+        if (!item) return []
+        return [
+          {
+            eventId: row.id,
+            kind: kinds[row.kind as keyof typeof kinds],
+            lineItemId: item.id,
+            label: item.label,
+            recurrence: item.recurrence,
+            roundDue: p.round_due,
+            amountCents: p.amount_cents ?? 0,
+            on: row.occurredAt as CivilDate,
+            undone: undone.has(row.id),
+          },
+        ]
+      })
+      .reverse()
   }
 
   // ---------------------------------------------------------------- instructions

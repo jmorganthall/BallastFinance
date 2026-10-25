@@ -19,6 +19,7 @@ import { MoneySince } from '@/components/money-since'
 import {
   attentionHeadline,
   awakeCloseOuts,
+  roundKey,
   debtTodoSentenceParts,
   derivedTodoSentenceParts,
   householdCaughtUp,
@@ -234,7 +235,9 @@ export default async function ThisWeekPage({
   // A snoozed "did this get spent?" is off this screen until it wakes (D38);
   // the one just snoozed stays as a line with an undo, so a slip is cheap.
   const closeOuts = awakeCloseOuts(allCloseOuts)
-  const justSnoozed = snoozed ? allCloseOuts.find((p) => p.lineItemId === snoozed && p.snoozedUntil) : undefined
+  const justSnoozed = snoozed
+    ? allCloseOuts.find((p) => roundKey(p.lineItemId, p.dueDate) === snoozed && p.snoozedUntil)
+    : undefined
   const snoozeOn = snoozeDays(today, transferWeekday)
 
   // Accounts a move or a spend marked done has changed since they were last
@@ -348,6 +351,7 @@ export default async function ThisWeekPage({
           </p>
           <form action={wakeCloseOutAction}>
             <input type="hidden" name="line_item_id" value={justSnoozed.lineItemId} />
+            <input type="hidden" name="round_due" value={justSnoozed.dueDate} />
             <button type="submit" className="shrink-0 rounded-lg px-3 py-2 text-sm text-[var(--color-ink-soft)] underline">
               Undo
             </button>
@@ -362,13 +366,13 @@ export default async function ThisWeekPage({
           </h2>
           <ul className="space-y-3">
             {closeOuts.map((prompt) => (
-              <li key={prompt.lineItemId}>
+              <li key={prompt.roundId}>
                 <CloseOutCard
                   prompt={prompt}
                   today={today}
                   snoozeOn={snoozeOn}
                   latestSnooze={latestSnoozeDay(today)}
-                  error={errorItem === prompt.lineItemId ? snoozeError : null}
+                  error={errorItem === roundKey(prompt.lineItemId, prompt.dueDate) ? snoozeError : null}
                 />
               </li>
             ))}

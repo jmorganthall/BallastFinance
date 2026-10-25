@@ -126,6 +126,17 @@ export const eventKindEnum = pgEnum('event_kind', [
   'income_changed',
   /** A bonus or commission payment that landed, or one taken back off the log. */
   'income_received',
+  // Rounds (migration 0023, PRD D53). A repeating part moves on by itself on
+  // its date; what is spent against a round, and when it is finished, are
+  // these facts, each naming the part and the round's due date.
+  /** Money that went out against a round, before or after its date: { line_item_id, round_due, amount_cents }. */
+  'spend_recorded',
+  /** A person said a round is finished; what it still held stays in the account: { line_item_id, round_due }. */
+  'round_finished',
+  /** The round's target put back to its full total; the spends before stay spent: { line_item_id, round_due }. */
+  'round_saved_back_up',
+  /** An earlier spend, finish or save back up taken back: { event_id }. Never an edit (migration 0001). */
+  'event_undone',
 ])
 
 export const tripLineCategoryEnum = pgEnum('trip_line_category', [

@@ -1,12 +1,15 @@
 /**
- * "Did this get spent?" (PRD §5, capability 4), with its snooze (D38). One
- * tap answers it; one tap more puts the question off until a day, while the
+ * "Did this get spent?" (PRD §5, capability 4) for one round (D53), with its
+ * snooze (D38). Money goes out a bit at a time: "Record spend" takes what
+ * went out off what the round still holds, and finishes it once the spends
+ * reach its total; "Finish" closes it now, and what it still held stays in
+ * the account. One tap more puts the question off until a day, while the
  * money stays held -- nothing about a snooze reaches a figure. The same card
  * is on This week and, snoozed or not, on the plan's own page, where a
  * snoozed one can be answered early or woken up.
  */
 
-import { Card, humanDate, Pill, When, Zzz } from '@/components/ui'
+import { Card, humanDate, Money, Pill, When, Zzz } from '@/components/ui'
 import {
   addDays,
   formatCents,
@@ -15,7 +18,12 @@ import {
   type CloseOutPrompt,
   type SnoozeChoice,
 } from '@/domain'
-import { confirmSpendAction, snoozeCloseOutAction, wakeCloseOutAction } from '@/server/actions'
+import {
+  finishRoundAction,
+  recordSpendAction,
+  snoozeCloseOutAction,
+  wakeCloseOutAction,
+} from '@/server/actions'
 
 const QUICK: Exclude<SnoozeChoice, 'date'>[] = ['tomorrow', 'transfer_day', 'week', 'month']
 
@@ -38,7 +46,14 @@ export function CloseOutCard({
   error?: string | null
 }) {
   const snoozed = prompt.snoozedUntil
-  const back = packageId ? <input type="hidden" name="package_id" value={packageId} /> : null
+  // Every form names the round: the part and the round's due date (D53).
+  const back = (
+    <>
+      <input type="hidden" name="line_item_id" value={prompt.lineItemId} />
+      <input type="hidden" name="round_due" value={prompt.dueDate} />
+      {packageId ? <input type="hidden" name="package_id" value={packageId} /> : null}
+    </>
+  )
   return (
     <Card className={snoozed ? 'border-dashed' : 'border-[var(--color-behind)]'}>
       <div className="flex items-start justify-between gap-3">
@@ -58,15 +73,30 @@ export function CloseOutCard({
         )}
       </div>
 
-      <form action={confirmSpendAction} className="mt-3 flex items-end gap-2">
-        <input type="hidden" name="line_item_id" value={prompt.lineItemId} />
+      <p className="mt-2 text-sm">
+        {prompt.spentCents > 0 ? (
+          <>
+            <Money cents={prompt.spentCents} /> of <Money cents={prompt.plannedCents} /> spent ·{' '}
+            <strong>
+              <Money cents={prompt.needsCents} />
+            </strong>{' '}
+            still held
+          </>
+        ) : (
+          <>
+            <Money cents={prompt.needsCents} /> held for it
+          </>
+        )}
+      </p>
+
+      <form action={recordSpendAction} className="mt-3 flex items-end gap-2">
         {back}
         <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
-          How much actually went out
+          How much went out
           <input
             name="actual_amount"
             inputMode="decimal"
-            defaultValue={formatCents(prompt.plannedCents).replace('$', '').replace(/,/g, '')}
+            defaultValue={formatCents(prompt.needsCents).replace('$', '').replace(/,/g, '')}
             className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
           />
         </label>
@@ -74,9 +104,30 @@ export function CloseOutCard({
           type="submit"
           className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
         >
-          Yes, spent
+          Record spend
         </button>
       </form>
+      <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+        Less than <Money cents={prompt.needsCents} /> keeps the rest held for more spending. More than that
+        finishes it, and the extra comes out of what this account holds for other plans.
+      </p>
+
+      <div className="mt-3">
+        <form action={finishRoundAction}>
+          {back}
+          <button
+            type="submit"
+            title={
+              prompt.needsCents > 0
+                ? `The ${formatCents(prompt.needsCents)} still held stays in the account for your other plans.`
+                : undefined
+            }
+            className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium"
+          >
+            {prompt.needsCents > 0 ? `Finish it; ${formatCents(prompt.needsCents)} stays in the account` : 'Finish it'}
+          </button>
+        </form>
+      </div>
 
       {snoozed ? (
         <div className="mt-3 flex items-center justify-between gap-3">
@@ -84,7 +135,6 @@ export function CloseOutCard({
             Asks again <When date={snoozed} today={today} />. The money stays held until then.
           </p>
           <form action={wakeCloseOutAction}>
-            <input type="hidden" name="line_item_id" value={prompt.lineItemId} />
             {back}
             <button
               type="submit"
@@ -100,7 +150,6 @@ export function CloseOutCard({
             Not spent yet? Snooze it
           </summary>
           <form action={snoozeCloseOutAction} className="mt-2 space-y-2">
-            <input type="hidden" name="line_item_id" value={prompt.lineItemId} />
             {back}
             <div className="flex flex-wrap gap-2">
               {QUICK.map((choice) => (
@@ -145,7 +194,7 @@ export function CloseOutCard({
       {error ? <p className="mt-2 text-sm text-[var(--color-behind)]">{error}</p> : null}
       {!snoozed ? (
         <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
-          Until you answer, this money stays counted in your totals.
+          Until it is finished, what it still holds stays counted in your totals.
         </p>
       ) : null}
     </Card>

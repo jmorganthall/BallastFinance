@@ -39,7 +39,7 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -148,6 +148,35 @@ principles, and they are non-negotiable.
   today. There is no drift, no
   should-hold, no catch-up bump or ease-off offer and no rate component on
   screen any more.
+- **A repeating plan moves on by itself, and money goes out a bit at a time**
+  (PRD D53, rev 106). Each time a part comes round is a round, named by its
+  due date. On the date the round stays open and the next starts saving at
+  once, from that date, answered or not; `roundsOf` in `src/domain/rounds.ts`
+  works out the open rounds from the part and its events, never stored. The
+  stored `due_date` is the oldest open round, kept there by
+  `Engine.settleRounds`. In the position the round saving now is the part's
+  own id and a round still open past its date is a part of its own under
+  `roundKey(lineItemId, dueDate)`, with `PartPosition.round` saying which
+  (`round.lineItemId` is what a form posts). `totalCents` is what the round
+  still needs: the total less the spends since the last "Save back up"; a
+  later round in the run-forward needs the full total. A spend
+  (`spend_recorded`, migration 0023) can be recorded any time, comes out of
+  the money like any spend, and finishes the round once the spends reach its
+  total; more is allowed. `round_finished` closes it now, and what it held
+  stays in the pile. `round_saved_back_up` (only for a round still ahead of
+  its date) puts the target back. `event_undone` takes any of the three back
+  (`Engine.roundEvents` leaves undone ones out everywhere; a spend undone
+  after a count gives nothing back, since the count saw the money). A round
+  finished before its date moves the part on at once, saving from that day,
+  but the run-forward measures the part from the finished round's date
+  (`round.measuredFrom`) until it passes, so finishing early never asks for
+  more a week than waiting: invariant 9 in `position.test.ts`. A plan's bar,
+  chart and Saving since follow `roundsAhead`; its status and shortfall count
+  every open round. While two rounds of a part are open, both names carry
+  `roundSuffix` ("(2026)", "(Oct 2026)", "(Oct 24)"). "Yes, spent" is
+  retired: the card says "Record spend" and "Finish it", and the plan's page
+  has "Money went out for this" (a choice of round when more than one is
+  open) and "What went out" with an Undo on each.
 - **"Did this get spent?" can be snoozed, and a part waiting to be spent is
   Ready to spend** (PRD D38, rev 64). A snooze is a `close_out_snoozed` event
   (migration 0017) with the part, the due date asked about and the day it
@@ -261,8 +290,8 @@ principles, and they are non-negotiable.
   `money.from === 'count'` and `money.on`; the check-in nudge reads it
   there. An open "cover what is short" move, like an old catch-up, stands in
   for the one-time move the position would ask for, so the same money is
-  never asked for twice. "Yes, spent" left blank records the part's own
-  total, read by the engine, never a figure the form posted. The to-do
+  never asked for twice. "Record spend" left blank records what the round
+  still holds (D53), read by the engine, never a figure the form posted. The to-do
   sentence marks the account the money goes to, and the screen sets it in
   bold and the accent colour.
 - **A debt's balance is the last one stated, less the payments since**
@@ -553,7 +582,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 824 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 850 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
