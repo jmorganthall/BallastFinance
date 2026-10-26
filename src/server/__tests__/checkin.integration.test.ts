@@ -297,9 +297,13 @@ describeDb('check-ins and close-out (D35)', () => {
     expect(awakeCloseOuts(await engine.closeOutPrompts())).toHaveLength(1)
   })
 
-  it('retires the item on confirmation and takes it out of the totals', async () => {
+  it('takes a spend off what it still holds, and retires the item once it is finished (D53)', async () => {
     const [prompt] = await engine.closeOutPrompts()
-    await engine.confirmSpend({ lineItemId: prompt!.lineItemId, actualAmountCents: 165000 })
+    await engine.recordSpend({ lineItemId: prompt!.lineItemId, amountCents: 165000 })
+    // $1,650 of $1,700 went out: it still asks, holding the $50 left.
+    const [still] = await engine.closeOutPrompts()
+    expect(still).toMatchObject({ plannedCents: 170000, spentCents: 165000, needsCents: 5000 })
+    await engine.finishRound({ lineItemId: prompt!.lineItemId })
 
     expect(await engine.closeOutPrompts()).toHaveLength(0)
 
@@ -319,26 +323,21 @@ describeDb('check-ins and close-out (D35)', () => {
     expect(p.allCaughtUp).toBe(true)
   })
 
-  it('keeps the planned-versus-actual difference rather than discarding it', async () => {
-    const rows = await db
-      .select()
-      .from(schema.events)
-      .where(eq(schema.events.kind, 'spend_confirmed'))
+  it('keeps what actually went out, and the finish beside it', async () => {
+    const rows = await db.select().from(schema.events)
     const ours = rows.filter((r) => r.householdId === householdId)
-    expect(ours).toHaveLength(1)
-
-    const payload = ours[0]!.payload as { planned_cents: number; actual_amount_cents: number }
-    expect(payload.planned_cents).toBe(170000)
-    expect(payload.actual_amount_cents).toBe(165000)
+    const spends = ours.filter((r) => r.kind === 'spend_recorded')
+    expect(spends).toHaveLength(1)
+    expect(spends[0]!.payload).toMatchObject({ round_due: '2026-12-19', amount_cents: 165000 })
     // $50 less went out than planned; that money is still sitting in the account.
-    expect(payload.planned_cents - payload.actual_amount_cents).toBe(5000)
+    expect(ours.filter((r) => r.kind === 'round_finished')).toHaveLength(1)
   })
 
-  it('refuses to close out the same item twice', async () => {
+  it('refuses to spend against a round already finished', async () => {
     const items = await engine.listLineItems()
-    await expect(
-      engine.confirmSpend({ lineItemId: items[0]!.id, actualAmountCents: 1 }),
-    ).rejects.toThrow(/already closed out/)
+    await expect(engine.recordSpend({ lineItemId: items[0]!.id, amountCents: 1 })).rejects.toThrow(
+      /already finished|Only a plan being saved for/,
+    )
   })
 })
 
@@ -537,18 +536,18 @@ describeDb('one-time moves (D34, D35)', () => {
     expect(await engine.outstandingInstructions()).toEqual([])
   })
 
-  it("records a spend left blank at the part's own total, never a figure the form sent", async () => {
+  it("records a spend left blank at what the round still holds, never a figure the form sent", async () => {
     pin('2026-10-24')
     const registration = (await engine.listLineItems()).find((li) => li.label === 'Registration')!
-    await expect(engine.confirmSpend({ lineItemId: registration.id, actualAmountCents: -1 })).rejects.toThrow(
-      /whole number of cents/,
+    await expect(engine.recordSpend({ lineItemId: registration.id, amountCents: -1 })).rejects.toThrow(
+      /more than zero/,
     )
     const before = (await account()).money
-    await engine.confirmSpend({ lineItemId: registration.id })
+    await engine.recordSpend({ lineItemId: registration.id })
 
-    const rows = await db.select().from(schema.events).where(eq(schema.events.kind, 'spend_confirmed'))
+    const rows = await db.select().from(schema.events).where(eq(schema.events.kind, 'spend_recorded'))
     const ours = rows.filter((r) => r.householdId === householdId)
-    expect(ours.at(-1)!.payload).toMatchObject({ planned_cents: 50000, actual_amount_cents: 50000 })
+    expect(ours.at(-1)!.payload).toMatchObject({ round_due: '2026-10-24', amount_cents: 50000 })
     const after = (await account()).money
     expect(after.spendsSinceCents - before.spendsSinceCents).toBe(50000)
     expect(after.totalCents).toBe(before.totalCents - 50000)

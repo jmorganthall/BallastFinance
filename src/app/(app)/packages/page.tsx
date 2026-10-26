@@ -59,11 +59,17 @@ export default async function PackagesPage({
   const rows = orderPlans(
     views.map((view) => {
       const plan = view.package.state === 'active' ? plans.get(view.package.id) : undefined
+      // A live plan's next date is its rounds' (D53): the round saving now
+      // for a date ahead, so a round still open past its date -- asked
+      // about under "did this get spent?" -- never holds the plan back.
+      const ahead = plan ? plan.parts.filter((x) => !x.round.past) : []
       const next =
         view.package.state === 'retired'
           ? null
           : nextDue(
-              view.items.map((item) => item.lineItem),
+              plan && plan.parts.length > 0
+                ? (ahead.length > 0 ? ahead : plan.parts).map((x) => x.lineItem)
+                : view.items.map((item) => item.lineItem),
               today,
             )
       return {

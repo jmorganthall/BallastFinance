@@ -21,7 +21,11 @@ import {
   addLineItemAction,
   commitPackageAction,
   deletePackageAction,
+  finishRoundAction,
+  recordSpendAction,
   renamePackageAction,
+  saveRoundBackUpAction,
+  undoRoundEventAction,
   retireLineItemAction,
   retirePackageAction,
   updateLineItemAction,
@@ -31,6 +35,8 @@ import {
   formatCents,
   latestSnoozeDay,
   previousOccurrence,
+  roundKey,
+  roundSuffix,
   snoozeDays,
   shortReasons,
   steadySinceWords,
@@ -102,6 +108,15 @@ export default async function PackageDetailPage({
     ? []
     : (await engine.closeOutPrompts()).filter((c) => planItemIds.has(c.lineItemId))
   const snoozeOn = snoozeDays(today, await engine.transferWeekday())
+  // Every spend, finish and save back up on this plan, newest first, each
+  // with an Undo while it stands (D53 (6)).
+  const history = isDraft ? [] : await engine.roundHistory(id)
+  // A part's open rounds, oldest first (D53): the round still open past its
+  // date beside the one saving now, for the spend form's choice.
+  const roundsOfPart = (lineItemId: string) =>
+    (plan?.parts ?? [])
+      .filter((p) => p.round.lineItemId === lineItemId)
+      .sort((a, b) => a.round.dueDate.localeCompare(b.round.dueDate))
   const accountName = (accountId: string) =>
     accounts.find((a) => a.id === accountId)?.name ?? 'Unknown account'
   const defaultAccount = accounts.find((a) => a.writable)?.id ?? accounts[0]?.id ?? ''
@@ -299,14 +314,14 @@ export default async function PackageDetailPage({
           </h2>
           <ul className="space-y-3">
             {closeOuts.map((prompt) => (
-              <li key={prompt.lineItemId}>
+              <li key={prompt.roundId}>
                 <CloseOutCard
                   prompt={prompt}
                   today={today}
                   snoozeOn={snoozeOn}
                   latestSnooze={latestSnoozeDay(today)}
                   packageId={id}
-                  error={errorItem === prompt.lineItemId ? snoozeError : null}
+                  error={errorItem === roundKey(prompt.lineItemId, prompt.dueDate) ? snoozeError : null}
                 />
               </li>
             ))}
@@ -320,7 +335,11 @@ export default async function PackageDetailPage({
 
       <ul className="space-y-3">
         {live.map((item) => {
+          // The part's own id is the round saving now (D53); its date is
+          // that round's, past an older round still open.
           const part = partOf.get(item.lineItem.id) ?? null
+          const dueDate = part?.lineItem.dueDate ?? item.lineItem.dueDate
+          const open = roundsOfPart(item.lineItem.id)
           return (
           <li key={item.lineItem.id}>
             <Card>
@@ -331,17 +350,17 @@ export default async function PackageDetailPage({
                     {accountName(item.lineItem.reserveAccountId)}
                     {' · '}
                     {item.lineItem.recurrence === null ? (
-                      <When date={item.lineItem.dueDate} today={today} as="due" />
+                      <When date={dueDate} today={today} as="due" />
                     ) : (
                       <>
                         {describeRecurrence(item.lineItem.recurrence).toLowerCase()}, next{' '}
-                        <When date={item.lineItem.dueDate} today={today} as="due" />
+                        <When date={dueDate} today={today} as="due" />
                       </>
                     )}
                   </p>
                 </div>
                 {/* All of it there and waiting is not a warning (D38): the bar says Ready to spend. */}
-                {item.isOverdue && part?.status !== 'ready_to_spend' ? (
+                {(part ? part.isOverdue : item.isOverdue) && part?.status !== 'ready_to_spend' ? (
                   <Pill tone="behind">Date has passed</Pill>
                 ) : null}
               </div>
@@ -377,7 +396,85 @@ export default async function PackageDetailPage({
                     dueDate={part.lineItem.dueDate}
                     shortReasons={reasons.get(part.accountId) ? [reasons.get(part.accountId)!] : []}
                   />
+                  {part.round.spentCents > 0 ? (
+                    <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                      <Money cents={part.round.spentCents} /> of <Money cents={part.round.fullCents} /> already
+                      spent, so <Money cents={part.totalCents} /> is still needed.
+                    </p>
+                  ) : null}
+                  {part.round.countedSpentCents > 0 ? (
+                    <form action={saveRoundBackUpAction} className="mt-2">
+                      <input type="hidden" name="line_item_id" value={item.lineItem.id} />
+                      <input type="hidden" name="round_due" value={part.round.dueDate} />
+                      <input type="hidden" name="package_id" value={view.package.id} />
+                      <button
+                        type="submit"
+                        title="What was spent stays spent; the account saves it again."
+                        className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-xs font-medium"
+                      >
+                        Save back up to <Money cents={part.round.fullCents} />
+                      </button>
+                    </form>
+                  ) : null}
                 </>
+              ) : null}
+
+              {/*
+                Money can go out against a round any time, a bit at a time
+                (D53 (2)). With more than one round of the part open, the
+                form asks which, the oldest first; "Finish" closes the chosen
+                round now, and what it still held stays in the account.
+              */}
+              {open.length > 0 ? (
+                <details className="mt-3 border-t border-[var(--color-line)] pt-3">
+                  <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
+                    Money went out for this
+                  </summary>
+                  <form action={recordSpendAction} className="mt-3 space-y-2">
+                    <input type="hidden" name="line_item_id" value={item.lineItem.id} />
+                    <input type="hidden" name="package_id" value={view.package.id} />
+                    {open.length > 1 ? (
+                      <label className="block text-sm font-medium">
+                        Which one
+                        <select name="round_due" defaultValue={open[0]!.round.dueDate} className={field}>
+                          {open.map((r) => (
+                            <option key={r.round.dueDate} value={r.round.dueDate}>
+                              {r.lineItem.label}, {formatCents(r.totalCents)} still held
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <input type="hidden" name="round_due" value={open[0]!.round.dueDate} />
+                    )}
+                    <label className="block text-sm font-medium">
+                      How much went out
+                      <input name="actual_amount" inputMode="decimal" placeholder="0.00" required className={field} />
+                    </label>
+                    <p className="text-xs text-[var(--color-ink-soft)]">
+                      It comes off what this account holds and off what is still needed. Once what went out
+                      reaches the total it is finished; more than that comes out of what the account holds for
+                      other plans.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="submit"
+                        className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+                      >
+                        Record spend
+                      </button>
+                      <button
+                        type="submit"
+                        formAction={finishRoundAction}
+                        formNoValidate
+                        title="Nothing more is going out for it; what it still holds stays in the account for your other plans."
+                        className="rounded-xl border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+                      >
+                        Finish it
+                      </button>
+                    </div>
+                  </form>
+                </details>
               ) : null}
 
               {!isDone ? (
@@ -474,6 +571,52 @@ export default async function PackageDetailPage({
           )
         })}
       </ul>
+
+      {history.length > 0 ? (
+        <section className="mt-6">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            What went out
+          </h2>
+          <Card>
+            <ul className="divide-y divide-[var(--color-line)] text-sm">
+              {history.map((entry) => (
+                <li key={entry.eventId} className="flex items-center justify-between gap-3 py-2">
+                  <div className={entry.undone ? 'text-[var(--color-ink-soft)] line-through' : ''}>
+                    <p>
+                      {entry.kind === 'spend' ? (
+                        <>
+                          <Money cents={entry.amountCents} /> spent
+                        </>
+                      ) : entry.kind === 'finish' ? (
+                        'Finished'
+                      ) : (
+                        'Saved back up'
+                      )}{' '}
+                      · {entry.label}
+                      {entry.recurrence ? ` (${roundSuffix(entry.roundDue, entry.recurrence, today)})` : ''}
+                    </p>
+                    <p className="text-xs text-[var(--color-ink-soft)]">{humanDate(entry.on)}</p>
+                  </div>
+                  {entry.undone ? (
+                    <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">Taken back</span>
+                  ) : !isDone ? (
+                    <form action={undoRoundEventAction}>
+                      <input type="hidden" name="event_id" value={entry.eventId} />
+                      <input type="hidden" name="package_id" value={view.package.id} />
+                      <button
+                        type="submit"
+                        className="shrink-0 rounded-lg px-3 py-1.5 text-sm text-[var(--color-ink-soft)] underline"
+                      >
+                        Undo
+                      </button>
+                    </form>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </section>
+      ) : null}
 
       {!isDone ? (
         <Card className="mt-3">

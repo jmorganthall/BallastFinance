@@ -102,6 +102,7 @@ import {
 import type { SentencePart } from './instructions'
 import { ceilDiv, formatCents, roundUpToStep, type Cents } from './money'
 import { isRecurring, nextOccurrence, previousOccurrence } from './recurrence'
+import { roundKey, roundLabel, roundsOf, type Round, type RoundEvent } from './rounds'
 import {
   lineItemTotalCents,
   type DriftAdjustment,
@@ -175,6 +176,11 @@ export interface PositionInput {
   transferRoundUpCents?: Cents
   /** The day the recurring transfer runs (D31). Absent is the default, for pure tests. */
   transferWeekday?: Weekday
+  /**
+   * Spends, finishes and saves back up recorded against a part's rounds
+   * (D53), oldest first, undone ones left out. Absent: none.
+   */
+  roundEvents?: readonly RoundEvent[]
 }
 
 // ---------------------------------------------------------------- outputs
@@ -195,12 +201,48 @@ export type PartStatus = 'ready_to_spend' | 'on_track' | 'short'
 export type AccountStatus = 'on_track' | 'running_down' | 'short' | 'unconfirmed'
 
 /** Why a part's steady line starts where it does, for the words on screen. */
-export type SteadySinceReason = 'last_occurrence' | 'plan_started' | 'added' | 'typed' | 'spent'
+export type SteadySinceReason = 'last_occurrence' | 'plan_started' | 'added' | 'typed' | 'spent' | 'finished'
+
+/**
+ * Which round of its part a position is (D53). A part's own id is its
+ * current round, the one saving for a date ahead; a round on or past its
+ * date that nobody has finished is a position of its own, under
+ * `roundKey(lineItemId, dueDate)`, so its money is held and counted apart
+ * from the next round's.
+ */
+export interface PartRound {
+  /** The part's own id: what a form posts. `lineItem.id` is the round's. */
+  lineItemId: Id
+  dueDate: CivilDate
+  /** The part's total: what the round needs before anything is spent. */
+  fullCents: Cents
+  /** Every spend recorded against it. */
+  spentCents: Cents
+  /** The spends that lower its target: those since the last "Save back up". */
+  countedSpentCents: Cents
+  /** On or past its date: "did this get spent?" asks about it. */
+  past: boolean
+  /** The round saving now, which comes round again after its date in the run-forward. */
+  repeats: boolean
+  /**
+   * The round ahead finished early, which the run-forward still measures
+   * the part from, needing nothing there, until its date passes (D53 (3)):
+   * so finishing early never asks for more a week than waiting would.
+   * Null when no round ahead was finished early.
+   */
+  measuredFrom: CivilDate | null
+  /** How many rounds of the part are open, this one included; above one, names carry their suffix. */
+  openRounds: number
+}
 
 export interface PartPosition {
+  /** The round as a part: its date is the round's, its label carries the suffix while another round is open (D53 (8)). */
   lineItem: LineItem
   packageId: Id
   accountId: Id
+  /** Which round this is (D53). */
+  round: PartRound
+  /** What this round still needs: the part's total less the spends that count against it (D53 (2)). */
   totalCents: Cents
   /** When it goes out: its due date, or today when it is overdue and still owed. */
   outflowDate: CivilDate
@@ -344,8 +386,14 @@ export interface AccountFix {
 
 export interface PlanPosition {
   package: Package
-  /** Its live parts, soonest due first. */
+  /** Its live parts, soonest due first: every open round of each (D53). */
   parts: PartPosition[]
+  /**
+   * The figures below are its rounds saving for a date ahead (D53): a round
+   * still open past its date is asked about under "did this get spent?"
+   * and never holds the plan's bar, chart or "Saving since" back. With no
+   * round ahead (a one-off past its date), every round.
+   */
   totalCents: Cents
   steadyPerWeekCents: Cents
   savedForCents: Cents
@@ -354,7 +402,7 @@ export interface PlanPosition {
   tickCents: Cents
   /** The earliest day any live part's steady line starts: the plan's "Saving since". */
   savingSince: CivilDate | null
-  /** Its worst part's status; on track with no live part. */
+  /** Its worst part's status over every open round; on track with no live part. */
   status: PartStatus
   /** Its Short parts' shortfalls added up (D41): what "+ $Y to make up" says on its card. */
   shortByCents: Cents
@@ -481,6 +529,7 @@ interface PartFrame {
   lineItem: LineItem
   packageId: Id
   accountId: Id
+  round: PartRound
   totalCents: Cents
   outflowDate: CivilDate
   isOverdue: boolean
@@ -490,22 +539,37 @@ interface PartFrame {
 }
 
 function frameOf(args: {
+  /** The round as a part: its id and due date are the round's. */
   lineItem: LineItem
   pkg: Package
   cycles: readonly LineItemCycle[]
   today: CivilDate
   transferWeekday: Weekday
+  round: PartRound
+  /** What the round still needs (D53 (2)). */
+  needsCents: Cents
+  /** The day the round started saving when it is not the part's stored round (D53 (1), (3)). */
+  savingFrom: CivilDate | null
 }): PartFrame {
   const { lineItem, pkg, today, transferWeekday } = args
-  const totalCents = lineItemTotalCents(lineItem)
+  const totalCents = args.needsCents
   const isOverdue = compareDates(lineItem.dueDate, today) < 0
-  const savingSince = steadyLineStart(args)
+  // A round after the one the part was stored at started saving on the last
+  // round's date, or the day that round was finished when it was finished
+  // early (D53); the stored round's start is the person's choice (D33).
+  const savingSince: { date: CivilDate; reason: SteadySinceReason } = args.savingFrom
+    ? {
+        date: args.savingFrom,
+        reason: args.savingFrom === previousOccurrence(lineItem.dueDate, lineItem.recurrence) ? 'last_occurrence' : 'finished',
+      }
+    : steadyLineStart(args)
   const from =
     compareDates(savingSince.date, lineItem.dueDate) < 0 ? savingSince.date : lineItem.dueDate
   return {
     lineItem,
     packageId: pkg.id,
     accountId: lineItem.reserveAccountId,
+    round: args.round,
     totalCents,
     outflowDate: isOverdue ? today : lineItem.dueDate,
     isOverdue,
@@ -522,6 +586,50 @@ function frameOf(args: {
       transferWeekday,
     }),
   }
+}
+
+/**
+ * A live part's open rounds as frames (D53): each round on or past its date
+ * not yet finished, under its round key, and the round saving now under
+ * the part's own id, which comes round again in the run-forward. A one-off
+ * has its one round under its own id.
+ */
+function framesOfPart(args: {
+  lineItem: LineItem
+  pkg: Package
+  cycles: readonly LineItemCycle[]
+  today: CivilDate
+  transferWeekday: Weekday
+  roundEvents: readonly RoundEvent[]
+}): PartFrame[] {
+  const { lineItem, today } = args
+  const rounds = roundsOf({ lineItem, events: args.roundEvents, today })
+  const openRounds = rounds.past.length + (rounds.current ? 1 : 0)
+  const repeating = isRecurring(lineItem.recurrence)
+  const frame = (round: Round, current: boolean) =>
+    frameOf({
+      ...args,
+      lineItem: {
+        ...lineItem,
+        id: current || !repeating ? lineItem.id : roundKey(lineItem.id, round.dueDate),
+        dueDate: round.dueDate,
+        label: roundLabel({ label: lineItem.label, dueDate: round.dueDate, recurrence: lineItem.recurrence, openRounds, today }),
+      },
+      round: {
+        lineItemId: lineItem.id,
+        dueDate: round.dueDate,
+        fullCents: round.fullCents,
+        spentCents: round.spentCents,
+        countedSpentCents: round.countedSpentCents,
+        past: round.past,
+        repeats: current && repeating,
+        measuredFrom: current ? rounds.finishedAhead : null,
+        openRounds,
+      },
+      needsCents: round.needsCents,
+      savingFrom: current ? rounds.currentSavingFrom : null,
+    })
+  return [...rounds.past.map((r) => frame(r, false)), ...(rounds.current ? [frame(rounds.current, true)] : [])]
 }
 
 /**
@@ -589,7 +697,10 @@ export interface Slot {
  * repeating parts, which W never goes below.
  */
 export function requirementsFor(args: {
-  parts: readonly Pick<PartFrame, 'lineItem' | 'outflowDate' | 'totalCents'>[]
+  parts: readonly (Pick<PartFrame, 'lineItem' | 'outflowDate' | 'totalCents'> & {
+    /** Which round it is (D53): only the round saving now comes round again, at the part's full total. */
+    round?: Pick<PartRound, 'repeats' | 'fullCents' | 'measuredFrom'>
+  })[]
   today: CivilDate
   transferWeekday: Weekday
   /**
@@ -602,7 +713,10 @@ export function requirementsFor(args: {
   const { parts, today, transferWeekday } = args
   if (parts.length === 0) return { horizon: null, requirements: [], runRatePerWeekCents: 0, slots: [] }
 
-  const horizon = parts.reduce<CivilDate>((h, p) => maxDate(h, p.outflowDate), parts[0]!.outflowDate)
+  // A part whose round ahead was finished early is measured from that
+  // round, needing nothing there, until its date passes (D53 (3)).
+  const measuredDate = (p: (typeof parts)[number]) => p.round?.measuredFrom ?? p.outflowDate
+  const horizon = parts.reduce<CivilDate>((h, p) => maxDate(h, measuredDate(p)), measuredDate(parts[0]!))
   const runTo = args.until ?? horizon
 
   const outflows = new Map<CivilDate, Cents>()
@@ -615,19 +729,35 @@ export function requirementsFor(args: {
   let runRatePerWeekCents = 0
 
   for (const p of parts) {
-    add(p, p.outflowDate, p.totalCents, true)
+    const ownDue = p.lineItem.dueDate
+    const measuredFrom = p.round?.measuredFrom ?? null
+    // A round finished early needs nothing on its date, which is still a
+    // date the account is judged on, as it was before it was finished.
+    if (measuredFrom) outflows.set(measuredFrom, outflows.get(measuredFrom) ?? 0)
+    else add(p, p.outflowDate, p.totalCents, true)
     const recurrence = p.lineItem.recurrence
-    if (!isRecurring(recurrence)) continue
+    if (!isRecurring(recurrence) || p.round?.repeats === false) continue
+    // A later round needs the part's whole total, whatever this one has
+    // already spent (D53); a round between one finished early and this one
+    // was finished early too, and needs nothing.
+    const fullCents = p.round?.fullCents ?? p.totalCents
+    const centsOn = (on: CivilDate) => {
+      const c = compareDates(on, ownDue)
+      return c < 0 ? 0 : c === 0 ? p.totalCents : fullCents
+    }
 
     // Later occurrences come round from the due date as written, the same
     // way a spend rolls it forward, whether or not the first is overdue.
-    let occurrence = p.lineItem.dueDate
+    let occurrence = measuredFrom ?? ownDue
     let next = nextOccurrence(occurrence, recurrence)
     for (let guard = 0; next && guard < MAX_OCCURRENCES; guard += 1) {
       if (compareDates(next, occurrence) <= 0) break
       if (compareDates(next, runTo) > 0) break
       occurrence = next
-      add(p, compareDates(occurrence, today) < 0 ? today : occurrence, p.totalCents, false)
+      const on = compareDates(occurrence, today) < 0 ? today : occurrence
+      if (occurrence === ownDue) add(p, on, p.totalCents, true)
+      else if (compareDates(occurrence, ownDue) < 0) outflows.set(on, outflows.get(on) ?? 0)
+      else add(p, on, fullCents, false)
       next = nextOccurrence(occurrence, recurrence)
     }
     if (!next) continue
@@ -638,17 +768,20 @@ export function requirementsFor(args: {
     const cycleStart = previousOccurrence(next, recurrence) ?? occurrence
     if (!args.until) {
       const share = evenPaceCents({
-        totalCents: p.totalCents,
+        totalCents: centsOn(next),
         fromDate: cycleStart,
         dueDate: next,
         today: horizon,
         transferWeekday,
       })
       terminalCents += share
-      if (share > 0) slots.push({ lineItemId: p.lineItem.id, on: horizon, cents: share, current: false, label: p.lineItem.label })
+      // The round saving now, beyond the horizon, is held for as its share.
+      if (share > 0 || next === ownDue) {
+        slots.push({ lineItemId: p.lineItem.id, on: horizon, cents: share, current: next === ownDue, label: p.lineItem.label })
+      }
     }
     runRatePerWeekCents += ceilDiv(
-      Math.max(0, p.totalCents),
+      Math.max(0, fullCents),
       accrualWeeksBetween(cycleStart, next, transferWeekday),
     )
   }
@@ -1238,6 +1371,16 @@ function accountPosition(args: {
 }
 
 
+/**
+ * A plan's rounds saving for a date ahead (D53): what its bar, chart and
+ * "Saving since" are about. A round still open past its date has its own
+ * question; with no round ahead, every round.
+ */
+export function roundsAhead(parts: readonly PartPosition[]): PartPosition[] {
+  const ahead = parts.filter((p) => !p.round.past)
+  return ahead.length > 0 ? ahead : [...parts]
+}
+
 /** The position: every account run forward, every part counted, every plan and the household rolled up. */
 export function position(input: PositionInput): HouseholdPosition {
   const transferWeekday = input.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
@@ -1246,10 +1389,11 @@ export function position(input: PositionInput): HouseholdPosition {
   const packagesById = new Map(input.packages.map((p) => [p.id, p]))
 
   const frames: PartFrame[] = []
+  const roundEvents = input.roundEvents ?? []
   for (const lineItem of input.lineItems) {
     const pkg = packagesById.get(lineItem.packageId)
     if (!pkg || !isLive(pkg, lineItem)) continue
-    frames.push(frameOf({ lineItem, pkg, cycles, today, transferWeekday }))
+    frames.push(...framesOfPart({ lineItem, pkg, cycles, today, transferWeekday, roundEvents }))
   }
 
   const framesOf = (id: Id) => frames.filter((f) => f.accountId === id)
@@ -1257,27 +1401,29 @@ export function position(input: PositionInput): HouseholdPosition {
     accountPosition({ account, frames: framesOf(account.id), input, packagesById, transferWeekday }),
   )
 
-  const partsById = new Map(accounts.flatMap((a) => a.parts.map((p) => [p.lineItem.id, p] as const)))
+  // Every round of every part (D53): a round still open past its date is a
+  // part of the plan beside the round saving now.
+  const allParts = accounts.flatMap((a) => a.parts)
   const plans: PlanPosition[] = input.packages
     .filter((p) => p.state === 'active')
     .map((pkg) => {
-      const parts = input.lineItems
-        .map((li) => partsById.get(li.id))
-        .filter((p): p is PartPosition => p !== undefined && p.packageId === pkg.id)
+      const parts = allParts
+        .filter((p) => p.packageId === pkg.id)
         .sort(
           (a, b) =>
             compareDates(a.outflowDate, b.outflowDate) ||
             a.lineItem.label.localeCompare(b.lineItem.label),
         )
+      const shown = roundsAhead(parts)
       return {
         package: pkg,
         parts,
-        totalCents: parts.reduce((s, p) => s + p.totalCents, 0),
-        steadyPerWeekCents: parts.reduce((s, p) => s + p.steadyPerWeekCents, 0),
-        savedForCents: parts.reduce((s, p) => s + p.savedForCents, 0),
-        countedCents: parts.reduce((s, p) => s + p.countedCents, 0),
-        tickCents: parts.reduce((s, p) => s + p.tickCents, 0),
-        savingSince: parts.reduce<CivilDate | null>(
+        totalCents: shown.reduce((s, p) => s + p.totalCents, 0),
+        steadyPerWeekCents: shown.reduce((s, p) => s + p.steadyPerWeekCents, 0),
+        savedForCents: shown.reduce((s, p) => s + p.savedForCents, 0),
+        countedCents: shown.reduce((s, p) => s + p.countedCents, 0),
+        tickCents: shown.reduce((s, p) => s + p.tickCents, 0),
+        savingSince: shown.reduce<CivilDate | null>(
           (d, p) => (d === null || compareDates(p.savingSince.date, d) < 0 ? p.savingSince.date : d),
           null,
         ),
@@ -1521,6 +1667,8 @@ export function steadySinceWords(reason: SteadySinceReason): string {
       return 'the day you gave'
     case 'spent':
       return 'the day it was last spent'
+    case 'finished':
+      return 'the day the last one was finished'
   }
 }
 
@@ -1836,7 +1984,9 @@ export function planChart(args: {
   transferWeekday?: Weekday
   maxPoints?: number
 }): PlanChart | null {
-  const { plan, today } = args
+  const { today } = args
+  // The chart is about the rounds saving for a date ahead (D53).
+  const plan = { ...args.plan, parts: roundsAhead(args.plan.parts) }
   const transferWeekday = args.transferWeekday ?? DEFAULT_TRANSFER_WEEKDAY
   if (plan.parts.length === 0) return null
   const to = plan.parts.reduce<CivilDate>((d, p) => maxDate(d, p.lineItem.dueDate), plan.parts[0]!.lineItem.dueDate)
