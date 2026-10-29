@@ -37,10 +37,12 @@ import {
   referenceFreshness,
   shortDate,
   sourceName,
+  tripStage,
   weekdayName,
   type SchoolCalendarSourceKind,
   type SchoolDayOff,
   type Trip,
+  type TripStage,
 } from '@/domain'
 import { TravelerFields } from './traveler-fields'
 import { ParkCalendar } from './park-calendar'
@@ -70,10 +72,14 @@ function bySchoolYear(days: readonly SchoolDayOff[]): { schoolYear: string; days
   return [...groups].map(([schoolYear, list]) => ({ schoolYear, days: list })).sort((a, b) => a.schoolYear.localeCompare(b.schoolYear))
 }
 
+const STAGE_BADGES: Record<TripStage, { tone: 'neutral' | 'accent' | 'ahead'; label: string }> = {
+  put_away: { tone: 'neutral', label: 'Put away' },
+  plan: { tone: 'ahead', label: 'A plan now' },
+  working: { tone: 'accent', label: 'Working it out' },
+}
+
 function tripStatus(trip: Trip): { tone: 'neutral' | 'accent' | 'ahead'; label: string } {
-  if (trip.retiredAt) return { tone: 'neutral', label: 'Put away' }
-  if (trip.packageId) return { tone: 'ahead', label: 'A plan now' }
-  return { tone: 'accent', label: 'Working it out' }
+  return STAGE_BADGES[tripStage(trip)]
 }
 
 export default async function TripsPage({

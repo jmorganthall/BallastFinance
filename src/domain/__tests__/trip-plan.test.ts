@@ -29,6 +29,7 @@ import {
   parseCrowdPage,
   parseNominatim,
   parseThrillDataCrowd,
+  thrillDataParkLinks,
   pickLevel,
   reservationCostCents,
   reservationMoney,
@@ -484,6 +485,38 @@ describe('reading a crowd calendar', () => {
     expect(parseThrillDataCrowd(thrillDataPage, '2027-06')).toEqual({ levels: [], reason: 'The calendar had days, but none for 2027-06.' })
     // Each of the site's five steps is its own step on the busyness colours.
     expect([1, 3, 5, 7, 9].map(busynessStep)).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it("Thrill Data: a park's own page reads with the same cells, written as that park, and never falls back", () => {
+    expect(parseThrillDataCrowd(thrillDataPage, '2027-10', 'epcot').levels).toEqual([
+      { date: '2027-10-12', park: 'epcot', level: 5 },
+      { date: '2027-10-31', park: 'epcot', level: 3 },
+    ])
+    // A park page is only ever read as a calendar of that park: a page without cells is nothing, not a guess at which park.
+    expect(parseThrillDataCrowd(thrillDataJson, '2027-06', 'epcot')).toEqual({ levels: [], reason: 'Nothing on the page read as a crowd calendar.' })
+  })
+
+  it("Thrill Data: the resort page's links to each park's crowd calendar, never a guessed address", () => {
+    const resort = `<nav>
+<a href="/trip-planning/crowd-calendar/resort/wdw/2028">2028</a>
+<a href="/trip-planning/crowd-calendar/park/wdw/magic-kingdom/2027">Magic Kingdom</a>
+<a href="https://www.thrill-data.com/trip-planning/crowd-calendar/park/wdw/epcot/2026">EPCOT 2026</a>
+<a href="https://www.thrill-data.com/trip-planning/crowd-calendar/park/wdw/epcot/2027?x=1&amp;y=2">EPCOT</a>
+<a href="https://www.thrill-data.com/waits/park/wdw/hollywood-studios/">Hollywood Studios waits</a>
+<a href="https://elsewhere.example/crowd-calendar/animal-kingdom/2027">Animal Kingdom</a>
+<a class="park" href='/trip-planning/crowd-calendar/park/wdw/animal-kingdom'>  <span>Animal Kingdom</span> </a>
+<a href="/trip-planning/crowd-calendar/park/wdw/typhoon-lagoon/2027">Typhoon Lagoon</a>
+</nav>`
+    expect(thrillDataParkLinks(resort, '2027-11')).toEqual([
+      { park: 'magic_kingdom', url: 'https://www.thrill-data.com/trip-planning/crowd-calendar/park/wdw/magic-kingdom/2027' },
+      // The year asked for wins over another year's page.
+      { park: 'epcot', url: 'https://www.thrill-data.com/trip-planning/crowd-calendar/park/wdw/epcot/2027?x=1&y=2' },
+      // Not a crowd calendar, and another site's page, are passed over; a link with no year is kept as it is.
+      { park: 'animal_kingdom', url: 'https://www.thrill-data.com/trip-planning/crowd-calendar/park/wdw/animal-kingdom' },
+    ])
+    expect(thrillDataParkLinks(thrillDataPage, '2027-01')).toEqual([])
+    expect(thrillDataParkLinks('', '2027-01')).toEqual([])
+    expect(CROWD_SOURCES[0]!.parkLinks).toBe(thrillDataParkLinks)
   })
 
   it('Thrill Data: a page with no calendar cells falls back to the general reader of crowd pages', () => {

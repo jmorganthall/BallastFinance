@@ -470,6 +470,24 @@ principles, and they are non-negotiable.
   pages keep one column. The `@theme` block is `static` because colours
   read as `var(--color-busy-${step})` from code are invisible to Tailwind's
   scan, and light mode silently lost busy steps 2-5 without it.
+- **A tapped day says each park, and the calendar shows our trips** (PRD
+  D54, rev 108). `CalendarCell.parks` is `busynessFor` for each of
+  `THEME_PARKS`, listed in the day's detail with that park's hours; the
+  grid, tooltip and year strip still show the one figure, the parks'
+  average. Per-park levels come from Thrill Data's park pages, found only
+  through the links on the resort page (`thrillDataParkLinks`: Thrill
+  Data's own site, "crowd-calendar" in the path, the asked year preferred)
+  and read by `parseThrillDataCrowd(text, month, park)`, which never falls
+  back to the general reader for a park page. No park address is guessed;
+  a resort page with no such links, or a park page that fails, is a note
+  in the held pull. `pullCrowdCalendar` reads each address once a pull.
+  Trips not put away (`tripStage` in `src/domain/trip.ts`: `working`,
+  `plan` once sent to Plans, `put_away`) come in through
+  `Engine.calendarTrips` as `CalendarCell.trips` (plans first, with
+  `starts`/`ends`) and `YearStripDay.trip`: a band across the top of the
+  days, solid accent for a plan, accent stripes with an outline while
+  being worked out, so the stage never rests on colour alone. Nothing is
+  stored.
 - **Which park, which day is a derivation, and "Use this plan" is the only
   write** (PRD D32, rev 45). `src/domain/park-day-plan.ts` documents the fit
   at its top: the busyness level (`MISSING_BUSYNESS` 5.5 when nothing is
@@ -582,7 +600,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 850 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 858 tests. Database tests skip when DATABASE_URL is unset
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

@@ -38,6 +38,7 @@ import {
   parseIcal,
   parseNominatim,
   parseOsrmRoute,
+  PARK_LABELS,
   type CivilDate,
   type CrowdSource,
   type DayOffInput,
@@ -154,22 +155,60 @@ export async function geocodeAddress(
 export interface CrowdFetch extends ParsedCrowd {
   source: CrowdSource
   url: string
+  /** What each park's own page said when it gave nothing (D54), for the screen. The resort's levels stand regardless. */
+  notes: string[]
 }
 
-/** One source, one month: the page read by that source's own parser. An error status is thrown; an unreadable page is nothing with a reason. */
+/** Pages already read in one pull, by address, so two months of the same year ask each page once. */
+export type CrowdPageCache = Map<string, Promise<string>>
+
+async function crowdPage(source: CrowdSource, url: string, fetchImpl: typeof fetch, cache: CrowdPageCache): Promise<string> {
+  let page = cache.get(url)
+  if (!page) {
+    page = (async () => {
+      const response = await fetchImpl(url, {
+        signal: AbortSignal.timeout(20_000),
+        headers: { accept: 'text/html, application/json', 'user-agent': userAgent() },
+      })
+      if (!response.ok) throw new Error(`${source.label} answered ${response.status}`)
+      return response.text()
+    })()
+    cache.set(url, page)
+  }
+  return page
+}
+
+/**
+ * One source, one month: the page read by that source's own parser. An
+ * error status is thrown; an unreadable page is nothing with a reason. A
+ * source that links to each park's own calendar (D54) has those pages read
+ * too, one request each, each as its park; a park page that fails is a
+ * note, never the end of the resort's levels.
+ */
 export async function fetchCrowdCalendar(
   source: CrowdSource,
   destination: TripDestination,
   month: string,
   fetchImpl: typeof fetch = fetch,
+  cache: CrowdPageCache = new Map(),
 ): Promise<CrowdFetch> {
   const url = source.url(destination, month)
-  const response = await fetchImpl(url, {
-    signal: AbortSignal.timeout(20_000),
-    headers: { accept: 'text/html, application/json', 'user-agent': userAgent() },
-  })
-  if (!response.ok) throw new Error(`${source.label} answered ${response.status}`)
-  return { source, url, ...source.parse(await response.text(), month) }
+  const text = await crowdPage(source, url, fetchImpl, cache)
+  const got: CrowdFetch = { source, url, ...source.parse(text, month), notes: [] }
+  if (!source.parkLinks || !source.parsePark || got.levels.length === 0) return got
+  const links = source.parkLinks(text, month)
+  if (links.length === 0) got.notes.push(`${source.label}: the resort page links to no park's own calendar.`)
+  for (const link of links) {
+    const label = `${source.label}, ${PARK_LABELS[link.park]}`
+    try {
+      const park = source.parsePark(await crowdPage(source, link.url, fetchImpl, cache), month, link.park)
+      if (park.levels.length === 0) got.notes.push(`${label}: ${park.reason ?? 'nothing for ' + month}`)
+      got.levels.push(...park.levels)
+    } catch (error) {
+      got.notes.push(`${label}: ${(error as Error).message.replace(`${source.label} `, '')}`)
+    }
+  }
+  return got
 }
 
 export interface CrowdPullResult {
@@ -183,7 +222,7 @@ export interface CrowdPullResult {
 /**
  * The sources in order (D23): the first that reads as a crowd calendar for
  * every month asked wins. Each source's failure is a line for the screen,
- * never an exception.
+ * never an exception; so is a park page that gave nothing, said once.
  */
 export async function pullCrowdCalendar(
   destination: TripDestination,
@@ -192,17 +231,20 @@ export async function pullCrowdCalendar(
   sources: readonly CrowdSource[] = CROWD_SOURCES,
 ): Promise<CrowdPullResult> {
   const notes: string[] = []
+  const cache: CrowdPageCache = new Map()
   for (const source of sources) {
     const levels: CrowdFetch['levels'] = []
+    const parkNotes = new Set<string>()
     let failed: string | null = null
     for (const month of months) {
       try {
-        const got = await fetchCrowdCalendar(source, destination, month, fetchImpl)
+        const got = await fetchCrowdCalendar(source, destination, month, fetchImpl, cache)
         if (got.levels.length === 0) {
           failed = `${source.label}: ${got.reason ?? 'nothing for ' + month}`
           break
         }
         levels.push(...got.levels)
+        for (const note of got.notes) parkNotes.add(note)
       } catch (error) {
         failed = `${source.label}: ${(error as Error).message}`
         break
@@ -212,7 +254,7 @@ export async function pullCrowdCalendar(
       notes.push(failed)
       continue
     }
-    notes.push(`${source.label}: ${levels.length} park-days read.`)
+    notes.push(`${source.label}: ${levels.length} park-days read.`, ...parkNotes)
     return { source, levels, notes }
   }
   return { source: null, levels: [], notes }

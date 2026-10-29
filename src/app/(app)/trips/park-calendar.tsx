@@ -8,7 +8,12 @@
  * there is school, black stripes mean we cannot go, and the bar is how busy
  * on the green-to-red scale (--color-busy-1..5, D32) with the number printed
  * beside it, so colour is never the only carrier. Where each figure came
- * from is in the day's tooltip and in the detail a tap opens.
+ * from is in the day's tooltip and in the detail a tap opens, with each
+ * park's own figure (D54).
+ *
+ * Trips (D54) lie as a band across the top of their days, edge to edge
+ * along the week: solid once a trip is a plan, striped while it is being
+ * worked out, so the stage never rests on colour.
  */
 
 import Link from 'next/link'
@@ -22,11 +27,11 @@ import {
   monthLabel,
   PARK_LABELS,
   QUEUE_TIMES_ATTRIBUTION,
-  THEME_PARKS,
   WEATHER_HORIZON_WORDS,
   weekdayName,
   type CalendarCell,
   type CalendarMonth,
+  type CalendarTripDay,
   type YearStripMonth,
 } from '@/domain'
 
@@ -34,6 +39,33 @@ const WEEKDAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
 /** Black diagonal stripes over a day we cannot go (D48); what is under them still shows. */
 const CANT_GO: CSSProperties = { background: 'repeating-linear-gradient(135deg, var(--color-cantgo) 0 5px, transparent 5px 10px)' }
+
+const STAGE_WORDS: Record<CalendarTripDay['stage'], string> = { plan: 'a plan now', working: 'working it out' }
+
+/** A trip's band on one day (D54): solid for a plan, striped with an outline while being worked out; rounded where it starts and ends. */
+function TripBand({ trip, row }: { trip: CalendarTripDay; row: number }) {
+  const edge = '1px solid var(--color-accent)'
+  const style: CSSProperties = {
+    top: `${2 + row * 10}px`,
+    left: trip.starts ? '3px' : '-1px',
+    right: trip.ends ? '3px' : '-1px',
+    ...(trip.stage === 'plan'
+      ? { background: 'var(--color-accent)' }
+      : {
+          background: 'repeating-linear-gradient(135deg, var(--color-accent) 0 2px, transparent 2px 5px)',
+          borderTop: edge,
+          borderBottom: edge,
+          borderLeft: trip.starts ? edge : undefined,
+          borderRight: trip.ends ? edge : undefined,
+        }),
+  }
+  return (
+    <span
+      className={`pointer-events-none absolute z-10 h-2 ${trip.starts ? 'rounded-l-full' : ''} ${trip.ends ? 'rounded-r-full' : ''}`}
+      style={style}
+    />
+  )
+}
 
 /** "9:00 pm" from "21:00". */
 export function clockWords(time: string): string {
@@ -65,6 +97,7 @@ function dayWords(cell: CalendarCell): string {
   if (cell.daysOff.length > 0) parts.push(`no school: ${cell.daysOff.join(', ')}`)
   else if (cell.weekend) parts.push('weekend')
   if (cell.blackouts.length > 0) parts.push(`cannot go: ${cell.blackouts.join(', ')}`)
+  for (const t of cell.trips) parts.push(`trip: ${t.name} (${STAGE_WORDS[t.stage]})`)
   return parts.join(' · ')
 }
 
@@ -129,6 +162,7 @@ export function ParkCalendar({
                     className="relative h-16 border border-[var(--color-line)] p-0 align-top sm:h-20 lg:h-24"
                     style={c?.noSchool ? { background: 'var(--color-noschool)' } : undefined}
                   >
+                    {c?.trips.slice(0, 2).map((t, row) => <TripBand key={t.id} trip={t} row={row} />)}
                     {c ? <DayCell cell={c} href={dayHref(c.date)} selected={c.date === selected} /> : null}
                   </td>
                 ))}
@@ -161,7 +195,7 @@ export function ParkCalendar({
               <li>
                 {cell.busyness ? (
                   <>
-                    <strong>How busy: {cell.busyness.level}</strong> <span className="text-[var(--color-ink-soft)]">({crowdWord(cell.busyness.level)})</span>{' '}
+                    <strong>How busy: {Math.round(cell.busyness.level)}</strong> <span className="text-[var(--color-ink-soft)]">({crowdWord(cell.busyness.level)})</span>{' '}
                     <span className="text-[var(--color-ink-soft)]">
                       — {BUSYNESS_SOURCE_WORDS[cell.busyness.source]}
                       {cell.busyness.detail && cell.busyness.source !== 'typed' ? `, ${cell.busyness.detail}` : ''}
@@ -172,25 +206,47 @@ export function ParkCalendar({
                   <span className="text-[var(--color-ink-soft)]">How busy: not known yet.</span>
                 )}
               </li>
-              {hoursOn(cell.date).length > 0 ? (
-                <li>
-                  {THEME_PARKS.map((park) => {
+              <li>
+                <ul className="space-y-1.5">
+                  {cell.parks.map(({ park, busyness }) => {
                     const h = hoursOn(cell.date).find((x) => x.park === park)
-                    return h ? (
-                      <span key={park} className="block">
-                        {PARK_LABELS[park]} {clockWords(h.opens)}–{clockWords(h.closes)}
-                        {h.earlyEntry ? ` (early entry ${clockWords(h.earlyEntry)})` : ''}
-                        {h.extendedEvening ? ` (extended to ${clockWords(h.extendedEvening)})` : ''}
-                      </span>
-                    ) : null
+                    return (
+                      <li key={park}>
+                        <span className="grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-x-2">
+                          <span className="font-medium">{PARK_LABELS[park]}</span>
+                          {busyness ? <BusyBar level={busyness.level} /> : <span className="text-right text-xs text-[var(--color-ink-soft)]">not known yet</span>}
+                        </span>
+                        <span className="block text-xs text-[var(--color-ink-soft)]">
+                          {busyness
+                            ? `${crowdWord(busyness.level)}, ${BUSYNESS_SOURCE_WORDS[busyness.source]}${busyness.fetchedOn ? `, ${dataAge(busyness.fetchedOn, today)}` : ''}`
+                            : 'How busy not known yet'}
+                          {h ? (
+                            <>
+                              {' · '}
+                              {clockWords(h.opens)}–{clockWords(h.closes)}
+                              {h.earlyEntry ? ` (early entry ${clockWords(h.earlyEntry)})` : ''}
+                              {h.extendedEvening ? ` (extended to ${clockWords(h.extendedEvening)})` : ''}
+                            </>
+                          ) : null}
+                        </span>
+                      </li>
+                    )
                   })}
-                </li>
-              ) : (
-                <li className="text-[var(--color-ink-soft)]">No park hours for this date yet.</li>
-              )}
+                </ul>
+                {hoursOn(cell.date).length === 0 ? <span className="mt-1 block text-xs text-[var(--color-ink-soft)]">No park hours for this date yet.</span> : null}
+              </li>
               {cell.holidays.length > 0 ? <li>{cell.holidays.join(', ')}</li> : null}
               {cell.daysOff.length > 0 ? <li>No school: {cell.daysOff.join(', ')}</li> : null}
               {cell.blackouts.length > 0 ? <li className="text-[var(--color-behind)]">Cannot go: {cell.blackouts.join(', ')}</li> : null}
+              {cell.trips.map((t) => (
+                <li key={t.id}>
+                  Trip:{' '}
+                  <Link href={`/trips/${t.id}`} className="font-medium underline underline-offset-4">
+                    {t.name}
+                  </Link>{' '}
+                  <span className="text-[var(--color-ink-soft)]">({STAGE_WORDS[t.stage]})</span>
+                </li>
+              ))}
             </ul>
             {children ? <div className="mt-2">{children}</div> : null}
           </div>
@@ -210,6 +266,12 @@ export function ParkCalendar({
   )
 }
 
+/** A trip on the year strip (D54): solid for a plan, dashes while being worked out. */
+const STRIP_TRIP: Record<CalendarTripDay['stage'], CSSProperties> = {
+  plan: { background: 'var(--color-accent)' },
+  working: { background: 'repeating-linear-gradient(90deg, var(--color-accent) 0 2px, transparent 2px 4px)' },
+}
+
 /** Twelve months, a sliver a day, coloured by how busy (grey where nothing is known); a tap opens that month (D48). */
 function YearStrip({ months, current, monthHref }: { months: YearStripMonth[]; current: string; monthHref: (month: string) => string }) {
   return (
@@ -223,7 +285,12 @@ function YearStrip({ months, current, monthHref }: { months: YearStripMonth[]; c
           className={`block rounded-md p-1 ${m.month === current ? 'ring-2 ring-[var(--color-accent)]' : ''}`}
         >
           <span className={`block text-[11px] leading-tight ${m.month === current ? 'font-semibold' : 'text-[var(--color-ink-soft)]'}`}>{m.label}</span>
-          <span className="mt-0.5 flex h-5 overflow-hidden rounded-sm bg-[var(--color-card)]">
+          <span className="mt-0.5 flex h-[3px]" aria-hidden="true">
+            {m.days.map((d) => (
+              <span key={d.date} className="flex-1" style={d.trip ? STRIP_TRIP[d.trip] : undefined} />
+            ))}
+          </span>
+          <span className="mt-px flex h-5 overflow-hidden rounded-sm bg-[var(--color-card)]">
             {m.days.map((d) => (
               <span
                 key={d.date}
@@ -240,6 +307,9 @@ function YearStrip({ months, current, monthHref }: { months: YearStripMonth[]; c
   )
 }
 
+/** Room at the top of a day for its trip bands (D54), so the date never sits under one. */
+const TRIP_ROOM = ['pt-0.5 sm:pt-1', 'pt-3', 'pt-5']
+
 function DayCell({ cell, href, selected }: { cell: CalendarCell; href: string; selected: boolean }) {
   const words = dayWords(cell)
   const sure = cell.weather?.horizon === 'forecast'
@@ -248,7 +318,7 @@ function DayCell({ cell, href, selected }: { cell: CalendarCell; href: string; s
       href={href}
       title={words}
       aria-label={words}
-      className={`absolute inset-0 block px-1 py-0.5 text-left sm:px-1.5 sm:py-1 ${selected ? 'ring-2 ring-inset ring-[var(--color-accent)]' : ''} ${cell.past ? 'opacity-50' : ''}`}
+      className={`absolute inset-0 block px-1 pb-0.5 text-left sm:px-1.5 sm:pb-1 ${TRIP_ROOM[Math.min(cell.trips.length, 2)]} ${selected ? 'ring-2 ring-inset ring-[var(--color-accent)]' : ''} ${cell.past ? 'opacity-50' : ''}`}
     >
       <span
         className={`inline-block min-w-[1.5em] rounded-full text-center text-xs font-semibold sm:text-sm ${cell.today ? 'ring-2 ring-[var(--color-accent)]' : ''}`}

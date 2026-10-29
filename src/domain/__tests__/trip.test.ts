@@ -23,6 +23,7 @@ import {
   toIntake,
   tripDays,
   tripNights,
+  tripStage,
   validateChoices,
   validateReferencePrices,
   validateTripInputs,
@@ -472,5 +473,15 @@ describe('validation', () => {
     expect(() => validateChoices(choices({ promotion: { name: 'x', percentOffBasisPoints: 100, amountOffCents: 100, appliesToCategory: 'lodging', bookBy: TODAY } }), trip)).toThrow(TripDataError)
     expect(() => validateChoices(choices({ promotion: { name: 'x', appliesToCategory: 'lodging', bookBy: TODAY } }), trip)).toThrow(TripDataError)
     expect(() => validateChoices(choices({ promotion: { name: 'x', percentOffBasisPoints: 2000, appliesToCategory: 'promotion', bookBy: TODAY } }), trip)).toThrow(TripDataError)
+  })
+})
+
+describe("a trip's stage", () => {
+  it('working it out until it is a plan; put away over both (D54)', () => {
+    const trip = { packageId: null, retiredAt: null }
+    expect(tripStage(trip)).toBe('working')
+    expect(tripStage({ ...trip, packageId: 'p1' })).toBe('plan')
+    expect(tripStage({ packageId: 'p1', retiredAt: '2026-10-01' })).toBe('put_away')
+    expect(tripStage({ ...trip, retiredAt: '2026-10-01' })).toBe('put_away')
   })
 })

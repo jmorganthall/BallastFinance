@@ -239,6 +239,7 @@ import {
   type WeekWeights,
   busynessSources,
   calendarMonth as layOutMonth,
+  tripStage,
   DEFAULT_QUEUE_TIMES_GROUP,
   DEFAULT_QUEUE_TIMES_PARKS,
   DESTINATIONS,
@@ -260,6 +261,7 @@ import {
   validateWaitObservation,
   type BusynessSources,
   type CalendarMonth,
+  type CalendarTrip,
   type YearStripMonth,
   type ParkHours,
   type ParkWeather,
@@ -4769,12 +4771,13 @@ export class Engine {
   async calendarMonth(month: string, destination: TripDestination = 'wdw'): Promise<CalendarMonth> {
     validateMonth(month)
     const range = monthBounds(month)
-    const [weather, hours, daysOff, blackouts, busyness] = await Promise.all([
+    const [weather, hours, daysOff, blackouts, busyness, trips] = await Promise.all([
       this.parkWeather(range, destination),
       this.parkHours(range, destination),
       this.schoolDaysOff(range),
       this.blackoutDates(),
       this.busynessSources(range, destination),
+      this.calendarTrips(destination),
     ])
     return layOutMonth({
       month,
@@ -4785,14 +4788,30 @@ export class Engine {
       holidays: federalHolidaysBetween(range.from, range.to),
       blackouts,
       today: this.today(),
+      trips,
     })
   }
 
   /** The twelve-month strip above the calendar (D48), from this month on: how busy and whether we can go, a sliver a day. */
   async calendarYear(destination: TripDestination = 'wdw'): Promise<YearStripMonth[]> {
     const fromMonth = monthOf(this.today())
-    const [busyness, blackouts] = await Promise.all([this.busynessSources(yearStripBounds(fromMonth), destination), this.blackoutDates()])
-    return yearStrip({ fromMonth, busyness, blackouts, today: this.today() })
+    const [busyness, blackouts, trips] = await Promise.all([
+      this.busynessSources(yearStripBounds(fromMonth), destination),
+      this.blackoutDates(),
+      this.calendarTrips(destination),
+    ])
+    return yearStrip({ fromMonth, busyness, blackouts, today: this.today(), trips })
+  }
+
+  /** The household's trips to a destination as the calendar draws them (D54): every one not put away, with its stage. */
+  private async calendarTrips(destination: TripDestination): Promise<CalendarTrip[]> {
+    const trips: CalendarTrip[] = []
+    for (const t of await this.listTrips()) {
+      const stage = tripStage(t)
+      if (t.destination !== destination || stage === 'put_away') continue
+      trips.push({ id: t.id, name: t.name, startDate: t.startDate, endDate: t.endDate, stage })
+    }
+    return trips
   }
 
   private async recordSchoolCalendarChange(
