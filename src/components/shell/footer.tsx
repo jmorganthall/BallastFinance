@@ -9,13 +9,19 @@
  */
 
 import { runningBuild, shortRevision, updateStatus } from '@/server/version'
+import { selfUpdateOffered } from '@/server/self-update'
+import { requireEngine } from '@/server/session'
+import { dismissBackupNoticeAction } from '@/server/actions'
+import { UpdateNow } from './update-now'
 
 const REPO = 'https://github.com/jmorganthall/BallastFinance'
 
 export async function AppFooter() {
   const build = runningBuild()
-  const status = await updateStatus()
+  const { engine } = await requireEngine()
+  const [status, backupNotice] = await Promise.all([updateStatus(), engine.backupNotice()])
   const revision = shortRevision(build.revision)
+  const offered = selfUpdateOffered()
 
   const buildLabel = [build.version ? `v${build.version}` : null, revision ? `(${revision})` : null]
     .filter(Boolean)
@@ -31,10 +37,14 @@ export async function AppFooter() {
           <p className="font-semibold">A newer version of Ballast is available.</p>
           <p className="mt-1">
             This one is {revision ?? 'an older build'}; the latest image is{' '}
-            {shortRevision(status.latestRevision)}. Pull the latest image and restart the
-            container to update. Nothing here needs doing first — the update migrates itself on
-            start.
+            {shortRevision(status.latestRevision)}.{' '}
+            {offered
+              ? 'Press Update now to install it, or pull the latest image and restart the container.'
+              : 'Pull the latest image and restart the container to update.'}{' '}
+            Nothing here needs doing first — the update migrates itself on start, and backs
+            the database up first when it changes it.
           </p>
+          {offered ? <UpdateNow revision={build.revision} /> : null}
           <p className="mt-2">
             <a
               href={`${REPO}/compare/${build.revision}...${status.latestRevision}`}
@@ -46,6 +56,20 @@ export async function AppFooter() {
             </a>
           </p>
         </div>
+      ) : null}
+
+      {backupNotice ? (
+        <form
+          action={dismissBackupNoticeAction}
+          role="status"
+          className="mb-4 flex flex-col gap-2 rounded-2xl border border-[var(--color-caution)] bg-[var(--color-caution-soft)] p-3 text-sm text-[var(--color-ink)] sm:flex-row sm:items-center sm:justify-between"
+        >
+          <input type="hidden" name="backup_id" value={backupNotice.id} />
+          <p>The last update changed the database without a backup: {backupNotice.reason}.</p>
+          <button type="submit" className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-1 font-medium">
+            Got it
+          </button>
+        </form>
       ) : null}
 
       <div className="flex flex-col gap-1 border-t border-[var(--color-line)] pt-4 sm:flex-row sm:items-center sm:justify-between">
