@@ -13,6 +13,9 @@
  *      meant the app could not connect at all, or worse, someone "fixed" it by
  *      handing the app the owner's credentials, which silently undoes the
  *      append-only guarantee.
+ *   1b. When a migration is waiting, back the database up first
+ *      (src/server/db-backup.ts). A failed backup never stops the start; it
+ *      is recorded after the migrations and shown in the app.
  *   4. Seed the household and allowlist, idempotently. Without an allowlist
  *      entry nobody can sign in, so a fresh stack would come up unusable.
  *
@@ -24,7 +27,16 @@
 import { drizzle } from 'drizzle-orm/postgres-js'
 import { migrate } from 'drizzle-orm/postgres-js/migrator'
 import postgres from 'postgres'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import * as schema from '../src/db/schema'
+import {
+  DEFAULT_BACKUP_DIR,
+  pendingMigrations,
+  takeBackup,
+  type BackupResult,
+  type MigrationJournal,
+} from '../src/server/db-backup'
 import { seedHousehold } from './seed'
 
 const APP_ROLE = process.env.APP_DB_ROLE ?? 'ballast_app'
@@ -87,6 +99,68 @@ async function setAppRolePassword(sql: postgres.Sql, password: string): Promise<
   log(`password set for the restricted role "${APP_ROLE}"`)
 }
 
+interface BackupBeforeMigrating {
+  pending: string[]
+  result: BackupResult
+}
+
+/**
+ * A backup, only when a migration is waiting on a database that already holds
+ * something. Never throws: whatever goes wrong becomes the recorded reason,
+ * and the start goes on.
+ */
+async function backUpBeforeMigrating(
+  sql: postgres.Sql,
+  migrationUrl: string,
+): Promise<BackupBeforeMigrating | null> {
+  let pending: string[]
+  try {
+    const journal = JSON.parse(
+      await readFile(join(MIGRATIONS_FOLDER, 'meta', '_journal.json'), 'utf8'),
+    ) as MigrationJournal
+    const waiting = await pendingMigrations(sql, journal)
+    if (waiting.fresh || waiting.pending.length === 0) return null
+    pending = waiting.pending
+  } catch (error) {
+    log(`WARNING: could not tell whether a migration is waiting: ${(error as Error).message}`)
+    return null
+  }
+
+  log(`${pending.length} migration(s) waiting; backing up first`)
+  let result: BackupResult
+  try {
+    result = await takeBackup({
+      databaseUrl: migrationUrl,
+      dir: process.env.BALLAST_BACKUP_DIR?.trim() || DEFAULT_BACKUP_DIR,
+    })
+  } catch (error) {
+    result = { ok: false, reason: (error as Error).message, elapsedMs: 0 }
+  }
+  if (result.ok) log(`backed up to ${result.file} (${result.bytes} bytes) before migrating`)
+  else log(`WARNING: no backup before migrating: ${result.reason} — starting anyway`)
+  return { pending, result }
+}
+
+/** After the migrations, because the table that holds it may arrive in one of them. */
+async function recordBackup(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  { pending, result }: BackupBeforeMigrating,
+): Promise<void> {
+  try {
+    await db.insert(schema.databaseBackups).values({
+      revision: process.env.BALLAST_BUILD_SHA?.trim() || null,
+      migrations: pending,
+      ok: result.ok,
+      file: result.ok ? result.file : null,
+      bytes: result.ok ? result.bytes : null,
+      elapsedMs: result.elapsedMs,
+      reason: result.ok ? null : result.reason,
+    })
+  } catch (error) {
+    log(`WARNING: could not record the backup: ${(error as Error).message}`)
+  }
+}
+
 async function main(): Promise<void> {
   const migrationUrl = process.env.DATABASE_MIGRATION_URL
   if (!migrationUrl) {
@@ -111,8 +185,12 @@ async function main(): Promise<void> {
   const db = drizzle(sql, { schema })
 
   try {
+    const backup = await backUpBeforeMigrating(sql, migrationUrl)
+
     await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER })
     log('migrations applied')
+
+    if (backup) await recordBackup(db, backup)
 
     const appPassword = process.env.APP_DB_PASSWORD
     if (appPassword) {

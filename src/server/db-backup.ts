@@ -25,6 +25,7 @@ import { createWriteStream } from 'node:fs'
 import { access, constants, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { createGzip } from 'node:zlib'
+import type postgres from 'postgres'
 
 export const DEFAULT_BACKUP_DIR = '/backups'
 export const BACKUP_TIMEOUT_MS = 2 * 60 * 1000
@@ -195,4 +196,33 @@ export async function takeBackup(input: {
   }
   await rename(partial, file)
   return { ok: true, file, bytes: (await stat(file)).size, elapsedMs: elapsed() }
+}
+
+export interface MigrationJournal {
+  entries: { tag: string; when: number }[]
+}
+
+/**
+ * Which migrations are waiting, by drizzle's own rule: an entry is applied
+ * when its `when` is at or before the newest `created_at` in
+ * `drizzle.__drizzle_migrations`. No such table means a database never
+ * migrated -- a first install, with nothing in it to back up. Asked as the
+ * owner: the app's role cannot see the drizzle schema.
+ */
+export async function pendingMigrations(
+  sql: postgres.Sql,
+  journal: MigrationJournal,
+): Promise<{ fresh: boolean; pending: string[] }> {
+  const [exists] = await sql<{ present: boolean }[]>`
+    select to_regclass('drizzle.__drizzle_migrations') is not null as present
+  `
+  if (!exists?.present) return { fresh: true, pending: journal.entries.map((e) => e.tag) }
+  const [last] = await sql<{ at: string | null }[]>`
+    select max(created_at)::text as at from drizzle.__drizzle_migrations
+  `
+  const lastAt = last?.at == null ? null : Number(last.at)
+  return {
+    fresh: false,
+    pending: journal.entries.filter((e) => lastAt === null || e.when > lastAt).map((e) => e.tag),
+  }
 }

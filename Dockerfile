@@ -34,6 +34,12 @@ ENV PORT=3000
 ARG GIT_SHA=""
 ENV BALLAST_BUILD_SHA=$GIT_SHA
 
+# pg_dump, for the backup the bootstrap takes before a migration. It must be
+# the server's major version or newer: the database is postgres:16. Should a
+# later Alpine drop the 16 client, its default (newer) client still dumps a 16
+# server, so the build falls back to it rather than failing.
+RUN apk add --no-cache postgresql16-client || apk add --no-cache postgresql-client
+
 RUN addgroup -g 1001 -S nodejs && adduser -S ballast -u 1001
 
 COPY --from=builder /app/public ./public
