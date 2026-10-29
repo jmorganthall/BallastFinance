@@ -410,7 +410,27 @@ describe('the calendar', () => {
     expect(oct25).toMatchObject({ weather: { horizon: 'normal' }, busyness: { level: 3, source: 'typed', detail: '1 of 4 parks' } })
     // A day with nothing at all is still a cell.
     const oct20 = month.weeks[3]![2]!
-    expect(oct20).toEqual({ date: '2026-10-20', day: 20, weekend: false, past: false, today: false, weather: null, busyness: null, earliestClose: null, daysOff: [], holidays: [], blackouts: [], noSchool: false })
+    expect(oct20).toEqual({
+      date: '2026-10-20',
+      day: 20,
+      weekend: false,
+      past: false,
+      today: false,
+      weather: null,
+      busyness: null,
+      parks: [
+        { park: 'magic_kingdom', busyness: null },
+        { park: 'epcot', busyness: null },
+        { park: 'hollywood_studios', busyness: null },
+        { park: 'animal_kingdom', busyness: null },
+      ],
+      earliestClose: null,
+      daysOff: [],
+      holidays: [],
+      blackouts: [],
+      noSchool: false,
+      trips: [],
+    })
     // No school on a weekend or a day off school (D48); the day off makes Columbus Day count, not the holiday itself.
     expect(oct3.noSchool).toBe(true)
     expect(oct12.noSchool).toBe(true)
@@ -445,10 +465,68 @@ describe('the calendar', () => {
     })
     expect(strip.map((m) => m.label)).toEqual(['Oct', 'Nov', 'Dec', 'Jan 27', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'])
     expect(strip.map((m) => m.days.length)).toEqual([31, 30, 31, 31, 28, 31, 30, 31, 30, 31, 31, 30])
-    expect(strip[0]!.days[3]).toEqual({ date: '2026-10-04', level: null, cantGo: false, past: true })
-    expect(strip[0]!.days[11]).toEqual({ date: '2026-10-12', level: 7, cantGo: false, past: false })
-    expect(strip[4]!.days[14]).toEqual({ date: '2027-02-15', level: 9, cantGo: true, past: false })
+    expect(strip[0]!.days[3]).toEqual({ date: '2026-10-04', level: null, cantGo: false, past: true, trip: null })
+    expect(strip[0]!.days[11]).toEqual({ date: '2026-10-12', level: 7, cantGo: false, past: false, trip: null })
+    expect(strip[4]!.days[14]).toEqual({ date: '2027-02-15', level: 9, cantGo: true, past: false, trip: null })
     expect(yearStripBounds('2026-10')).toEqual({ from: '2026-10-01', to: '2027-09-30' })
+  })
+
+  it("a tapped day carries each park's own figure from its own best tier, beside the resort's one figure (D54)", () => {
+    const date = '2026-11-26'
+    const month = calendarMonth({
+      month: '2026-11',
+      weather: [],
+      hours: [],
+      busyness: {
+        crowdLevels: [
+          crowd(date, 'other', 9, 'thrill_data'),
+          crowd(date, 'magic_kingdom', 9, 'thrill_data'),
+          crowd(date, 'epcot', 5, 'thrill_data'),
+          crowd(date, 'epcot', 3, 'typed'),
+          crowd(date, 'animal_kingdom', 7, 'ropedrop'),
+        ],
+      },
+      daysOff: [],
+      holidays: [],
+      blackouts: [],
+      today: '2026-10-28',
+    })
+    const cell = month.weeks.flat().find((c) => c?.date === date)!
+    expect(cell.parks).toEqual([
+      { park: 'magic_kingdom', busyness: { level: 9, source: 'crowd_level', detail: 'thrill_data', fetchedOn: TODAY } },
+      { park: 'epcot', busyness: { level: 3, source: 'typed', detail: 'typed', fetchedOn: TODAY } },
+      { park: 'hollywood_studios', busyness: null },
+      { park: 'animal_kingdom', busyness: { level: 7, source: 'outlook', detail: 'ropedrop', fetchedOn: TODAY } },
+    ])
+    // The cell's one figure is still busynessFor for the resort: here the mean of the three parks known.
+    expect(cell.busyness).toMatchObject({ level: 6.3, detail: '3 of 4 parks' })
+  })
+
+  it('trips lie across their days: a plan before one being worked out, the first and last day marked, across a month edge (D54)', () => {
+    const trips = [
+      { id: 't1', name: 'Thanksgiving', startDate: '2026-11-25', endDate: '2026-11-29', stage: 'working' as const },
+      { id: 't2', name: 'Fall weekend', startDate: '2026-10-30', endDate: '2026-11-01', stage: 'plan' as const },
+      { id: 't3', name: 'Long weekend', startDate: '2026-11-27', endDate: '2026-12-02', stage: 'plan' as const },
+    ]
+    const month = calendarMonth({ month: '2026-11', weather: [], hours: [], busyness: {}, daysOff: [], holidays: [], blackouts: [], today: '2026-10-28', trips })
+    const on = (date: string) => month.weeks.flat().find((c) => c?.date === date)!.trips
+    // Starts in October: November 1st is its last day, not its first.
+    expect(on('2026-11-01')).toEqual([{ id: 't2', name: 'Fall weekend', stage: 'plan', starts: false, ends: true }])
+    expect(on('2026-11-02')).toEqual([])
+    expect(on('2026-11-25')).toEqual([{ id: 't1', name: 'Thanksgiving', stage: 'working', starts: true, ends: false }])
+    expect(on('2026-11-28')).toEqual([
+      { id: 't3', name: 'Long weekend', stage: 'plan', starts: false, ends: false },
+      { id: 't1', name: 'Thanksgiving', stage: 'working', starts: false, ends: false },
+    ])
+    expect(on('2026-11-30')).toEqual([{ id: 't3', name: 'Long weekend', stage: 'plan', starts: false, ends: false }])
+
+    const strip = yearStrip({ fromMonth: '2026-11', busyness: {}, blackouts: [], today: '2026-10-28', trips })
+    const stripDay = (date: string) => strip.flatMap((m) => m.days).find((d) => d.date === date)!.trip
+    expect(stripDay('2026-11-25')).toBe('working')
+    // A plan wins the sliver where the two overlap.
+    expect(stripDay('2026-11-28')).toBe('plan')
+    expect(stripDay('2026-12-02')).toBe('plan')
+    expect(stripDay('2026-12-03')).toBeNull()
   })
 
   it('month arithmetic and the age in words', () => {

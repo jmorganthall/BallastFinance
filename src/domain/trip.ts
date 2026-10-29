@@ -96,6 +96,14 @@ export interface Trip {
   retiredAt: CivilDate | null
 }
 
+/** Where a trip stands (D54): being worked out, a plan (sent to Plans), or put away. The trip's own facts say it; nothing is stored. */
+export type TripStage = 'working' | 'plan' | 'put_away'
+
+export function tripStage(trip: Pick<Trip, 'packageId' | 'retiredAt'>): TripStage {
+  if (trip.retiredAt) return 'put_away'
+  return trip.packageId ? 'plan' : 'working'
+}
+
 export type TravelChoice = 'drive' | 'fly'
 export type LodgingChoice = 'disney_resort' | 'dvc_rental' | 'rental'
 export type LightningLaneChoice = 'none' | 'multi_pass' | 'premier'

@@ -248,6 +248,21 @@ describeDb('park data', () => {
     await expect(engine.calendarMonth('2026-13')).rejects.toThrow(/month/)
   })
 
+  it("the calendar carries the household's trips not put away, and each park's own figure on a day (D54)", async () => {
+    const away = await engine.createTrip({ name: 'Put away', startDate: '2026-10-05', endDate: '2026-10-07', travelers: [{ name: 'Josh', band: 'adult' }], car: null })
+    await engine.retireTrip(away.id)
+    const month = await engine.calendarMonth('2026-10')
+    const cell = (date: string) => month.weeks.flat().find((c) => c?.date === date)!
+    expect(cell('2026-10-19').trips).toMatchObject([{ name: 'Disney', stage: 'working', starts: true, ends: false }])
+    expect(cell('2026-10-25').trips).toMatchObject([{ name: 'Disney', stage: 'working', starts: false, ends: true }])
+    expect(cell('2026-10-06').trips).toEqual([])
+    expect(cell('2026-10-21').parks.find((p) => p.park === 'magic_kingdom')?.busyness).toMatchObject({ level: 2, source: 'typed' })
+    expect(cell('2026-10-21').parks.find((p) => p.park === 'epcot')?.busyness).toBeNull()
+    const strip = await engine.calendarYear()
+    expect(strip.flatMap((m) => m.days).find((d) => d.date === '2026-10-22')?.trip).toBe('working')
+    expect(strip.flatMap((m) => m.days).find((d) => d.date === '2026-10-06')?.trip).toBeNull()
+  })
+
   /**
    * Which park, which day (D32): a trip with typed busyness, stored weather
    * and hours gets a proposal with reasons; "Use this plan" writes each

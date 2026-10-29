@@ -716,6 +716,15 @@ export interface CrowdSource {
   /** The page to fetch for a destination and a month ("YYYY-MM"). */
   url(destination: TripDestination, month: string): string
   parse(text: string, month: string): ParsedCrowd
+  /** Each park's own calendar, as the page links to it (D54); read by that source's parser for that park. */
+  parkLinks?(text: string, month: string): CrowdParkLink[]
+  /** A park's own page, read as that park. */
+  parsePark?(text: string, month: string, park: TripPark): ParsedCrowd
+}
+
+export interface CrowdParkLink {
+  park: TripPark
+  url: string
 }
 
 export interface ParsedCrowd {
@@ -974,8 +983,12 @@ export function monthPageName(month: string): string {
  * scale (busynessStep, two levels a step). The year is the page's: the
  * month asked for names it. A page that does not draw cells falls back to
  * the general reader of crowd pages.
+ *
+ * A park's own calendar (D54), found through thrillDataParkLinks, draws
+ * the same cells and is read as that park. It never falls back: the general
+ * reader would guess the park from the page, and a park page is about one.
  */
-export function parseThrillDataCrowd(text: string, month: string): ParsedCrowd {
+export function parseThrillDataCrowd(text: string, month: string, park: TripPark = 'other'): ParsedCrowd {
   if (typeof text !== 'string' || !text.trim()) return { levels: [], reason: 'The page was empty.' }
   const abbreviation = MONTH_ABBREVIATIONS[Number(month.slice(5, 7)) - 1]
   const levels: ParsedCrowdLevel[] = []
@@ -988,11 +1001,52 @@ export function parseThrillDataCrowd(text: string, month: string): ParsedCrowd {
     if (title[1] !== abbreviation) continue
     const date = dateFromText(`${month}-${title[2]!.padStart(2, '0')}`, null)
     if (!date || levels.some((l) => l.date === date)) continue
-    levels.push({ date, park: 'other', level: 2 * Number(step[1]) - 1 })
+    levels.push({ date, park, level: 2 * Number(step[1]) - 1 })
   }
   if (levels.length > 0) return { levels, reason: null }
   if (cells > 0) return { levels, reason: `The calendar had days, but none for ${month}.` }
+  if (park !== 'other') return { levels, reason: 'Nothing on the page read as a crowd calendar.' }
   return parseCrowdPage(text, month)
+}
+
+const THRILL_DATA_ORIGIN = new URL(THRILL_DATA_URL).origin
+
+/** The few entities a link's address or words carry on a page. */
+const decodeEntities = (s: string) =>
+  s.replace(/&amp;/g, '&').replace(/&#x27;|&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ')
+
+/**
+ * The links on Thrill Data's resort page to each theme park's own crowd
+ * calendar (D54). No park address is guessed (the first RopeDrop address
+ * was a guess and answered 404): only a link the page carries is followed,
+ * on Thrill Data's own site, with "crowd-calendar" in its path, and named a
+ * park by its words, else by its address. Where a park has pages for more
+ * than one year, the year of the month asked for wins; a link with no year
+ * is kept as it is. In the order of THEME_PARKS.
+ */
+export function thrillDataParkLinks(text: string, month: string): CrowdParkLink[] {
+  if (typeof text !== 'string' || !text) return []
+  const year = month.slice(0, 4)
+  const found = new Map<TripPark, { url: string; thisYear: boolean }>()
+  for (const a of text.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const href = /\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(a[1]!)
+    if (!href) continue
+    let url: URL
+    try {
+      url = new URL(decodeEntities((href[1] ?? href[2] ?? '').trim()), THRILL_DATA_URL)
+    } catch {
+      continue
+    }
+    if (url.origin !== THRILL_DATA_ORIGIN || !url.pathname.includes('crowd-calendar')) continue
+    const words = decodeEntities(a[2]!.replace(/<[^>]*>/g, ' ')).trim()
+    const fromWords = parkFromText(words)
+    const park = fromWords && THEME_PARKS.includes(fromWords) ? fromWords : parkFromText(url.pathname)
+    if (!park || !THEME_PARKS.includes(park)) continue
+    const thisYear = url.pathname.split('/').includes(year)
+    const held = found.get(park)
+    if (!held || (thisYear && !held.thisYear)) found.set(park, { url: url.href, thisYear })
+  }
+  return THEME_PARKS.filter((p) => found.has(p)).map((park) => ({ park, url: found.get(park)!.url }))
 }
 
 /**
@@ -1006,7 +1060,9 @@ export const CROWD_SOURCES: readonly CrowdSource[] = [
     key: 'thrill_data',
     label: 'Thrill Data',
     url: (_destination, month) => `${THRILL_DATA_URL}/${month.slice(0, 4)}`,
-    parse: parseThrillDataCrowd,
+    parse: (text, month) => parseThrillDataCrowd(text, month),
+    parkLinks: thrillDataParkLinks,
+    parsePark: parseThrillDataCrowd,
   },
 ]
 

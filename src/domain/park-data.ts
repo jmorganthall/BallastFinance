@@ -43,7 +43,7 @@
  */
 
 import { addDays, compareDates, todayIn, type CivilDate } from './dates'
-import type { TripDestination } from './trip'
+import type { TripDestination, TripStage } from './trip'
 import { crowdLevelsFromJson, pickLevel, THEME_PARKS, TripPlanError, parkFromText, type BlackoutRange, type CrowdLevel, type TripPark } from './trip-plan'
 import type { DayOffInput, Holiday } from './trip-when'
 
@@ -433,6 +433,8 @@ export interface CalendarCell {
   today: boolean
   weather: BlendedWeather | null
   busyness: Busyness | null
+  /** Each theme park's own answer (D54), for the tapped day; the grid shows only the one figure above. */
+  parks: { park: TripPark; busyness: Busyness | null }[]
   /** The theme park that closes first that day, and when. */
   earliestClose: { park: TripPark; closes: string } | null
   daysOff: string[]
@@ -444,6 +446,33 @@ export interface CalendarCell {
    * because a school can stay open on one.
    */
   noSchool: boolean
+  /** The household's trips on this day (D54), plans first, each saying whether the day is its first or last. */
+  trips: CalendarTripDay[]
+}
+
+/** A trip as the calendar draws it (D54): its days and its stage, a put-away trip left out by the caller. */
+export interface CalendarTrip {
+  id: string
+  name: string
+  startDate: CivilDate
+  endDate: CivilDate
+  stage: Exclude<TripStage, 'put_away'>
+}
+
+export interface CalendarTripDay {
+  id: string
+  name: string
+  stage: CalendarTrip['stage']
+  starts: boolean
+  ends: boolean
+}
+
+/** The trips on a date, plans first, then by start date and name, so a band keeps its row along the week. */
+function tripsOn(trips: readonly CalendarTrip[], date: CivilDate): CalendarTripDay[] {
+  return trips
+    .filter((t) => compareDates(t.startDate, date) <= 0 && compareDates(date, t.endDate) <= 0)
+    .sort((a, b) => (a.stage === b.stage ? 0 : a.stage === 'plan' ? -1 : 1) || compareDates(a.startDate, b.startDate) || a.name.localeCompare(b.name))
+    .map((t) => ({ id: t.id, name: t.name, stage: t.stage, starts: t.startDate === date, ends: t.endDate === date }))
 }
 
 export interface CalendarMonth {
@@ -506,7 +535,9 @@ function weekdayOf(date: CivilDate): number {
  * A month as the calendar shows it (D29): a cell per day with the weather
  * and its horizon, how busy and its source, the earliest park close, the
  * days off school, the federal holidays and the blocked-out stretches. The
- * engine gathers the inputs for the month; this lays them out.
+ * engine gathers the inputs for the month; this lays them out. D54 adds each
+ * theme park's own answer for the tapped day, and the household's trips on
+ * each day.
  */
 export function calendarMonth(input: {
   month: string
@@ -517,6 +548,8 @@ export function calendarMonth(input: {
   holidays: readonly Holiday[]
   blackouts: readonly BlackoutRange[]
   today: CivilDate
+  /** The household's trips not put away (D54). */
+  trips?: readonly CalendarTrip[]
 }): CalendarMonth {
   const { from, to } = monthBounds(input.month)
   const split = splitWeather(input.weather)
@@ -532,11 +565,13 @@ export function calendarMonth(input: {
       today: d === input.today,
       weather: blendWeather({ ...split, date: d }),
       busyness: busynessFor({ ...input.busyness, date: d, park: 'other' }),
+      parks: THEME_PARKS.map((park) => ({ park, busyness: busynessFor({ ...input.busyness, date: d, park }) })),
       earliestClose: earliestClose(input.hours, d),
       daysOff,
       holidays: input.holidays.filter((h) => h.date === d).map((h) => h.name),
       blackouts: blackoutsOn(input.blackouts, d),
       noSchool: wd === 0 || wd === 6 || daysOff.length > 0,
+      trips: tripsOn(input.trips ?? [], d),
     })
   }
   const weeks: (CalendarCell | null)[][] = []
@@ -582,6 +617,8 @@ export interface YearStripDay {
   level: number | null
   cantGo: boolean
   past: boolean
+  /** A trip on this day (D54): a plan wins over one being worked out. */
+  trip: CalendarTrip['stage'] | null
 }
 
 export interface YearStripMonth {
@@ -601,10 +638,17 @@ export function yearStripBounds(fromMonth: string): { from: CivilDate; to: Civil
 /**
  * The strip of twelve months above the calendar (D48): a sliver a day, how
  * busy for the whole resort (the same busynessFor the month's cells read)
- * and whether we can go. Until Explore's scoring exists (D42) this is what
- * it shows; nothing about it is stored.
+ * and whether we can go, and which days a trip covers (D54). Until
+ * Explore's scoring exists (D42) this is what it shows; nothing about it is
+ * stored.
  */
-export function yearStrip(input: { fromMonth: string; busyness: BusynessSources; blackouts: readonly BlackoutRange[]; today: CivilDate }): YearStripMonth[] {
+export function yearStrip(input: {
+  fromMonth: string
+  busyness: BusynessSources
+  blackouts: readonly BlackoutRange[]
+  today: CivilDate
+  trips?: readonly CalendarTrip[]
+}): YearStripMonth[] {
   const months: YearStripMonth[] = []
   for (let i = 0; i < 12; i++) {
     const month = shiftMonth(input.fromMonth, i)
@@ -616,6 +660,7 @@ export function yearStrip(input: { fromMonth: string; busyness: BusynessSources;
         level: busynessFor({ ...input.busyness, date: d, park: 'other' })?.level ?? null,
         cantGo: blackoutsOn(input.blackouts, d).length > 0,
         past: compareDates(d, input.today) < 0,
+        trip: tripsOn(input.trips ?? [], d)[0]?.stage ?? null,
       })
     }
     const m = Number(month.slice(5, 7))

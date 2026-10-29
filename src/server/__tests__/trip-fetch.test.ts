@@ -183,6 +183,43 @@ describe('checking how busy', () => {
     expect(got.notes).toEqual(['Thrill Data: Thrill Data answered 403', 'Second: 4 park-days read.'])
   })
 
+  it("follows the resort page's links to each park's calendar, reads each as that park, and fetches every address once", async () => {
+    const cells = (month: string, step: number) => `<span class="cal-cell l${step}" title="${['Jun', 'Jul'][Number(month.slice(5, 7)) - 6]} 12 — 30 min">12</span>`
+    const resort = (body: string) => `<html><body><nav><a href="/trip-planning/crowd-calendar/park/wdw/magic-kingdom/2027">Magic Kingdom</a><a href="/trip-planning/crowd-calendar/park/wdw/epcot/2027">EPCOT</a></nav>${body}</body></html>`
+    const asked: string[] = []
+    const fake = (async (url: string, init?: RequestInit) => {
+      asked.push(url)
+      const headers = init?.headers as Record<string, string>
+      expect(Object.keys(headers).map((k) => k.toLowerCase())).not.toContain('origin')
+      expect(Object.keys(headers).map((k) => k.toLowerCase())).not.toContain('referer')
+      if (url.includes('/resort/')) return new Response(resort(cells('2027-06', 5) + cells('2027-07', 4)))
+      if (url.includes('magic-kingdom')) return new Response(cells('2027-06', 2) + cells('2027-07', 3))
+      return new Response('gone', { status: 404 })
+    }) as unknown as typeof fetch
+    const got = await pullCrowdCalendar('wdw', ['2027-06', '2027-07'], fake)
+    expect(got.source?.key).toBe('thrill_data')
+    expect(got.levels).toEqual([
+      { date: '2027-06-12', park: 'other', level: 9 },
+      { date: '2027-06-12', park: 'magic_kingdom', level: 3 },
+      { date: '2027-07-12', park: 'other', level: 7 },
+      { date: '2027-07-12', park: 'magic_kingdom', level: 5 },
+    ])
+    // The year page and each park page once, though two months were asked for.
+    expect(asked.sort()).toEqual([
+      'https://www.thrill-data.com/trip-planning/crowd-calendar/park/wdw/epcot/2027',
+      'https://www.thrill-data.com/trip-planning/crowd-calendar/park/wdw/magic-kingdom/2027',
+      'https://www.thrill-data.com/trip-planning/crowd-calendar/resort/wdw/2027',
+    ])
+    // A park page that fails is a line for the screen, once, and the rest is kept.
+    expect(got.notes).toEqual(['Thrill Data: 4 park-days read.', 'Thrill Data, EPCOT: answered 404'])
+  })
+
+  it('a resort page that links to no park calendars says so, and the resort figure is still kept', async () => {
+    const got = await pullCrowdCalendar('wdw', ['2027-06'], respond('<span class="cal-cell l2" title="Jun 12 — 30 min">12</span>'))
+    expect(got.levels).toEqual([{ date: '2027-06-12', park: 'other', level: 3 }])
+    expect(got.notes).toEqual(['Thrill Data: 1 park-days read.', "Thrill Data: the resort page links to no park's own calendar."])
+  })
+
   it('every source unreadable is no source, with every reason, never a throw', async () => {
     const got = await pullCrowdCalendar('wdw', ['2027-06'], respond('<html>captive portal</html>'))
     expect(got.source).toBeNull()
