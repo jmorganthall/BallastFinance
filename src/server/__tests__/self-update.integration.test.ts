@@ -50,7 +50,9 @@ describeDb('update attempts and backups against a live database', () => {
     const rows = await engine.updateHistory({ runningRevision: null, limit: 50 })
     const row = rows.find((r) => r.id === id)!
     const now = new Date(row.createdAt.getTime() + minutesOn * 60_000)
-    return (await engine.updateHistory({ runningRevision, now, limit: 50 })).find((r) => r.id === id)!
+    // The running build started half a minute after the press, as after a real update.
+    const runningSince = new Date(row.createdAt.getTime() + 30_000)
+    return (await engine.updateHistory({ runningRevision, now, runningSince, limit: 50 })).find((r) => r.id === id)!
   }
 
   it('records an attempt before the call and keeps no token', async () => {

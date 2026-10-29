@@ -176,6 +176,22 @@ describe('taking a backup', () => {
     expect(readdirSync(dir)).toEqual([])
   })
 
+  it('says why, rather than crashing the start, when reading the dump fails', async () => {
+    const dir = tempDir()
+    const result = await takeBackup({
+      databaseUrl: URL,
+      dir,
+      checkFolder: async () => ({ ok: true }),
+      spawnImpl: fakeSpawn((child) => {
+        child.stdout.write('SET x;\n')
+        child.stdout.emit('error', new Error('read failed'))
+        child.emit('close', 0, null)
+      }),
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'could not write the backup: read failed' })
+    expect(readdirSync(dir)).toEqual([])
+  })
+
   it('says pg_dump is missing when the image has none', async () => {
     const dir = tempDir()
     const result = await takeBackup({

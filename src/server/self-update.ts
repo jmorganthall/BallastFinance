@@ -208,21 +208,30 @@ export async function testWatchtower(input: {
 }
 
 /**
- * The verdict on a pending attempt, from the build running now, or null when
- * there is nothing new to say. A request that never got through failed; a
- * different build means it worked; the same build ten minutes on means
- * Watchtower took the call and changed nothing.
+ * The verdict on a pending attempt, from the build running now and when it
+ * started, or null when there is nothing new to say. A request that never got
+ * through failed. A different build counts only if it started within ten
+ * minutes of the press: one that started later came from something else (a
+ * pull by hand, Watchtower's own schedule), and the press itself changed
+ * nothing. The same build ten minutes on means Watchtower took the call and
+ * changed nothing.
  */
 export function settleAttempt(
   attempt: Pick<UpdateAttempt, 'createdAt' | 'outcome' | 'verdict' | 'revisionBefore'>,
   runningRevision: string | null,
   now: Date,
+  runningSince: Date,
 ): { verdict: AttemptVerdict; revisionAfter: string | null } | null {
   if (attempt.verdict !== 'pending') return null
   if (attempt.outcome === 'rejected' || attempt.outcome === 'unreachable') {
     return { verdict: 'failed', revisionAfter: null }
   }
-  if (compareRevisions(attempt.revisionBefore, runningRevision) === 'behind') {
+  const startedAfterPress = runningSince.getTime() - attempt.createdAt.getTime()
+  if (
+    compareRevisions(attempt.revisionBefore, runningRevision) === 'behind' &&
+    startedAfterPress >= 0 &&
+    startedAfterPress <= SETTLE_AFTER_MS
+  ) {
     return { verdict: 'updated', revisionAfter: runningRevision }
   }
   if (now.getTime() - attempt.createdAt.getTime() >= SETTLE_AFTER_MS) {

@@ -42,12 +42,23 @@ export function UpdateNow({ revision }: { revision: string | null }) {
 
   const press = async () => {
     setPhase({ kind: 'starting' })
+    let result: Awaited<ReturnType<typeof updateNowAction>> | undefined
     try {
-      const result = await updateNowAction()
-      setPhase(result.started ? { kind: 'updating', since: Date.now() } : { kind: 'error', message: result.message })
+      result = await updateNowAction()
     } catch (error) {
-      if (outcomeOfCallError(error) === 'started') setPhase({ kind: 'updating', since: Date.now() })
+      setPhase(
+        outcomeOfCallError(error) === 'started'
+          ? { kind: 'updating', since: Date.now() }
+          : { kind: 'error', message: 'Something went wrong before Watchtower was asked. Nothing was updated.' },
+      )
+      return
     }
+    // No answer at all: the session ended and the action sent the page to sign in.
+    if (!result) {
+      setPhase({ kind: 'idle' })
+      return
+    }
+    setPhase(result.started ? { kind: 'updating', since: Date.now() } : { kind: 'error', message: result.message })
   }
 
   if (phase.kind === 'updating') {

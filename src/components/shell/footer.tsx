@@ -19,7 +19,13 @@ const REPO = 'https://github.com/jmorganthall/BallastFinance'
 export async function AppFooter() {
   const build = runningBuild()
   const { engine } = await requireEngine()
-  const [status, backupNotice] = await Promise.all([updateStatus(), engine.backupNotice()])
+  const [status, backupNotice] = await Promise.all([
+    updateStatus(),
+    engine.backupNotice(),
+    // Settles a press of Update now on the first page the new build serves,
+    // while "started within ten minutes of the press" can still be told.
+    engine.updateHistory({ runningRevision: build.revision, limit: 5 }),
+  ])
   const revision = shortRevision(build.revision)
   const offered = selfUpdateOffered()
 

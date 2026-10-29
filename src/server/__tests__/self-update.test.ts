@@ -150,25 +150,33 @@ describe('settling an attempt', () => {
     ...over,
   })
 
-  it('is updated as soon as a different build is running', () => {
-    expect(settleAttempt(attempt(), NEWER, minutes(1))).toEqual({ verdict: 'updated', revisionAfter: NEWER })
+  it('is updated when a different build started within ten minutes of the press', () => {
+    expect(settleAttempt(attempt(), NEWER, minutes(1), minutes(0.5))).toEqual({ verdict: 'updated', revisionAfter: NEWER })
+    expect(settleAttempt(attempt(), NEWER, minutes(60 * 48), minutes(2))).toEqual({ verdict: 'updated', revisionAfter: NEWER })
+  })
+
+  it('is no change when the different build started long after the press, as by a later pull by hand', () => {
+    expect(settleAttempt(attempt(), NEWER, minutes(60 * 48), minutes(60 * 47))).toEqual({
+      verdict: 'no_change',
+      revisionAfter: NEWER,
+    })
   })
 
   it('is no change ten minutes on with the same build', () => {
-    expect(settleAttempt(attempt(), RUNNING, minutes(10))).toEqual({ verdict: 'no_change', revisionAfter: RUNNING })
+    expect(settleAttempt(attempt(), RUNNING, minutes(10), minutes(-60))).toEqual({ verdict: 'no_change', revisionAfter: RUNNING })
   })
 
   it('waits before ten minutes', () => {
-    expect(settleAttempt(attempt(), RUNNING, minutes(9))).toBeNull()
+    expect(settleAttempt(attempt(), RUNNING, minutes(9), minutes(-60))).toBeNull()
   })
 
   it('fails a request that never got through', () => {
-    expect(settleAttempt(attempt({ outcome: 'rejected' }), RUNNING, minutes(0))?.verdict).toBe('failed')
-    expect(settleAttempt(attempt({ outcome: 'unreachable' }), RUNNING, minutes(0))?.verdict).toBe('failed')
+    expect(settleAttempt(attempt({ outcome: 'rejected' }), RUNNING, minutes(0), minutes(-60))?.verdict).toBe('failed')
+    expect(settleAttempt(attempt({ outcome: 'unreachable' }), RUNNING, minutes(0), minutes(-60))?.verdict).toBe('failed')
   })
 
   it('leaves a settled attempt alone', () => {
-    expect(settleAttempt(attempt({ verdict: 'updated' }), RUNNING, minutes(30))).toBeNull()
+    expect(settleAttempt(attempt({ verdict: 'updated' }), RUNNING, minutes(30), minutes(-60))).toBeNull()
   })
 
   it('says each verdict in plain words', () => {

@@ -5,13 +5,15 @@
 
 /**
  * A successful update stops this container while the action is still
- * answering, so the browser's call fails with a network error. Any failure
- * of the call itself therefore means "it is happening": wait for the new
- * build. A real refusal (bad token, Watchtower not there) comes back as an
- * answer, not as a thrown error.
+ * answering, so the browser's call fails with a network error -- a
+ * `TypeError` from fetch -- which means "it is happening": wait for the new
+ * build. An error the server answered with (Next.js rethrows it with a
+ * `digest`), or anything else, means the server was alive and the press
+ * failed before Watchtower was asked: say so, never "updating".
  */
-export function outcomeOfCallError(_error: unknown): 'started' {
-  return 'started'
+export function outcomeOfCallError(error: unknown): 'started' | 'failed' {
+  const answered = typeof error === 'object' && error !== null && 'digest' in error
+  return error instanceof TypeError && !answered ? 'started' : 'failed'
 }
 
 /** Reload once a build other than the one the button was pressed on answers. */

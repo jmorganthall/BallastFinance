@@ -602,12 +602,12 @@ principles, and they are non-negotiable.
   WATCHTOWER_TOKEN`, so only Ballast is updated. The token is read from the
   environment for that one call and is never stored, shown or logged. A
   successful update kills this container mid-request, so a cut connection is
-  `dropped` (started) and the page polls the public `/api/version` until a
+  `dropped` (started: the browser sees a bare network `TypeError`; an error Next.js answers with a `digest` is a failed press, never "updating") and the page polls the public `/api/version` until a
   different revision answers, giving up after 4 minutes; refused, unknown host
   or connect timeout is `unreachable`, a non-2xx `rejected`. "Test connection"
   only ever GETs Watchtower's root. Every press is an `update_attempts` row
   written before the request and settled on read by `settleAttempt`
-  (`updated` when the build changed, `no_change` ten minutes on, `failed`),
+  (`updated` only when a different build started within ten minutes of the press, so a later pull by hand never reads as the button working; `no_change` ten minutes on; `failed`), on the first page the new build serves (the footer) and on Settings,
   because Watchtower answers 200 for a container outside its scope. The
   bootstrap, when a migration is waiting on a database already migrated
   (`pendingMigrations`, drizzle's own rule), takes `takeBackup` in
@@ -628,7 +628,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 902 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 905 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

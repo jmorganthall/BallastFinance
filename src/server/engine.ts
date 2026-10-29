@@ -5643,8 +5643,15 @@ export class Engine {
    * (`settleAttempt`) and the settled ones written back, so the verdict is
    * reached on the first read after the restart and never re-judged.
    */
-  async updateHistory(input: { runningRevision: string | null; now?: Date; limit?: number }): Promise<UpdateAttempt[]> {
+  async updateHistory(input: {
+    runningRevision: string | null
+    now?: Date
+    /** When this build started; a different build counts only if it started soon after the press. */
+    runningSince?: Date
+    limit?: number
+  }): Promise<UpdateAttempt[]> {
     const now = input.now ?? new Date()
+    const runningSince = input.runningSince ?? new Date(Date.now() - process.uptime() * 1000)
     const rows = await this.db
       .select()
       .from(updateAttemptsTable)
@@ -5657,7 +5664,7 @@ export class Engine {
         outcome: row.outcome as AttemptOutcome,
         verdict: row.verdict as AttemptVerdict,
       }
-      const settled = settleAttempt(attempt, input.runningRevision, now)
+      const settled = settleAttempt(attempt, input.runningRevision, now, runningSince)
       if (settled) {
         await this.db
           .update(updateAttemptsTable)

@@ -160,7 +160,15 @@ export async function takeBackup(input: {
     const out = createWriteStream(partial)
     const gzip = createGzip({ level: 9 })
     child.stdout?.pipe(gzip).pipe(out)
-    out.on('error', (error) => finish({ ok: false, reason: `could not write the backup: ${error.message}` }))
+    // An error on any stream ends the backup with a reason; unhandled, it
+    // would crash the bootstrap, and a failed backup must never stop a start.
+    const failWrite = (error: Error) => {
+      child.kill('SIGKILL')
+      finish({ ok: false, reason: `could not write the backup: ${error.message}` })
+    }
+    child.stdout?.on('error', failWrite)
+    gzip.on('error', failWrite)
+    out.on('error', failWrite)
 
     child.on('error', (error: NodeJS.ErrnoException) => {
       finish({
