@@ -41,6 +41,9 @@ ENV BALLAST_BUILD_SHA=$GIT_SHA
 RUN apk add --no-cache postgresql16-client || apk add --no-cache postgresql-client
 
 RUN addgroup -g 1001 -S nodejs && adduser -S ballast -u 1001
+# Where the backup before a migration goes. A new named volume takes this
+# folder's owner, so the default mount is writable by the app's user.
+RUN mkdir /backups && chown ballast:nodejs /backups
 
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=ballast:nodejs /app/.next/standalone ./
