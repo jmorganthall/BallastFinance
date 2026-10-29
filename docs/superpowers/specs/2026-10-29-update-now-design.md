@@ -93,15 +93,24 @@ client today. The database is `postgres:16-alpine`.
 ## Decided
 
 **By the household:**
-- Use the existing Watchtower (`containrrr/watchtower:latest`).
+- Use the existing Watchtower (`containrrr/watchtower:latest`), at `http://192.168.2.6:8998`.
+- Ballast on Unraid runs the published `ghcr.io/jmorganthall/ballastfinance:latest`, so
+  Watchtower can pull it and the `?image=` filter matches. PathBrain's compose files carry no
+  Watchtower label or scope, and its button works against the same Watchtower, so that
+  Watchtower probably has no label or scope filter. If it does, the update history will
+  report "No change", and the docs say to check this first.
 - Model it on PathBrain's design.
 - "Update now" must deal with the backup gap, provided the backup is quick.
 - If the backup fails, start without one.
 
 **My calls, which they may overturn:**
 1. **Configuration:** `WATCHTOWER_URL` and `WATCHTOWER_TOKEN`, unprefixed to match PathBrain,
-   set in the environment and all three compose files. Empty URL means no button, and the
-   footer reads exactly as it does today.
+   under a `# Watchtower` comment in all three compose files as `"${WATCHTOWER_URL:-}"` and
+   `"${WATCHTOWER_TOKEN:-}"`. The household's address, `http://192.168.2.6:8998` (given by the
+   household; the same one PathBrain uses), goes in `.env.example` and the docs, and never as
+   a default in a committed compose file: the image is public, and another install's button
+   must not point at this household's LAN. Empty URL means no button, and the footer reads
+   exactly as it does today.
 2. **Image filter:** the request is `POST {WATCHTOWER_URL}/v1/update?image=<image>`, where
    `<image>` is `BALLAST_IMAGE_REPO` or `DEFAULT_IMAGE` from `version.ts`, i.e. the same
    setting the update check already uses.
