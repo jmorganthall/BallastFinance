@@ -19,7 +19,6 @@ import {
   removeSchoolDayOffAction,
   saveBlackoutDatesAction,
   saveHomeAddressAction,
-  savePackTemplateAction,
   saveParkDataSourcesAction,
   saveReferencePricesAction,
   saveSchoolCalendarSourcesAction,
@@ -128,13 +127,12 @@ export default async function TripsPage({
     drive: driveParam,
   } = await searchParams
   const { engine } = await requireEngine()
-  const [trips, prices, home, blackouts, packTemplate, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames, pendingCrowds] =
+  const [trips, prices, home, blackouts, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames, pendingCrowds] =
     await Promise.all([
       engine.listTrips(),
       engine.referencePrices(),
       engine.homeLocation(),
       engine.blackoutDates(),
-      engine.packTemplate(),
       Promise.resolve(engine.today()),
       engine.schoolDaysOff(),
       engine.schoolCalendarSources(),
@@ -761,22 +759,6 @@ export default async function TripsPage({
               </label>
               <button type="submit" className={secondaryButton + ' col-span-2'}>
                 Keep this quote
-              </button>
-            </form>
-          </Card>
-        </section>
-
-        <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
-          <h2 className={sectionTitle}>What we always pack</h2>
-          <Card>
-            <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
-              One item a line. Every trip&apos;s to-do list gets these, due the day before it starts. Changing the list
-              here reaches a trip when its timeline is rebuilt.
-            </p>
-            <form action={savePackTemplateAction} className="space-y-2">
-              <textarea name="pack_template" rows={Math.max(4, packTemplate.length + 1)} defaultValue={packTemplate.join('\n')} className={input} />
-              <button type="submit" className={secondaryButton}>
-                Save the packing list
               </button>
             </form>
           </Card>

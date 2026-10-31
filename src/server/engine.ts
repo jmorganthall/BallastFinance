@@ -216,7 +216,6 @@ import {
   comingUpTasks,
   cutDays,
   dayPlan,
-  DEFAULT_PACK_TEMPLATE,
   mergeTimeline,
   reservationMoney,
   sortReservations,
@@ -505,7 +504,6 @@ export interface TripPlanView {
   weeks: WeekComparisonRow[]
   crowdLevels: CrowdLevel[]
   blackoutDates: BlackoutRange[]
-  packTemplate: string[]
   pendingPull: CrowdPull | null
   /** The top ten dates across the horizon, with the reasons (D25). */
   bestWeeks: BestWeeks
@@ -3755,7 +3753,7 @@ export class Engine {
     const trip = (await this.listTrips()).find((t) => t.id === tripId)
     if (!trip) return null
     const days = await this.listTripDays(tripId)
-    const [variants, reservations, tasks, referencePrices, drive, gas, maxDriveMinutes, blackoutDates, packTemplate, pendingPull] = await Promise.all([
+    const [variants, reservations, tasks, referencePrices, drive, gas, maxDriveMinutes, blackoutDates, pendingPull] = await Promise.all([
       this.variantsWithLines(tripId),
       this.listReservations(tripId),
       this.listTasks(tripId),
@@ -3764,7 +3762,6 @@ export class Engine {
       this.gasPrice(),
       this.maxDriveMinutes(),
       this.blackoutDates(),
-      this.packTemplate(),
       this.pendingCrowdPull(),
     ])
     const variant = planningVariant(trip, variants)
@@ -3791,7 +3788,6 @@ export class Engine {
       weeks: weekComparison({ ...pricing, days, crowdLevels, busyness, blackoutDates }),
       crowdLevels,
       blackoutDates,
-      packTemplate,
       pendingPull,
       bestWeeks: bestWeeks({ ...pricing, days, crowdLevels, busyness, daysOff, blackoutDates, horizonMonths, weights: weekWeights }),
       horizonMonths,
@@ -4167,17 +4163,6 @@ export class Engine {
     const tidy = ranges.map((r) => ({ ...r, label: r.label.trim() }))
     validateBlackoutDates(tidy)
     await this.putSetting('trip_blackout_dates', tidy)
-  }
-
-  async packTemplate(): Promise<string[]> {
-    const stored = await this.getSetting<string[] | null>('trip_pack_template', null)
-    return stored ?? [...DEFAULT_PACK_TEMPLATE]
-  }
-
-  async setPackTemplate(labels: readonly string[]): Promise<void> {
-    const tidy = labels.map((l) => l.trim()).filter((l) => l !== '')
-    validatePackTemplate(tidy)
-    await this.putSetting('trip_pack_template', tidy)
   }
 
   // -- the school calendar (D25): the household's own days off, and where they come from
@@ -5198,7 +5183,7 @@ export class Engine {
     const variants = (await tx.select().from(tripVariantsTable).where(eq(tripVariantsTable.tripId, trip.id))).map(toVariant)
     const variant = planningVariant(trip, variants)
     const lines = variant ? await this.linesOf(tx, variant.id) : []
-    const generated = bookingTimeline(trip, variant, this.today(), { packTemplate: await this.packTemplate() })
+    const generated = bookingTimeline(trip, variant, this.today())
     const merge = mergeTimeline(generated, await this.tasksOf(tx, trip.id))
     // A generated to-do points at the part it books or pays for, when the way has one.
     const lineFor = (category: TripLineCategory | null): Id | null => {

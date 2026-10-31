@@ -1549,17 +1549,6 @@ export async function saveParkDataSourcesAction(formData: FormData): Promise<voi
   redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}#sources` : '/trips?saved=1#sources')
 }
 
-export async function savePackTemplateAction(formData: FormData): Promise<void> {
-  const { engine } = await requireEngine()
-  const lines = String(formData.get('pack_template') ?? '')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l !== '')
-  const done = await tripRefusalOf(() => engine.setPackTemplate(lines))
-  revalidatePath('/trips')
-  redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
-}
-
 // -- planning a trip (D22, D23)
 
 export async function useWeekAction(formData: FormData): Promise<void> {

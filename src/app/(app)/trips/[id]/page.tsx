@@ -757,7 +757,7 @@ export default async function TripPage({
                   Rebuild the timeline
                 </button>
                 <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-                  Re-dates the to-dos the app made from the trip&apos;s dates and choices, and the packing list under Trips.
+                  Re-dates the to-dos the app made from the trip&apos;s dates and choices.
                   Anything you edited or ticked stays as it is.
                 </p>
               </form>

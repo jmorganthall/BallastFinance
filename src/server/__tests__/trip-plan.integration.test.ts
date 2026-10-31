@@ -124,8 +124,7 @@ describeDb('planning a trip', () => {
   it('the timeline is generated for the way the plan follows; a ticked or edited to-do survives a rebuild', async () => {
     let tasks = await engine.listTasks(tripId)
     // No way priced yet: only what every trip needs.
-    expect(tasks.filter((t) => !t.key?.startsWith('pack:')).map((t) => t.key)).toEqual(['dining', 'tickets', 'memory_maker'])
-    expect(tasks.find((t) => t.key === 'pack:ponchos')).toMatchObject({ kind: 'pack', dueOn: '2027-06-12', generated: true })
+    expect(tasks.map((t) => t.key)).toEqual(['dining', 'tickets', 'memory_maker'])
 
     const v = await engine.addVariant(tripId, {
       name: 'Fly, stay at Pop',
@@ -255,16 +254,6 @@ describeDb('planning a trip', () => {
       ["'Ohana", '2027-06-14'],
     ])
     expect(plan.tasks.find((t) => t.key === 'rental_balance')).toMatchObject({ dueOn: '2027-04-07' })
-    expect(plan.tasks.find((t) => t.key === 'pack:ponchos')).toMatchObject({ dueOn: '2027-06-05' })
-  })
-
-  it('the packing template is the household\'s, laid over the default, and reaches the to-dos on a rebuild', async () => {
-    await engine.setPackTemplate(['Ponchos', 'Bubble wands'])
-    await engine.rebuildTimeline(tripId)
-    const pack = (await engine.listTasks(tripId)).filter((t) => t.kind === 'pack')
-    expect(pack.map((t) => t.key).sort()).toEqual(['pack:bubble_wands', 'pack:ponchos'])
-    await expect(engine.setPackTemplate([''])).resolves.toBeUndefined()
-    expect(await engine.packTemplate()).toEqual([])
   })
 
   it('another household sees nothing and changes nothing', async () => {
