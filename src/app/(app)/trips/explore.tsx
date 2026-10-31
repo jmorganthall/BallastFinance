@@ -43,6 +43,7 @@ export function ExploreSection({
   parks,
   drive,
   lookedUp,
+  judged,
 }: {
   result: Explore & { shape: TripShape; stay: string }
   /** The park days asked for in the address, as written there; null is the family's usual. */
@@ -50,6 +51,8 @@ export function ExploreSection({
   drive: DriveEstimate | null
   /** A drive just looked up, shown before it is kept. */
   lookedUp: { miles: number; minutes: number } | null
+  /** How a week is judged, in words (weightsSentence). */
+  judged: string
 }) {
   const { shape } = result
   const usual = shape.parkDaysMin === shape.parkDaysMax ? `${shape.parkDaysMin}` : `${shape.parkDaysMin} to ${shape.parkDaysMax}`
@@ -167,8 +170,8 @@ export function ExploreSection({
       )}
 
       <p className="mt-2 text-xs leading-snug text-[var(--color-ink-soft)]">
-        From {shortDate(result.horizonFrom)} to {shortDate(result.horizonTo)}, {result.horizonTo.slice(0, 4)}: {result.considered} ways to go looked at. Quiet
-        first, then cheap, then no school missed. Cheap is what it costs to sleep at {stayWords(result.stay)}, night by night from the surest price we have;
+        From {shortDate(result.horizonFrom)} to {shortDate(result.horizonTo)}, {result.horizonTo.slice(0, 4)}: {result.considered} ways to go looked at.{' '}
+        {judged} Cheap is what it costs to sleep at {stayWords(result.stay)}, night by night from the surest price we have;
         a week with no price yet is neither cheap nor dear. The strip above shades each day by how good a trip leaving it is, and the numbers on the month
         are this list.
         {result.excludedByBlackout > 0 ? ` ${result.excludedByBlackout} left out for days we cannot go.` : ''}

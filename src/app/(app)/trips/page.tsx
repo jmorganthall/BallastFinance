@@ -35,6 +35,10 @@ import {
   crowdPullSummary,
   dollarsForInput,
   easyStretchField,
+  importanceOf,
+  IMPORTANCES,
+  IMPORTANCE_WORDS,
+  weightsSentence,
   headCount,
   homeIsLocated,
   layoutFromCode,
@@ -67,6 +71,13 @@ const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text
 const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium'
 const sectionTitle = 'mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
 const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium'
+
+/** The three questions behind the score (D25), each answered A lot / Some / A little / Not at all. */
+const WEIGHT_QUESTIONS: readonly { key: 'busy' | 'price' | 'school'; field: string; label: string }[] = [
+  { key: 'busy', field: 'weight_busy', label: 'Quiet parks' },
+  { key: 'price', field: 'weight_price', label: 'A cheap stay' },
+  { key: 'school', field: 'weight_school', label: 'Missing no school' },
+]
 
 const SOURCE_KIND_WORDS: Record<SchoolCalendarSourceKind, string> = { ical: 'Calendar feed (.ics)', pdf: 'PDF', page: 'Web page' }
 
@@ -283,7 +294,7 @@ export default async function TripsPage({
         Best times to go
       </h2>
       <Card>
-        <ExploreSection result={explored} parks={parkDays ? parksParam!.trim() : null} drive={homeDrive} lookedUp={lookedUp} />
+        <ExploreSection result={explored} parks={parkDays ? parksParam!.trim() : null} drive={homeDrive} lookedUp={lookedUp} judged={weightsSentence(weekWeights)} />
       </Card>
 
       {/* Wide screens: the calendar across the page, the rest in columns (D48). */}
@@ -596,8 +607,7 @@ export default async function TripsPage({
             <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
               The best times to go above are trips of this shape: park days with a travel day each side. A drive longer than an easy stretch
               can leave the evening before and finish in the morning; when a travel day would cost school, that makes the first day a quick park
-              day. Each trip also lists its ten best weeks of its own length. Quiet counts most, then cheap, then no school missed; a week you
-              cannot go is left out. Change the weights to say what matters more to you.
+              day. Each trip also lists its ten best weeks of its own length. A week you cannot go is left out.
             </p>
             <form action={saveWeekSettingsAction} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <label className="block text-xs text-[var(--color-ink-soft)]">
@@ -640,18 +650,31 @@ export default async function TripsPage({
                 Months ahead
                 <input name="horizon_months" inputMode="numeric" defaultValue={horizonMonths} className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
-                Quiet matters
-                <input name="weight_busy" inputMode="decimal" defaultValue={weekWeights.busy} className={input} />
-              </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
-                Cheap matters
-                <input name="weight_price" inputMode="decimal" defaultValue={weekWeights.price} className={input} />
-              </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
-                School matters
-                <input name="weight_school" inputMode="decimal" defaultValue={weekWeights.school} className={input} />
-              </label>
+              <div className="col-span-2 space-y-2 sm:col-span-4">
+                <p className="text-sm font-medium">How much does each matter?</p>
+                {WEIGHT_QUESTIONS.map((q) => (
+                  <fieldset key={q.field} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <legend className="float-left w-40 text-sm">{q.label}</legend>
+                    <div className="flex flex-wrap gap-1">
+                      {IMPORTANCES.map((level) => (
+                        <label key={level} className="cursor-pointer">
+                          <input
+                            type="radio"
+                            name={q.field}
+                            value={level}
+                            defaultChecked={importanceOf(weekWeights[q.key]) === level}
+                            className="peer sr-only"
+                          />
+                          <span className="inline-block rounded-full border border-[var(--color-line)] px-3 py-1 text-sm peer-checked:border-[var(--color-accent)] peer-checked:bg-[var(--color-accent-soft)] peer-checked:font-medium peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-accent)]">
+                            {IMPORTANCE_WORDS[level]}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ))}
+                <p className="rounded-lg bg-[var(--color-accent-soft)] p-2 text-xs">{weightsSentence(weekWeights)}</p>
+              </div>
               <button type="submit" className={secondaryButton + ' col-span-2 sm:col-span-4'}>
                 Save how we like to go
               </button>

@@ -95,6 +95,7 @@ import {
   type TripReservation,
   type TripTask,
   type VariantChoices,
+  weightsSentence,
 } from '@/domain'
 import { TravelerFields } from '../traveler-fields'
 import { ParkCalendar } from '../park-calendar'
@@ -474,7 +475,7 @@ export default async function TripPage({
           <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
             The ten best dates from {shortDate(plan.bestWeeks.horizonFrom)} to {shortDate(plan.bestWeeks.horizonTo)},{' '}
             {plan.bestWeeks.horizonTo.slice(0, 4)}: every {nights}-night window, and every long weekend a holiday or a day
-            off school makes. Quiet first, then cheap, then no school missed.
+            off school makes. {weightsSentence(plan.weekWeights)}
             {plan.bestWeeks.excludedByBlackout > 0 ? ` ${plan.bestWeeks.excludedByBlackout} left out for weeks you cannot go.` : ''}
             {plan.bestWeeks.daysOffKnown ? '' : ' No school calendar yet, so every weekday counts as school; add one under Trips.'}
           </p>

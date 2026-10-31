@@ -94,6 +94,63 @@ export const DEFAULT_WEEK_WEIGHTS: WeekWeights = { busy: 3, price: 2, school: 1 
 export const DEFAULT_HORIZON_MONTHS = 12
 export const BEST_WEEKS_SHOWN = 10
 
+// ---------------------------------------------------------------- the weights in words
+
+/** How much a part of the score matters, as a person picks it: the weight itself, 0 to 3. */
+export type Importance = 0 | 1 | 2 | 3
+
+export const IMPORTANCES: readonly Importance[] = [3, 2, 1, 0]
+
+export const IMPORTANCE_WORDS: Record<Importance, string> = { 3: 'A lot', 2: 'Some', 1: 'A little', 0: 'Not at all' }
+
+/** The choice a stored weight reads as: the nearest of 0 to 3, so a weight saved before the choices still shows. */
+export function importanceOf(weight: number): Importance {
+  return Math.max(0, Math.min(3, Math.round(weight))) as Importance
+}
+
+const WEIGHT_NAMES: Record<keyof WeekWeights, string> = { busy: 'quiet parks', price: 'a cheap stay', school: 'missing no school' }
+
+/**
+ * Each part's share of how a week is judged, in whole percents adding up
+ * to 100 (largest remainder), biggest first. This is what the weights mean:
+ * the score is a weighted sum of three parts each running 0 to 1.
+ */
+export function weightShares(w: WeekWeights): { key: keyof WeekWeights; name: string; percent: number }[] {
+  const keys: (keyof WeekWeights)[] = ['busy', 'price', 'school']
+  const total = keys.reduce((s, k) => s + w[k], 0)
+  if (total <= 0) return keys.map((key) => ({ key, name: WEIGHT_NAMES[key], percent: 0 }))
+  const exact = keys.map((k) => (w[k] * 100) / total)
+  const floors = exact.map(Math.floor)
+  let left = 100 - floors.reduce((s, f) => s + f, 0)
+  const order = exact.map((e, i) => ({ i, r: e - floors[i]! })).sort((a, b) => b.r - a.r || a.i - b.i)
+  for (const { i } of order) {
+    if (left <= 0) break
+    floors[i]! += 1
+    left -= 1
+  }
+  return keys.map((key, i) => ({ key, name: WEIGHT_NAMES[key], percent: floors[i]! })).sort((a, b) => b.percent - a.percent || keys.indexOf(a.key) - keys.indexOf(b.key))
+}
+
+/**
+ * The weights in one sentence a person can check against what they meant:
+ * "Quiet parks count for 50% of how a week is judged, a cheap stay 33%,
+ * and missing no school 17%." A part that does not count is said so.
+ */
+export function weightsSentence(w: WeekWeights): string {
+  const shares = weightShares(w)
+  const counted = shares.filter((s) => s.percent > 0)
+  const dropped = shares.filter((s) => s.percent === 0)
+  if (counted.length === 0) return 'Nothing counts yet, so no week can be ranked.'
+  const first = counted[0]!
+  const capital = first.name.charAt(0).toUpperCase() + first.name.slice(1)
+  const rest = counted.slice(1).map((s) => `${s.name} ${s.percent}%`)
+  const head = counted.length === 1 ? `${capital} is all that counts` : `${capital} ${first.key === 'busy' ? 'count' : 'counts'} for ${first.percent}% of how a week is judged`
+  const list = rest.length === 0 ? '' : rest.length === 1 ? `, and ${rest[0]}` : `, ${rest.slice(0, -1).join(', ')}, and ${rest.at(-1)}`
+  const droppedNames = dropped.map((s) => s.name).join(' and ')
+  const tail = dropped.length > 0 ? ` ${droppedNames.charAt(0).toUpperCase()}${droppedNames.slice(1)} ${dropped.length === 1 && dropped[0]!.key !== 'busy' ? 'does' : 'do'} not count.` : ''
+  return `${head}${list}.${tail}`
+}
+
 // ---------------------------------------------------------------- validation
 
 export function validateDayOff(input: DayOffInput & { schoolYear: string }): void {

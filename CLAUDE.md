@@ -405,6 +405,10 @@ principles, and they are non-negotiable.
   scored and the top ten shown with reasons. The formula is documented at the
   top of `src/domain/trip-when.ts`: quiet, then cheap, then no school missed
   (`trip_week_weights`, 3/2/1), each part normalised across the candidates,
+  each weight picked on screen as A lot / Some / A little / Not at all (3 to
+  0, `importanceOf`) and said back as each part's share of the score
+  (`weightsSentence`: "Quiet parks count for 50% of how a week is judged, a
+  cheap stay 33%, and missing no school 17%"), never as bare numbers,
   price among candidates of the same length, a blackout excludes. Federal
   holidays are computed with the observed-day rules. `school_days_off`
   (migration 0013) is the household's own calendar — typed, imported from an
@@ -676,7 +680,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 946 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 948 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
