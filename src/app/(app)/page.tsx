@@ -319,9 +319,11 @@ export default async function ThisWeekPage({
               The
               bank moves <Money cents={position.bankPerWeekCents} /> a week in all.
             </p>
-            {todos.length + debtTodos.length > 0 ? (
+            {todos.length + debtTodos.length + dueNow.length > 0 ? (
               <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-                There is an optional to-do below; nothing depends on it.
+                {todos.length + debtTodos.length + dueNow.length === 1
+                  ? 'There is an optional to-do below; nothing depends on it.'
+                  : 'There are optional to-dos below; nothing depends on them.'}
               </p>
             ) : null}
           </Card>

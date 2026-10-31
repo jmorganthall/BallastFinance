@@ -101,7 +101,6 @@ import {
   INTAKE_CONTRACT_VERSION,
   optimiseLumpSum,
   planAllocation,
-  promoExpiryWarning,
   scoreDebts,
   validateDebtInputs,
   validateDebtRates,
@@ -1436,6 +1435,7 @@ export class Engine {
     const moves = new Map<Id, Cents[]>()
     const spends = new Map<Id, Cents>()
     const transfers: ConfirmedTransfer[] = []
+    const confirmedOnce = new Set<Id>()
     const add = (map: Map<Id, Cents>, id: Id, cents: Cents) => map.set(id, (map.get(id) ?? 0) + cents)
 
     for (const row of rows) {
@@ -1465,6 +1465,10 @@ export class Engine {
       const p = row.payload as { instruction_id: Id; actual_amount_cents: Cents | null }
       const instruction = issuedById.get(p.instruction_id)
       if (!instruction) continue
+      // An instruction is done once, however many times "Done" was recorded:
+      // the first confirmation is the one that counts (as for debts).
+      if (confirmedOnce.has(p.instruction_id)) continue
+      confirmedOnce.add(p.instruction_id)
       const confirmation = {
         instructionId: p.instruction_id,
         confirmedOn: on,
@@ -2116,6 +2120,22 @@ export class Engine {
     actualAmountCents?: Cents
   }): Promise<void> {
     await this.db.transaction(async (tx) => {
+      // "Done" is said once: a double tap or a second press later records
+      // nothing more, so the same move can never be counted twice. The lock
+      // holds a second submission until the first has committed.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'instruction_confirmed:' + input.instructionId}))`)
+      const [already] = await tx
+        .select({ id: events.id })
+        .from(events)
+        .where(
+          and(
+            eq(events.householdId, this.householdId),
+            eq(events.kind, 'instruction_confirmed'),
+            sql`${events.payload}->>'instruction_id' = ${input.instructionId}`,
+          ),
+        )
+        .limit(1)
+      if (already) return
       await tx.insert(events).values({
         householdId: this.householdId,
         kind: 'instruction_confirmed',
@@ -3061,18 +3081,28 @@ export class Engine {
     })
   }
 
-  /** Debts whose promotional rate is close enough to worry about (PRD §8). */
+  /**
+   * Debts whose deal ends inside the promo lead window with the payments set
+   * up now not clearing it (PRD §8): exactly the debts the one status calls
+   * Short (D49 (5)), read from it, so the push and every screen agree. A deal
+   * the payments already clear is never shouted about.
+   */
   async promoWarnings(): Promise<
-    { debt: Debt; untilDate: CivilDate; monthlyToClearCents: Cents }[]
+    { debt: Debt; untilDate: CivilDate; onDealCents: Cents; monthlyToClearCents: Cents }[]
   > {
-    const [debts, leadWeeks] = await Promise.all([this.listDebts(), this.promoLeadWeeks()])
-    const today = this.today()
-    return debts
-      .filter((debt) => debt.state === 'open')
-      .flatMap((debt) => {
-        const warning = promoExpiryWarning(debt, today, leadWeeks)
-        return warning ? [{ debt, ...warning }] : []
-      })
+    const { debts } = await this.debtStatuses()
+    return debts.flatMap((view) =>
+      view.status === 'short' && view.miss
+        ? [
+            {
+              debt: view.debt,
+              untilDate: view.miss.untilDate,
+              onDealCents: view.miss.onDealCents,
+              monthlyToClearCents: view.miss.clearPerMonthCents,
+            },
+          ]
+        : [],
+    )
   }
 
   // ---------------------------------------------------------------- equity (PRD §15)

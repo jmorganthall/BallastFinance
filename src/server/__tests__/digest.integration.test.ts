@@ -243,6 +243,28 @@ describeDb('weekly digest', () => {
     })
   })
 
+  it('says All caught up with an open share-out ask, and that the ask is optional', async () => {
+    const onFriday = new Engine({ householdId, actorUserId: null, db, today: '2026-09-18' })
+    const id = await onFriday.issueInstruction({
+      type: 'one_time_move',
+      amountCents: 5000,
+      targetId: accountId,
+      targetLabel: 'Annual Expenses',
+      purpose: 'share_out',
+    })
+    const digest = await buildWeeklyDigest({
+      householdId,
+      baseUrl: 'https://ballast.example',
+      db,
+      today: '2026-09-18',
+    })
+    // Nothing the run-forward depends on is open (PRD D35 (6)), but the
+    // summary never says "all caught up" and stops there while asks are listed.
+    expect(digest.summary).toBe('Ballast: all caught up. 1 optional to-do.')
+    expect(digest.detail).toMatchObject({ all_caught_up: true })
+    await onFriday.endInstruction({ instructionId: id })
+  })
+
   it('nudges only when a balance is actually stale', async () => {
     const stale = await buildCheckInNudge({
       householdId,

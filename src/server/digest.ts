@@ -196,11 +196,15 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
 
   const blocking =
     position.todos.filter((t) => t.blocking).length + debtState.todos.filter((t) => t.blocking).length + dueNow.length
+  // Caught up, nothing listed is something the run-forward depends on; it is
+  // still listed, so the summary says how much (This week says the same).
+  const optional = position.todos.length + debtState.todos.length + dueNow.length
   const summary =
     shown.length === 0 && debtsNeeding.length === 0
       ? 'Ballast: nothing to move this week.'
       : caughtUp
         ? 'Ballast: all caught up.' +
+          (optional > 0 ? ` ${optional} optional to-do${optional === 1 ? '' : 's'}.` : '') +
           (closeOuts.length > 0 ? ` ${closeOuts.length} thing(s) need confirming.` : '')
         : `Ballast: ${blocking} thing(s) to do this week` +
           (closeOuts.length > 0 ? `, and ${closeOuts.length} to confirm.` : '.')
@@ -306,7 +310,7 @@ export async function buildPromoWarnings(input: DigestInput): Promise<Notificati
     kind: 'promo_expiry_warning' as const,
     householdId: input.householdId,
     summary: `Ballast: ${warning.debt.name} stops being 0% on ${warning.untilDate}.`,
-    body: `**${warning.debt.name}** has ${formatCents(warning.debt.balanceCents)} on a promotional rate that ends ${warning.untilDate}.\n\nTo clear it before interest starts, it needs ${formatCents(warning.monthlyToClearCents)} a month from here. After that date it costs ${(warning.debt.aprBasisPoints / 100).toFixed(2)}%.`,
+    body: `**${warning.debt.name}** has ${formatCents(warning.onDealCents)} on a promotional rate that ends ${warning.untilDate}, and the payments set up now will not clear it in time.\n\nTo clear it before interest starts, it needs ${formatCents(warning.monthlyToClearCents)} a month from here. After that date it costs ${(warning.debt.aprBasisPoints / 100).toFixed(2)}%.`,
     link: `${input.baseUrl}/debts`,
     detail: {
       debt_id: warning.debt.id,

@@ -3,12 +3,10 @@ import {
   BALANCE_STALE_AFTER_DAYS,
   balanceFreshness,
   DebtDataError,
-  DEFAULT_PROMO_LEAD_WEEKS,
   effectiveAprBasisPoints,
   interestOverNextYearCents,
   minimumPaymentCents,
   projectPayoff,
-  promoExpiryWarning,
   scoreDebts,
   isPaidOff,
   snowballLadder,
@@ -302,29 +300,6 @@ describe('promo-aware effective APR', () => {
       promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2026-01-01' }],
     })
     expect(effectiveAprBasisPoints(d, TODAY)).toBe(2499)
-  })
-
-  it('warns in time to actually clear the balance', () => {
-    const d = debt({
-      id: 'a',
-      name: 'BT',
-      balanceCents: 120000,
-      minPaymentRule: { type: 'fixed', amountCents: 120000 },
-      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2026-10-19' }],
-    })
-    const warning = promoExpiryWarning(d, TODAY, DEFAULT_PROMO_LEAD_WEEKS)
-    expect(warning).not.toBeNull()
-    expect(warning!.untilDate).toBe('2026-10-19')
-    expect(warning!.monthlyToClearCents).toBe(120000) // one month left
-  })
-
-  it('does not warn while the deadline is still far off', () => {
-    const d = debt({
-      id: 'a',
-      name: 'BT',
-      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-09-19' }],
-    })
-    expect(promoExpiryWarning(d, TODAY)).toBeNull()
   })
 })
 

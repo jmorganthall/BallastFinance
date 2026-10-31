@@ -506,6 +506,39 @@ describeDb('one-time moves (D34, D35)', () => {
     expect(counted.short).toEqual({ on: '2026-10-24', byCents: 800 })
   })
 
+  it('counts a move once however many times "Done" is pressed', async () => {
+    const before = (await account()).money.totalCents
+    const id = await engine.issueInstruction({
+      type: 'one_time_move_out',
+      amountCents: 500,
+      targetId: accountId,
+      targetLabel: 'Annual Expenses',
+    })
+    // A double tap: two submissions at once, then one more later.
+    await Promise.all([
+      engine.confirmInstruction({ instructionId: id }),
+      engine.confirmInstruction({ instructionId: id }),
+    ])
+    await engine.confirmInstruction({ instructionId: id })
+    const confirmations = (
+      await db.select().from(schema.events).where(eq(schema.events.kind, 'instruction_confirmed'))
+    ).filter((e) => (e.payload as { instruction_id: string }).instruction_id === id)
+    expect(confirmations).toHaveLength(1)
+
+    // One already recorded twice, before the guard, still counts once.
+    await db.insert(schema.events).values({
+      householdId,
+      kind: 'instruction_confirmed',
+      occurredAt: '2026-10-24',
+      source: 'manual',
+      payload: { instruction_id: id, actual_amount_cents: null },
+    })
+    expect((await account()).money.totalCents).toBe(before - 500)
+
+    // Put the account back for the tests after this one.
+    await engine.confirmBalance({ reserveAccountId: accountId, amountCents: before })
+  })
+
   it('counts an old catch-up ask only once it is done, and never asks for the same money twice', async () => {
     // A catch-up move still on the to-do list from before D35.
     const id = await engine.issueInstruction({

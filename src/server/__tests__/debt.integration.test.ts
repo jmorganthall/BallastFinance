@@ -174,7 +174,8 @@ describeDb('debts, the ladder and the optimizer', () => {
     expect(rows).toHaveLength(3)
   })
 
-  it('warns about a promotional rate that is about to end', async () => {
+  it('warns about a promotional rate only when the payments will not clear it (D49 (5))', async () => {
+    // Its minimum clears the whole deal before it ends: On track, no warning.
     const promo = await engine.createDebt({
       name: 'Balance transfer',
       category: 'consumer',
@@ -183,11 +184,23 @@ describeDb('debts, the ladder and the optimizer', () => {
       minPaymentRule: { type: 'fixed', amountCents: 120000 },
       promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2026-10-19' }],
     })
+    expect((await engine.promoWarnings()).map((w) => w.debt.id)).not.toContain(promo.id)
 
-    const warnings = await engine.promoWarnings()
+    // $50 a month leaves most of it at the full rate: Short, and warned.
+    const missing = await engine.createDebt({
+      name: 'Store card',
+      category: 'consumer',
+      balanceCents: 120000,
+      aprBasisPoints: 2699,
+      minPaymentRule: { type: 'fixed', amountCents: 5000 },
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2026-10-19' }],
+    })
+    const status = (await engine.debtStatuses()).debts.find((v) => v.debt.id === missing.id)!
+    expect(status.status).toBe('short')
+    const warnings = (await engine.promoWarnings()).filter((w) => w.debt.id === missing.id)
     expect(warnings).toHaveLength(1)
-    expect(warnings[0]!.debt.id).toBe(promo.id)
-    expect(warnings[0]!.monthlyToClearCents).toBe(120000)
+    expect(warnings[0]!.monthlyToClearCents).toBe(status.miss!.clearPerMonthCents)
+    await engine.removeDebt(missing.id)
 
     // And it jumps the queue when there is money that could clear it.
     const result = await engine.optimiseLumpSum(120000)
