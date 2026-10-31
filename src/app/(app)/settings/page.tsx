@@ -20,6 +20,7 @@ import {
 } from '@/server/actions'
 import { formatCents, WEEKDAY_NAMES } from '@/domain'
 import { SheetImport } from './sheet-import'
+import { UpdateCard } from './update-card'
 
 export const dynamic = 'force-dynamic'
 
@@ -351,6 +352,11 @@ export default async function SettingsPage({
           It is your data. Nothing here is locked in, and Ballast never holds a bank login.
         </p>
       </Card>
+
+      <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+        Updates
+      </h2>
+      <UpdateCard engine={engine} />
 
       {/* The AGPL §13 source link lives in the footer, on every page. */}
       <form action={signOutAction} className="mt-6">

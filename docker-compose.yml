@@ -60,5 +60,21 @@ services:
       N8N_WEBHOOK_TOKEN: ${N8N_WEBHOOK_TOKEN:-}
       HOUSEHOLD_TIMEZONE: ${HOUSEHOLD_TIMEZONE:-America/Chicago}
       TZ: America/Chicago
+      # A local build: Watchtower cannot pull it again, so "Update now" is not
+      # offered (docker-compose.ghcr.yml runs the published image and has it).
+      BALLAST_IMAGE: local-build
+
+      # The backup the bootstrap takes before a migration lands here; mounted
+      # below. On Unraid, point BACKUP_DIR at the nightly backup's folder
+      # (/mnt/user/backups/ballast) so its 30-day prune covers these too, and
+      # make that folder writable by uid 1001.
+      BALLAST_BACKUP_DIR: /backups
     ports:
       - '${APP_PORT:-3000}:3000'
+    volumes:
+      # Unset, a named volume (owned by the app's user, as the image's /backups
+      # is). Set to a host folder, that folder must be writable by uid 1001.
+      - "${BACKUP_DIR:-ballast-backups}:/backups"
+
+volumes:
+  ballast-backups:

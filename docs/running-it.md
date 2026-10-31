@@ -112,7 +112,8 @@ The footer of every page names the running build and, when the published image h
 moved on, says so. The published image carries the git revision it was built from; the
 running app compares its own against the `latest` tag on `ghcr.io` (four small anonymous
 requests, at most once an hour, never on the page's critical path) and shows a
-notice when they differ. Updating is what it always was: pull the image and restart.
+notice when they differ. Pull the image and restart, or press **Update now** when
+Watchtower is set up (below).
 
 - `BALLAST_UPDATE_CHECK=off` skips the check, for a box with no outbound network or a
   fork that publishes its own image. `BALLAST_IMAGE_REPO` points it at a different image.
@@ -120,6 +121,47 @@ notice when they differ. Updating is what it always was: pull the image and rest
   `scripts/quickstart.sh` does this for you; by hand it is
   `GIT_SHA=$(git rev-parse HEAD) docker compose up -d --build`. Without it the footer
   says the check is unavailable rather than guessing.
+
+### Updating from the app
+
+With `docker-compose.ghcr.yml` (the published image) and a Watchtower on the box, the
+update notice gets an **Update now** button. It asks Watchtower to pull the new image
+and recreate the Ballast container (`POST /v1/update?image=ghcr.io/jmorganthall/ballastfinance`,
+so nothing else Watchtower watches is touched); the page says "Updating — back in a
+minute" and reloads itself when the new build answers.
+
+1. Run Watchtower with `--http-api-update` and `WATCHTOWER_HTTP_API_TOKEN=<a long
+   random string>`, and publish its port 8080 on the host. Turning the API on stops
+   Watchtower's own schedule unless you also pass `--http-api-periodic-polls`.
+2. In Ballast's `.env`: `WATCHTOWER_URL=http://<host>:<port>` and `WATCHTOWER_TOKEN=<the
+   same string>`. The token stays in the environment: never on a page, in the database
+   or in a log.
+3. Settings, **Updates**, **Test connection** checks that Watchtower answers (it never
+   starts an update) and that the backup folder can be written.
+
+The button shows only when Ballast runs the published image at `latest`
+(`BALLAST_IMAGE`); a pinned version or a local build keeps the "pull and restart" words,
+because Watchtower could not update it anyway.
+
+Settings, **Update history**, lists every press and whether the build actually changed:
+**Updated**, **No change**, **Didn't start**, or **Waiting to see**. Watchtower answers
+"OK" even when it updates nothing, so "No change" is the one to read: usually Watchtower
+runs with `--label-enable` or `--scope` and this container is not in it (the compose file
+carries `com.centurylinklabs.watchtower.enable=true`; a scope needs its own label), the
+image was already current, or Watchtower could not reach ghcr.io.
+
+**A backup before every migration.** Every start runs the migrations, so any new image
+(Update now, Watchtower's own schedule, a manual pull) can change the data hours after
+the nightly backup. When a migration is waiting, the bootstrap first takes a `pg_dump`,
+gzipped, into `/backups` (`BACKUP_DIR` on the host), named
+`ballast-<UTC time>-before-update.sql.gz` so the nightly script's 30-day prune covers it.
+On Unraid point `BACKUP_DIR` at `/mnt/user/backups/ballast` and `chown 1001` it: the
+app runs as uid 1001. Left unset, it is a docker volume.
+
+If the backup fails (folder not mounted, not writable, over two minutes), Ballast starts
+anyway and says so: every page shows "The last update changed the database without a
+backup: <why>" until each of you presses **Got it**, and Settings keeps it under "Last
+backup before an update".
 
 Point `DATA_DIR` at the array (`/mnt/user/appdata/ballast/pgdata`) rather than a
 docker volume, so the database is covered by the array's parity and by your

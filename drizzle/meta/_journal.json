@@ -169,6 +169,13 @@
       "when": 1792970738109,
       "tag": "0023_rounds",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793239483906,
+      "tag": "0024_update_now",
+      "breakpoints": true
     }
   ]
 }

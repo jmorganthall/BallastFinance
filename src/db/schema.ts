@@ -23,6 +23,7 @@ import {
   jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -908,6 +909,81 @@ export const settings = pgTable(
     effectiveFrom: date('effective_from').notNull(),
   },
   (t) => [uniqueIndex('settings_key_idx').on(t.householdId, t.key, t.effectiveFrom)],
+)
+
+// ---------------------------------------------------------------- server upkeep
+//
+// Facts about the server, not about a household's money: each press of
+// "Update now" and each backup taken before a migration. They belong to no
+// household and are not events -- an attempt's outcome is filled in after the
+// container it was made from has gone. Written only through the engine, except
+// the backup row, which the bootstrap writes before the app is up.
+
+/** One press of "Update now": recorded before the request, settled after. */
+export const updateAttempts = pgTable(
+  'update_attempts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+    /** The address called. Never the token. */
+    url: text('url').notNull(),
+    tokenSent: boolean('token_sent').notNull(),
+    revisionBefore: text('revision_before'),
+    outcome: text('outcome').notNull(),
+    httpStatus: integer('http_status'),
+    responseBody: text('response_body'),
+    error: text('error'),
+    elapsedMs: integer('elapsed_ms'),
+    verdict: text('verdict').notNull().default('pending'),
+    verdictAt: timestamp('verdict_at', { withTimezone: true }),
+    revisionAfter: text('revision_after'),
+  },
+  (t) => [
+    index('update_attempts_created_idx').on(t.createdAt),
+    check(
+      'update_attempts_outcome',
+      sql`${t.outcome} in ('requested', 'accepted', 'dropped', 'rejected', 'unreachable')`,
+    ),
+    check('update_attempts_verdict', sql`${t.verdict} in ('pending', 'updated', 'no_change', 'failed')`),
+  ],
+)
+
+/** A backup taken (or not) by the bootstrap because a migration was waiting. */
+export const databaseBackups = pgTable(
+  'database_backups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    takenAt: timestamp('taken_at', { withTimezone: true }).notNull().defaultNow(),
+    /** The build that took it, which is the build that then migrated. */
+    revision: text('revision'),
+    /** The migrations that were waiting. */
+    migrations: text('migrations').array().notNull(),
+    ok: boolean('ok').notNull(),
+    file: text('file'),
+    bytes: bigint('bytes', { mode: 'number' }),
+    elapsedMs: integer('elapsed_ms').notNull(),
+    reason: text('reason'),
+  },
+  (t) => [
+    index('database_backups_taken_idx').on(t.takenAt),
+    check('database_backups_ok_file', sql`${t.ok} = (${t.file} is not null)`),
+  ],
+)
+
+/** "Got it" on the missing-backup notice, per person. */
+export const backupNoticeDismissals = pgTable(
+  'backup_notice_dismissals',
+  {
+    backupId: uuid('backup_id')
+      .notNull()
+      .references(() => databaseBackups.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    dismissedAt: timestamp('dismissed_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.backupId, t.userId] })],
 )
 
 export const householdsRelations = relations(households, ({ many }) => ({
