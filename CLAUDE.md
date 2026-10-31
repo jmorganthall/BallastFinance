@@ -10,6 +10,9 @@ Claude Docs document that changes as the build teaches us things — see
 here. Read it live before making a design decision; do not trust a summary,
 including this file.
 
+[docs/data-flow.md](docs/data-flow.md) maps how a figure gets from a fact to a
+screen, what re-derives when, and the places that still bend the layers.
+
 ## The four rules that hold the shape
 
 Everything else is detail. These are from PRD §10 and the abstract's data-model
