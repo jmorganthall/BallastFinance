@@ -183,6 +183,13 @@
       "when": 1793464550853,
       "tag": "0025_lodging_rates",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1793564550853,
+      "tag": "0026_end_old_asks",
+      "breakpoints": true
     }
   ]
 }
