@@ -86,6 +86,9 @@ import {
   DEFAULT_TRANSFER_WEEKDAY,
   isWeekday,
   ledgerOf,
+  householdView,
+  type HouseholdView,
+  onItsWayOf,
   type Ledger,
   type RecordedEvent,
   type Weekday,
@@ -1380,18 +1383,16 @@ export class Engine {
         ended: ledger.ended,
         transferWeekday,
       })
-      // A catch-up from before D35 or a share-out's "cover what is short" move
-      // still on the to-do list is money already asked for: the position takes
-      // it off the one-time move it derives, so the same money is never asked
-      // for twice.
-      const openMovesIn = outstandingInstructions({
-        issued: ledger.issued,
-        confirmed: ledger.confirmed,
-        ended: ledger.ended,
-        today: this.today(),
-      })
-        .filter((i) => i.type === 'one_time_move' && ['catch_up', 'cover'].includes(i.purpose ?? 'catch_up'))
-        .map((i) => ({ accountId: i.targetId, amountCents: i.amountCents }))
+      // Money on its way (D56 (2)): every move still asked for into an
+      // account, less every one still asked for out of it.
+      const onItsWay = onItsWayOf(
+        outstandingInstructions({
+          issued: ledger.issued,
+          confirmed: ledger.confirmed,
+          ended: ledger.ended,
+          today: this.today(),
+        }),
+      )
 
       return {
         today: this.today(),
@@ -1404,7 +1405,7 @@ export class Engine {
         adjustments: adjustments.accepted,
         movesSinceCount: ledger.movesSinceCount,
         spendsSinceCount: ledger.spendsSinceCount,
-        openMovesIn,
+        onItsWay: onItsWay.accounts,
         transferRoundUpCents,
         transferWeekday,
         roundEvents: ledger.roundEvents,
@@ -1470,6 +1471,25 @@ export class Engine {
     return this.db.transaction(run, { isolationLevel: 'repeatable read', accessMode: 'read only' })
   }
 
+  /**
+   * The household view (D56): the position, the debts' statuses and the asks
+   * still open, put together once -- the one list of what to do, whether the
+   * household is caught up, and what needs attention. This week, the digest
+   * and the share-out read this, never the pieces on their own.
+   */
+  async view(): Promise<{
+    position: HouseholdPosition
+    debts: DebtStatuses
+    household: HouseholdView
+  }> {
+    const [position, debts, open] = await Promise.all([
+      this.position(),
+      this.debtStatuses(),
+      this.outstandingInstructions(),
+    ])
+    return { position, debts, household: householdView({ position, debts, open }) }
+  }
+
   /** The one position: every money figure any screen, the digest or a to-do shows (D35). */
   async position(): Promise<HouseholdPosition> {
     return position(await this.positionInput())
@@ -1497,8 +1517,9 @@ export class Engine {
         return {
           accountId: a.account.id,
           accountName: a.account.name,
-          weeklyNowCents: was?.weeklyCents ?? 0,
-          weeklyAfterCents: a.weeklyCents,
+          // What each account needs a week, as its card says (D56 (5)).
+          weeklyNowCents: was?.neededPerWeekCents ?? 0,
+          weeklyAfterCents: a.neededPerWeekCents,
           moveAfterCents: a.oneTimeMove?.amountCents ?? 0,
           moveBy: a.oneTimeMove?.byDate ?? null,
         }
@@ -2139,8 +2160,8 @@ export class Engine {
    * first step of a share-out (PRD §6) covers these before the split.
    */
   async shortfalls(): Promise<Shortfall[]> {
-    const [current, debts] = await Promise.all([this.position(), this.listDebts()])
-    return findShortfalls({ accounts: current.accounts, debts, today: this.today() })
+    const [current, debts] = await Promise.all([this.position(), this.debtStatuses()])
+    return findShortfalls({ accounts: current.accounts, debts: debts.debts })
   }
 
   /**
@@ -2762,8 +2783,13 @@ export class Engine {
 
   /** Each open debt's status, its words' figures and its to-dos (PRD D49 (4)-(6)). */
   async debtStatuses(): Promise<DebtStatuses> {
-    const [debts, promoLeadWeeks] = await Promise.all([this.listDebts(), this.promoLeadWeeks()])
-    return debtStatuses({ debts, today: this.today(), promoLeadWeeks })
+    const [debts, promoLeadWeeks, open] = await Promise.all([
+      this.listDebts(),
+      this.promoLeadWeeks(),
+      this.outstandingInstructions(),
+    ])
+    // A "Pay $X toward" still open is money on its way (D56 (2)).
+    return debtStatuses({ debts, today: this.today(), promoLeadWeeks, onItsWay: onItsWayOf(open).debts })
   }
 
   /** The payoff order, with the running trade-off at each rung (PRD §7). */

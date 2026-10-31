@@ -61,6 +61,13 @@ export interface DebtView {
   debt: Debt
   status: DebtStatus
   miss: DebtDealMiss | null
+  /**
+   * The miss as if every "Pay $X toward" still open were paid (D56 (2)):
+   * what its to-do and the share-out's shortfall are sized on, so the same
+   * money is never asked for twice. The status stays on `miss`, on what has
+   * been paid. Null when the open payments clear it.
+   */
+  missAfterAsks: DebtDealMiss | null
   balanceAgeDays: number
   /** Its stated balance is older than `BALANCE_STALE_AFTER_DAYS`. */
   balanceStale: boolean
@@ -105,46 +112,54 @@ export interface DebtStatuses {
   caughtUp: boolean
 }
 
+/** A deal the payments set up now will not clear before it ends, or null. Its figures are the one cliff's. */
+function missOf(debt: Debt, today: CivilDate): DebtDealMiss | null {
+  const cliff = promoCliff(debt, today)
+  if (!cliff || cliff.shortCents <= 0) return null
+  return {
+    untilDate: cliff.untilDate,
+    dealRateBasisPoints: cliff.promoRateBasisPoints,
+    onDealCents: cliff.amountCents,
+    monthsLeft: cliff.monthsLeft,
+    owedAtEndCents: cliff.shortCents,
+    paymentNowCents: monthlyPaymentCents(debt, today),
+    clearPerMonthCents: cliff.monthsLeft <= 0 ? cliff.amountCents : Math.ceil(cliff.amountCents / cliff.monthsLeft),
+    chargedBackCents: chargedBackInterestCents(debt, today),
+  }
+}
+
 export function debtStatuses(args: {
   debts: readonly Debt[]
   today: CivilDate
   promoLeadWeeks?: number
+  /** Per debt, the "Pay $X toward" asks still open (D56 (2)). */
+  onItsWay?: ReadonlyMap<Id, Cents>
 }): DebtStatuses {
   const leadWeeks = args.promoLeadWeeks ?? DEFAULT_PROMO_LEAD_WEEKS
   const views: DebtView[] = args.debts
     .filter((debt) => debt.state === 'open' && debt.balanceCents > 0)
     .map((debt) => {
       const freshness = balanceFreshness(debt, args.today)
-      const cliff = promoCliff(debt, args.today)
-      let miss: DebtDealMiss | null = null
-      if (cliff && cliff.shortCents > 0) {
-        miss = {
-          untilDate: cliff.untilDate,
-          dealRateBasisPoints: cliff.promoRateBasisPoints,
-          onDealCents: cliff.amountCents,
-          monthsLeft: cliff.monthsLeft,
-          owedAtEndCents: cliff.shortCents,
-          paymentNowCents: monthlyPaymentCents(debt, args.today),
-          clearPerMonthCents:
-            cliff.monthsLeft <= 0 ? cliff.amountCents : Math.ceil(cliff.amountCents / cliff.monthsLeft),
-          chargedBackCents: chargedBackInterestCents(debt, args.today),
-        }
-      }
+      const miss = missOf(debt, args.today)
+      const coming = Math.min(debt.balanceCents, Math.max(0, args.onItsWay?.get(debt.id) ?? 0))
+      const missAfterAsks = coming > 0 ? missOf({ ...debt, balanceCents: debt.balanceCents - coming }, args.today) : miss
       const status: DebtStatus =
         miss === null ? 'on_track' : miss.monthsLeft * WEEKS_PER_MONTH <= leadWeeks ? 'short' : 'misses_deal'
-      return { debt, status, miss, balanceAgeDays: freshness.ageDays, balanceStale: freshness.stale }
+      return { debt, status, miss, missAfterAsks, balanceAgeDays: freshness.ageDays, balanceStale: freshness.stale }
     })
 
   const todos: DebtTodo[] = []
   for (const view of views) {
-    if (view.miss) {
+    // Sized as if the payments still asked for are made (D56 (2)).
+    const miss = view.missAfterAsks
+    if (miss) {
       todos.push({
         kind: 'raise_debt_payment',
         debtId: view.debt.id,
         debtName: view.debt.name,
-        fromCents: view.miss.paymentNowCents,
-        toCents: view.miss.clearPerMonthCents,
-        untilDate: view.miss.untilDate,
+        fromCents: miss.paymentNowCents,
+        toCents: miss.clearPerMonthCents,
+        untilDate: miss.untilDate,
         blocking: true,
       })
     }

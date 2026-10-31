@@ -153,6 +153,16 @@ describeDb('allocation runs', () => {
     await engine.commitPackage(created.packageId, { openingCents: 40000 })
     await engine.confirmBalance({ reserveAccountId: account!.id, amountCents: 10000 })
 
+    // The first share-out's moves into this account are still open: money on
+    // its way (D56 (2)), so nothing here is short while they are...
+    const openIn = (await engine.outstandingInstructions()).filter(
+      (i) => i.type === 'one_time_move' && i.targetId === account!.id,
+    )
+    expect(openIn.reduce((t, i) => t + i.amountCents, 0)).toBeGreaterThanOrEqual(30000)
+    expect(await engine.shortfalls()).toEqual([])
+    // ... and once they are withdrawn ("Not doing this"), it is asked for again.
+    for (const i of openIn) await engine.endInstruction({ instructionId: i.instructionId })
+
     // Until the bank's transfer is known the account is not judged, but the
     // move the suggested $50 depends on is asked for already, and it is what
     // a share-out can cover.

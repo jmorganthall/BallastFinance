@@ -496,3 +496,29 @@ export function instructionSentenceParts(
       return [t('Did the '), target, t(' money get spent from your savings?')]
   }
 }
+
+/**
+ * Money on its way (D56 (2)): what the asks still open would move. Into an
+ * account, every open one-time move (a cover, a catch-up or a share-out's)
+ * counts in, every open move out counts out; toward a debt, every open
+ * "Pay $X toward". A "left over" ask names no account and is none of these.
+ * Never money there: it changes no balance and no status, only the size of
+ * the other to-dos, so the same money is never asked for twice.
+ */
+export function onItsWayOf(open: readonly IssuedInstruction[]): {
+  accounts: { accountId: Id; amountCents: Cents }[]
+  debts: Map<Id, Cents>
+} {
+  const accounts: { accountId: Id; amountCents: Cents }[] = []
+  const debts = new Map<Id, Cents>()
+  for (const i of open) {
+    if (i.type === 'one_time_move' && i.purpose !== 'left_over') {
+      accounts.push({ accountId: i.targetId, amountCents: i.amountCents })
+    } else if (i.type === 'one_time_move_out') {
+      accounts.push({ accountId: i.targetId, amountCents: -i.amountCents })
+    } else if (i.type === 'debt_payment') {
+      debts.set(i.targetId, (debts.get(i.targetId) ?? 0) + i.amountCents)
+    }
+  }
+  return { accounts, debts }
+}
