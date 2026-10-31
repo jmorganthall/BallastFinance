@@ -6,7 +6,7 @@
 
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Empty, humanDate, PageHeader, Pill } from '@/components/ui'
+import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import {
   addSchoolDayOffAction,
   createTripAction,
@@ -24,6 +24,11 @@ import {
   saveReferencePricesAction,
   saveSchoolCalendarSourcesAction,
   saveWeekSettingsAction,
+  discardLodgingPullAction,
+  keepLodgingPullAction,
+  readLodgingPasteAction,
+  removeLodgingQuoteAction,
+  typeLodgingQuoteAction,
 } from '@/server/actions'
 import { readerEnabled } from '@/server/reader'
 import {
@@ -36,6 +41,10 @@ import {
   layoutFromCode,
   PARK_LABELS,
   parseParkDays,
+  ratesPullSummary,
+  RESORTINGS_CREDIT,
+  stayKey,
+  stayWords,
   percentForInput,
   referenceFreshness,
   shortDate,
@@ -100,6 +109,7 @@ export default async function TripsPage({
     name?: string
     layout?: string
     parks?: string
+    stay?: string
     drive?: string
   }>
 }) {
@@ -114,6 +124,7 @@ export default async function TripsPage({
     name: nameParam,
     layout: layoutParam,
     parks: parksParam,
+    stay: stayParam,
     drive: driveParam,
   } = await searchParams
   const { engine } = await requireEngine()
@@ -143,7 +154,14 @@ export default async function TripsPage({
   const month = monthParam && /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : today.slice(0, 7)
   // Explore (D55): the park days asked for in the address, else the family's usual; its ranking shades the strip and numbers the month.
   const parkDays = parseParkDays(parksParam)
-  const [explored, homeDrive] = await Promise.all([engine.explore({ parkDays }), engine.homeDrive()])
+  const [explored, homeDrive, lodgingPull, quotes, stays] = await Promise.all([
+    engine.explore({ parkDays, stay: stayParam ?? null }),
+    engine.homeDrive(),
+    engine.pendingLodgingPull(),
+    engine.lodgingQuotes(),
+    engine.lodgingStays(),
+  ])
+  const stayChoices = stays.includes(stayKey(explored.shape.stay)) ? stays : [...stays, stayKey(explored.shape.stay)]
   const ranks: Record<string, number> = {}
   explored.top.forEach((w, i) => {
     ranks[w.startDate] ??= i + 1
@@ -610,6 +628,16 @@ export default async function TripsPage({
                 <input type="checkbox" name="split_when_free" defaultChecked={explored.shape.splitWhenFree} />
                 Split a long drive whenever it costs nothing
               </label>
+              <label className="col-span-2 block text-xs text-[var(--color-ink-soft)] sm:col-span-4">
+                Where we usually stay, for what a night costs
+                <select name="stay" defaultValue={stayKey(explored.shape.stay)} className={input}>
+                  {(stayChoices.length > 0 ? stayChoices : ['all']).map((k) => (
+                    <option key={k} value={k}>
+                      {stayWords(k)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="block text-xs text-[var(--color-ink-soft)]">
                 Months ahead
                 <input name="horizon_months" inputMode="numeric" defaultValue={horizonMonths} className={input} />
@@ -628,6 +656,111 @@ export default async function TripsPage({
               </label>
               <button type="submit" className={secondaryButton + ' col-span-2 sm:col-span-4'}>
                 Save how we like to go
+              </button>
+            </form>
+          </Card>
+        </section>
+
+        <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
+          <h2 id="night-cost" className={sectionTitle}>
+            What a night costs
+          </h2>
+          <Card>
+            <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+              The best times to go are priced night by night from the surest figure there is: a price we were quoted for those nights, then
+              Disney&apos;s rate for the week, then for the month. Disney&apos;s rates come from{' '}
+              <a href={RESORTINGS_CREDIT.url} className="underline">
+                resortings.com
+              </a>
+              : open its prices-by-month page, copy the whole page and paste it here. It is shown before it is kept.
+            </p>
+            {lodgingPull ? (
+              <div className="mb-3 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
+                <p className="font-semibold">Disney&apos;s rates, as {lodgingPull.label} lists them</p>
+                {(() => {
+                  const sum = ratesPullSummary(lodgingPull.rates)
+                  return (
+                    <p className="mt-1">
+                      {sum.rates} rates: all resorts, the three tiers and {sum.resorts} resorts by month
+                      {sum.weeks > 0 ? `, and ${sum.weeks} weeks by check-in day` : ''}
+                      {sum.from && sum.to ? `, ${shortDate(sum.from)} ${sum.from.slice(0, 4)} to ${shortDate(sum.to)} ${sum.to.slice(0, 4)}` : ''}. Keep them?
+                    </p>
+                  )
+                })()}
+                {lodgingPull.basis ? <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{lodgingPull.basis}.</p> : null}
+                <div className="mt-3 flex gap-2">
+                  <form action={keepLodgingPullAction} className="flex-1">
+                    <button type="submit" className={primaryButton}>
+                      Keep these
+                    </button>
+                  </form>
+                  <form action={discardLodgingPullAction} className="flex-1">
+                    <button type="submit" className={secondaryButton}>
+                      Not now
+                    </button>
+                  </form>
+                </div>
+              </div>
+            ) : null}
+            <form action={readLodgingPasteAction} className="space-y-2">
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                The resortings.com page, pasted
+                <textarea name="text" rows={3} className={input} placeholder="What a night costs, month by month…" />
+              </label>
+              <button type="submit" className={secondaryButton}>
+                Read the page
+              </button>
+            </form>
+            <h3 className="mt-5 text-sm font-semibold">Prices we were quoted</h3>
+            {quotes.length === 0 ? (
+              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">None yet. A quote beats Disney&apos;s published rate for its nights.</p>
+            ) : (
+              <ul className="mt-1 divide-y divide-[var(--color-line)] text-sm">
+                {quotes.map((q) => (
+                  <li key={q.id} className="flex items-center justify-between gap-2 py-1.5">
+                    <span>
+                      {stayWords(q.stay)}, nights of {shortDate(q.fromDate)} to {shortDate(q.toDate)} {q.toDate.slice(0, 4)}: <Money cents={q.nightlyCents} /> a night
+                      {q.note ? <span className="text-[var(--color-ink-soft)]"> · {q.note}</span> : null}
+                    </span>
+                    <form action={removeLodgingQuoteAction}>
+                      <input type="hidden" name="quote_id" value={q.id} />
+                      <button type="submit" className={smallButton}>
+                        Remove
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form action={typeLodgingQuoteAction} className="mt-2 grid grid-cols-2 gap-2">
+              <label className="col-span-2 block text-xs text-[var(--color-ink-soft)]">
+                Where
+                <select name="stay" defaultValue={stayKey(explored.shape.stay)} className={input}>
+                  {(stayChoices.length > 0 ? stayChoices : ['all']).map((k) => (
+                    <option key={k} value={k}>
+                      {stayWords(k)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                First night
+                <input name="from_date" type="date" required className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Last night
+                <input name="to_date" type="date" required className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                A night, $
+                <input name="nightly" inputMode="decimal" required placeholder="310" className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                From
+                <input name="note" placeholder="Disney's site, phone quote…" className={input} />
+              </label>
+              <button type="submit" className={secondaryButton + ' col-span-2'}>
+                Keep this quote
               </button>
             </form>
           </Card>

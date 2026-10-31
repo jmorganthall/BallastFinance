@@ -7,11 +7,20 @@
 import { describe, expect, it } from 'vitest'
 import { explore, type ExploreInput } from '../explore'
 import { scoresOf } from '../trip-when'
+import type { WindowPrice } from '../night-cost'
 import type { CrowdLevel } from '../trip-plan'
 
 const TODAY = '2026-10-31'
 
 const level = (date: string, l: number): CrowdLevel => ({ destination: 'wdw', date, park: 'other', level: l, source: 'typed', fetchedOn: TODAY })
+
+/** A known price, for the ranking only. */
+const cost = (cents: number): WindowPrice => ({
+  cents,
+  lodging: { totalCents: cents, perNightCents: cents, nightsKnown: 1, nights: 1, weakest: 'typed', stale: false, disagrees: false, oldestAsOf: TODAY },
+  roadNights: 0,
+  roadNightCents: 0,
+})
 
 function run(over: Partial<ExploreInput> = {}) {
   return explore({
@@ -59,7 +68,7 @@ describe('explore', () => {
   it('measures how busy over the park days only', () => {
     // Packed on the travel days around a quiet Sat-Mon, quiet everywhere else.
     const crowd = [level('2026-11-07', 2), level('2026-11-08', 2), level('2026-11-09', 2), level('2026-11-06', 10), level('2026-11-10', 10)]
-    const r = run({ busyness: { crowdLevels: crowd }, priceOf: () => 0 })
+    const r = run({ busyness: { crowdLevels: crowd }, priceOf: () => cost(0) })
     const w = r.top.find((t) => t.firstParkDate === '2026-11-07')!
     expect(w.crowdAverage).toBe(2)
     expect(w.daysWithData).toBe(3)
@@ -84,12 +93,12 @@ describe('explore', () => {
   })
 
   it('ranks the cheaper of two same-length windows first when all else is equal', () => {
-    const r = run({ daysOff: [{ date: '2026-12-31', label: 'Break' }], priceOf: (w) => (w.firstParkDate === '2026-11-14' ? 100_00 : 500_00), weights: { busy: 0, price: 1, school: 0 } })
+    const r = run({ daysOff: [{ date: '2026-12-31', label: 'Break' }], priceOf: (w) => cost(w.firstParkDate === '2026-11-14' ? 100_00 : 500_00), weights: { busy: 0, price: 1, school: 0 } })
     expect(r.top[0]!.firstParkDate).toBe('2026-11-14')
   })
 
   it('shades every start date in five steps, the best start in the first, equal scores in one step', () => {
-    const r = run({ priceOf: (w) => (w.firstParkDate === '2026-11-21' ? 100_00 : 500_00) })
+    const r = run({ priceOf: (w) => cost(w.firstParkDate === '2026-11-21' ? 100_00 : 500_00) })
     const steps = Object.values(r.startSteps)
     expect(steps.every((s) => s >= 1 && s <= 5)).toBe(true)
     expect(r.startSteps[r.top[0]!.startDate]).toBe(1)

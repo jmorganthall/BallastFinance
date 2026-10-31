@@ -7,7 +7,21 @@
 
 import Link from 'next/link'
 import { checkHomeDriveAction, useHomeDriveAction } from '@/server/actions'
-import { exploreTripName, hoursWords, shapeCode, shortDate, weekdayName, type DriveEstimate, type Explore, type TripShape } from '@/domain'
+import { Hint } from '@/components/ui'
+import {
+  exploreTripName,
+  hoursWords,
+  priceDetail,
+  priceWords,
+  RESORTINGS_CREDIT,
+  shapeCode,
+  shortDate,
+  stayWords,
+  weekdayName,
+  type DriveEstimate,
+  type Explore,
+  type TripShape,
+} from '@/domain'
 
 const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium'
 const chip = 'rounded-full border px-3 py-1 text-sm'
@@ -30,7 +44,7 @@ export function ExploreSection({
   drive,
   lookedUp,
 }: {
-  result: Explore & { shape: TripShape }
+  result: Explore & { shape: TripShape; stay: string }
   /** The park days asked for in the address, as written there; null is the family's usual. */
   parks: string | null
   drive: DriveEstimate | null
@@ -132,7 +146,14 @@ export function ExploreSection({
                   {i + 1}. {dayWord(w.startDate)} {shortDate(w.startDate)} – {dayWord(w.endDate)} {shortDate(w.endDate)}, {w.endDate.slice(0, 4)}
                 </span>
                 <span className="block text-[var(--color-ink-soft)]">{w.words}</span>
-                <span className="block text-xs text-[var(--color-ink-soft)]">{w.reasons.join(' · ')}</span>
+                <span className="block text-xs text-[var(--color-ink-soft)]">
+                  {w.reasons.map((r, j) => (
+                    <span key={r}>
+                      {j > 0 ? ' · ' : ''}
+                      {r === priceWords(w.price) ? <Hint detail={priceDetail(w.price)}>{r}</Hint> : r}
+                    </span>
+                  ))}
+                </span>
               </div>
               <Link
                 href={`/trips?start=${w.startDate}&end=${w.endDate}&layout=${shapeCode(w)}&name=${encodeURIComponent(exploreTripName(w))}#new-trip`}
@@ -147,10 +168,20 @@ export function ExploreSection({
 
       <p className="mt-2 text-xs leading-snug text-[var(--color-ink-soft)]">
         From {shortDate(result.horizonFrom)} to {shortDate(result.horizonTo)}, {result.horizonTo.slice(0, 4)}: {result.considered} ways to go looked at. Quiet
-        first, then cheap, then no school missed; no prices yet. The strip above shades each day by how good a trip leaving it is, and the numbers on the
-        month are this list.
+        first, then cheap, then no school missed. Cheap is what it costs to sleep at {stayWords(result.stay)}, night by night from the surest price we have;
+        a week with no price yet is neither cheap nor dear. The strip above shades each day by how good a trip leaving it is, and the numbers on the month
+        are this list.
         {result.excludedByBlackout > 0 ? ` ${result.excludedByBlackout} left out for days we cannot go.` : ''}
         {result.daysOffKnown ? '' : ' No school calendar yet, so every weekday counts as school; add one below.'}
+        {result.top.some((w) => w.price?.lodging.weakest === 'rates_week' || w.price?.lodging.weakest === 'rates_month') ? (
+          <>
+            {' '}
+            <a href={RESORTINGS_CREDIT.url} className="underline">
+              {RESORTINGS_CREDIT.text}
+            </a>
+            .
+          </>
+        ) : null}
       </p>
     </div>
   )

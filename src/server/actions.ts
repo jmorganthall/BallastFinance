@@ -1321,6 +1321,51 @@ export async function checkDriveAction(formData: FormData): Promise<void> {
   backToTrip(tripId, null, `drive=${drive.miles}:${drive.minutes}`)
 }
 
+// -- what a night costs (D55 (5)): resortings.com pasted and held, and the prices we were quoted
+
+export async function readLodgingPasteAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(() => engine.readLodgingPaste(String(formData.get('text') ?? '')))
+  backToTrips(done.message, 'saved=1', '#night-cost')
+}
+
+export async function keepLodgingPullAction(): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(() => engine.keepLodgingPull())
+  backToTrips(done.message, 'saved=1', '#night-cost')
+}
+
+export async function discardLodgingPullAction(): Promise<void> {
+  const { engine } = await requireEngine()
+  await engine.stashLodgingPull(null)
+  backToTrips(null, 'saved=1', '#night-cost')
+}
+
+export async function typeLodgingQuoteAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountToCents } = await import('@/domain')
+  const done = await tripRefusalOf(async () => {
+    const fromDate = String(formData.get('from_date') ?? '')
+    const toDate = String(formData.get('to_date') ?? '')
+    assertCivilDate(fromDate)
+    assertCivilDate(toDate)
+    await engine.typeLodgingQuote({
+      stay: String(formData.get('stay') ?? ''),
+      fromDate,
+      toDate,
+      nightlyCents: parseAmountToCents(String(formData.get('nightly') ?? '')),
+      note: String(formData.get('note') ?? ''),
+    })
+  })
+  backToTrips(done.message, 'saved=1', '#night-cost')
+}
+
+export async function removeLodgingQuoteAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(() => engine.removeLodgingQuote(String(formData.get('quote_id') ?? '')))
+  backToTrips(done.message, 'saved=1', '#night-cost')
+}
+
 /** The drive from home with no trip (D55): looked up and shown on Trips before it is kept. */
 export async function checkHomeDriveAction(): Promise<void> {
   const { engine } = await requireEngine()
@@ -1833,7 +1878,7 @@ export async function discardSchoolCalendarAction(): Promise<void> {
 
 export async function saveWeekSettingsAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const { TripPlanError } = await import('@/domain')
+  const { TripPlanError, stayFromKey } = await import('@/domain')
   const done = await tripRefusalOf(async () => {
     const number = (name: string) => {
       const raw = String(formData.get(name) ?? '').trim()
@@ -1861,6 +1906,7 @@ export async function saveWeekSettingsAction(formData: FormData): Promise<void> 
         adultDrivers: whole('adult_drivers', 'Adult drivers is a whole number.'),
         easyStretchMinutes: stretch === '' ? null : Math.round(hours * 60),
         splitWhenFree: formData.get('split_when_free') === 'on',
+        stay: formData.has('stay') ? stayFromKey(String(formData.get('stay'))) : shape.stay,
       })
     }
   })

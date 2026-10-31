@@ -28,6 +28,7 @@
 
 import { addDays, addMonths, compareDates, type CivilDate } from './dates'
 import type { Cents } from './money'
+import { priceWords, type WindowPrice } from './night-cost'
 import { busynessFor, type BusynessSources } from './park-data'
 import type { BlackoutRange } from './trip-plan'
 import { shapeSchoolDaysMissed, shapeWindow, shapeWords, type ShapedWindow } from './trip-shape'
@@ -57,7 +58,7 @@ export interface ExploreInput {
   weights?: WeekWeights
   limit?: number
   /** What a window costs, when anything is known (D55 (5)); absent or null is no price yet. */
-  priceOf?: (window: ShapedWindow) => Cents | null
+  priceOf?: (window: ShapedWindow) => WindowPrice | null
 }
 
 export interface ExploreWindow extends ShapedWindow {
@@ -68,6 +69,7 @@ export interface ExploreWindow extends ShapedWindow {
   schoolDaysMissed: number
   /** Holidays and days off school the window uses. */
   uses: string[]
+  price: WindowPrice | null
   priceCents: Cents | null
   /** Lower is better. To three places. */
   score: number
@@ -122,6 +124,7 @@ export function explore(input: ExploreInput): Explore {
     daysCounted: number
     schoolDaysMissed: number
     uses: string[]
+    price: WindowPrice | null
     priceCents: Cents | null
     blackedOut: boolean
   }
@@ -151,7 +154,7 @@ export function explore(input: ExploreInput): Explore {
         daysCounted: n,
         schoolDaysMissed: shapeSchoolDaysMissed(w, isSchool),
         uses,
-        priceCents: input.priceOf ? input.priceOf(w) : null,
+        ...priced(input.priceOf ? input.priceOf(w) : null),
         blackedOut: w.days.some((d) => isCantGo(d.date)),
       })
     }
@@ -166,7 +169,7 @@ export function explore(input: ExploreInput): Explore {
     const { blackedOut: _, ...rest } = m
     const reasons = [crowdReason(m)]
     if (m.uses.length > 0) reasons.push(`uses ${m.uses.slice(0, 2).join(' and ')}${m.uses.length > 2 ? ` and ${m.uses.length - 2} more` : ''}`)
-    if (m.priceCents === null) reasons.push('no price yet')
+    reasons.push(priceWords(m.price))
     reasons.push(schoolReason(m.schoolDaysMissed))
     if (m.downReason === 'needed') reasons.push('the evening drive saves a school day')
     if (!m.driveKnown) reasons.push('drive not looked up yet')
@@ -186,6 +189,10 @@ export function explore(input: ExploreInput): Explore {
     stretchMinutes: input.stretchMinutes,
     startSteps: startSteps(scored),
   }
+}
+
+function priced(price: WindowPrice | null): { price: WindowPrice | null; priceCents: Cents | null } {
+  return { price, priceCents: price?.cents ?? null }
 }
 
 /**

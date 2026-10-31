@@ -22,6 +22,8 @@ import {
   reserveAccounts as reserveAccountsTable,
   settings as settingsTable,
   crowdLevels as crowdLevelsTable,
+  lodgingQuotes as lodgingQuotesTable,
+  lodgingRates as lodgingRatesTable,
   dvcListings as dvcListingsTable,
   parkHours as parkHoursTable,
   parkWeather as parkWeatherTable,
@@ -41,6 +43,16 @@ import {
 } from '@/db/schema'
 import { randomUUID } from 'node:crypto'
 import {
+  parseResortingsPrices,
+  RESORTINGS_SOURCE,
+  RESORTINGS_URL,
+  stayKey,
+  validateLodgingQuote,
+  validateLodgingRate,
+  windowPrice,
+  staysIn,
+  type LodgingQuote,
+  type LodgingRate,
   DEFAULT_TRIP_SHAPE,
   type LaidOutDay,
   easyStretchMinutes,
@@ -332,6 +344,16 @@ interface DoneInstructionInput {
   targetLabel: string
   purpose?: InstructionPurpose
   note?: string
+}
+
+/** A rates page read and held for a person to keep (D55 (5)). */
+export interface LodgingPull {
+  source: string
+  label: string
+  url: string
+  basis: string | null
+  rates: LodgingRate[]
+  fetchedOn: CivilDate
 }
 
 export class EngineError extends Error {}
@@ -4263,21 +4285,30 @@ export class Engine {
    * no trip. A search may ask for other park days (from the address, never
    * saved). The facts are gathered here; the ranking is the domain's.
    */
-  async explore(search: { parkDays?: { min: number; max: number } | null } = {}, destination: TripDestination = 'wdw'): Promise<Explore & { shape: TripShape }> {
+  async explore(
+    search: { parkDays?: { min: number; max: number } | null; stay?: string | null } = {},
+    destination: TripDestination = 'wdw',
+  ): Promise<Explore & { shape: TripShape; stay: string }> {
     const today = this.today()
-    const [shape, horizonMonths, weights, daysOff, blackoutDates, home] = await Promise.all([
+    const [shape, horizonMonths, weights, daysOff, blackoutDates, home, prices] = await Promise.all([
       this.tripShape(),
       this.horizonMonths(),
       this.weekWeights(),
       this.schoolDaysOff(),
       this.blackoutDates(),
       this.homeLocation(),
+      this.referencePrices(),
     ])
     const parkDays = search.parkDays ?? { min: shape.parkDaysMin, max: shape.parkDaysMax }
-    const [busyness, drive] = await Promise.all([
-      this.busynessSources({ from: today, to: addDays(addMonths(today, horizonMonths), parkDays.max + 7) }, destination),
+    const stay = search.stay?.trim() || stayKey(shape.stay)
+    const until = addDays(addMonths(today, horizonMonths), parkDays.max + 7)
+    const [busyness, drive, rates, quotes] = await Promise.all([
+      this.busynessSources({ from: today, to: until }, destination),
       this.driveEstimate({ home, destination }),
+      this.lodgingRates({ from: addDays(today, -40), to: until }, stay),
+      this.lodgingQuotes(),
     ])
+    const roadNightCents = prices.find((p) => p.key === 'midway_hotel_per_night')?.amountCents ?? 0
     const result = explore({
       today,
       horizonMonths,
@@ -4289,8 +4320,152 @@ export class Engine {
       daysOff,
       blackoutDates,
       weights,
+      priceOf: (w) => windowPrice(w, { stay, rates, quotes, today, roadNightCents }),
     })
-    return { ...result, shape }
+    return { ...result, shape, stay }
+  }
+
+  // -- what a night costs (D55 (5))
+
+  /** Disney's rates for a stay over a stretch of dates, as kept from resortings.com. */
+  async lodgingRates(range: { from: CivilDate; to: CivilDate }, stay?: string): Promise<LodgingRate[]> {
+    const rows = await this.db
+      .select()
+      .from(lodgingRatesTable)
+      .where(
+        and(
+          gte(lodgingRatesTable.periodStart, addDays(range.from, -31)),
+          lte(lodgingRatesTable.periodStart, range.to),
+          stay === undefined ? undefined : eq(lodgingRatesTable.stay, stay),
+        ),
+      )
+    return rows.map((r) => ({
+      source: r.source,
+      stay: r.stay,
+      period: r.period as LodgingRate['period'],
+      periodStart: r.periodStart,
+      nightlyCents: r.nightlyCents,
+      observedOn: r.observedOn,
+      fetchedOn: r.fetchedOn,
+      sourceUrl: r.sourceUrl,
+    }))
+  }
+
+  /** Every stay the kept rates can price: all resorts, the tiers, each resort. */
+  async lodgingStays(): Promise<string[]> {
+    const rows = await this.db.selectDistinct({ stay: lodgingRatesTable.stay }).from(lodgingRatesTable)
+    return staysIn(rows)
+  }
+
+  /** Keep rates: one row per stay, period and start, the newest capture over an older one. One trip_changed event says what came in. */
+  async recordLodgingRates(rates: readonly LodgingRate[]): Promise<number> {
+    for (const r of rates) validateLodgingRate(r)
+    if (rates.length === 0) return 0
+    await this.db.transaction(async (tx) => {
+      for (const r of rates) {
+        await tx
+          .insert(lodgingRatesTable)
+          .values(r)
+          .onConflictDoUpdate({
+            target: [lodgingRatesTable.source, lodgingRatesTable.stay, lodgingRatesTable.period, lodgingRatesTable.periodStart],
+            set: { nightlyCents: r.nightlyCents, observedOn: r.observedOn, fetchedOn: r.fetchedOn, sourceUrl: r.sourceUrl },
+          })
+      }
+      const starts = rates.map((r) => r.periodStart).sort()
+      await this.recordTripChange(tx, {
+        lodging_rates: { source: rates[0]!.source, count: rates.length, from: starts[0], to: starts[starts.length - 1], observed_on: rates[0]!.observedOn, fetched_on: rates[0]!.fetchedOn },
+      })
+    })
+    return rates.length
+  }
+
+  async pendingLodgingPull(): Promise<LodgingPull | null> {
+    const stored = await this.getSetting<LodgingPull | false | null>('trip_lodging_pull', null)
+    return stored && typeof stored === 'object' && Array.isArray(stored.rates) ? stored : null
+  }
+
+  /** Hold a pull for a person to look at; nothing is a rate until they keep it. A cleared hold is false: a setting is never null. */
+  async stashLodgingPull(pull: LodgingPull | null): Promise<void> {
+    await this.putSetting('trip_lodging_pull', pull ?? false)
+  }
+
+  /**
+   * The resortings.com page as a person pasted it (D55 (5)): read by the
+   * parser and held, never kept until a person says so. A paste with
+   * nothing readable is a refusal with the parser's reason.
+   */
+  async readLodgingPaste(text: string): Promise<LodgingPull> {
+    const parsed = parseResortingsPrices(text)
+    if (parsed.reason) throw new EngineError(parsed.reason)
+    const fetchedOn = this.today()
+    const pull: LodgingPull = {
+      source: RESORTINGS_SOURCE,
+      label: 'resortings.com',
+      url: RESORTINGS_URL,
+      basis: parsed.basis,
+      rates: parsed.rates.map((r) => ({ ...r, fetchedOn, sourceUrl: RESORTINGS_URL })),
+      fetchedOn,
+    }
+    for (const r of pull.rates) validateLodgingRate(r)
+    await this.stashLodgingPull(pull)
+    return pull
+  }
+
+  async keepLodgingPull(): Promise<number> {
+    const pull = await this.pendingLodgingPull()
+    if (!pull) throw new EngineError('There is nothing waiting to be kept.')
+    const kept = await this.recordLodgingRates(pull.rates)
+    await this.stashLodgingPull(null)
+    return kept
+  }
+
+  /** The nightly prices this household was quoted, newest first. */
+  async lodgingQuotes(): Promise<LodgingQuote[]> {
+    const rows = await this.db.select().from(lodgingQuotesTable).where(eq(lodgingQuotesTable.householdId, this.householdId))
+    return rows
+      .map((r) => ({ id: r.id, stay: r.stay, fromDate: r.fromDate, toDate: r.toDate, nightlyCents: r.nightlyCents, note: r.note, recordedOn: r.recordedOn }))
+      .sort((a, b) => compareDates(b.recordedOn, a.recordedOn) || compareDates(a.fromDate, b.fromDate))
+  }
+
+  /** A price we were quoted for some nights: the most trusted figure for them (D55 (5)). */
+  async typeLodgingQuote(input: { stay: string; fromDate: CivilDate; toDate: CivilDate; nightlyCents: Cents; note?: string }): Promise<LodgingQuote> {
+    const quote = { stay: input.stay.trim(), fromDate: input.fromDate, toDate: input.toDate, nightlyCents: input.nightlyCents, note: (input.note ?? '').trim(), recordedOn: this.today() }
+    validateLodgingQuote(quote)
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(lodgingQuotesTable)
+        .values({ householdId: this.householdId, ...quote })
+        .returning()
+      if (!row) throw new EngineError('Could not keep the quote')
+      await this.recordLodgingQuoteChange(tx, { before: null, after: { ...quote, id: row.id } })
+      return { ...quote, id: row.id }
+    })
+  }
+
+  async removeLodgingQuote(id: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(lodgingQuotesTable)
+        .where(and(eq(lodgingQuotesTable.id, id), eq(lodgingQuotesTable.householdId, this.householdId)))
+      if (!row) throw new EngineError('No such quote in this household')
+      await tx.delete(lodgingQuotesTable).where(eq(lodgingQuotesTable.id, id))
+      await this.recordLodgingQuoteChange(tx, {
+        before: { id: row.id, stay: row.stay, fromDate: row.fromDate, toDate: row.toDate, nightlyCents: row.nightlyCents, note: row.note, recordedOn: row.recordedOn },
+        after: null,
+      })
+    })
+  }
+
+  private async recordLodgingQuoteChange(tx: Conn, payload: { before: LodgingQuote | null; after: LodgingQuote | null }): Promise<void> {
+    await tx.insert(events).values({
+      householdId: this.householdId,
+      kind: 'lodging_quote_changed',
+      occurredAt: this.today(),
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload,
+    })
   }
 
   /** The drive from home, looked up without a trip (D55), kept where every trip from this home reads it. */

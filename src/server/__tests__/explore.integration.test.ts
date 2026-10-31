@@ -94,3 +94,74 @@ describeDb('explore', () => {
     expect(changes.length).toBeGreaterThan(0)
   })
 })
+
+describeDb('what a night costs', () => {
+  let client: ReturnType<typeof postgres>
+  let db: ReturnType<typeof drizzle<typeof schema>>
+  let householdId: string
+  let otherId: string
+  let engine: Engine
+  let other: Engine
+  const TODAY = '2026-10-31'
+  const PAGE = [
+    'MONTH\tALL RESORTS\tVS YEAR\tVALUE\tMODERATE\tDELUXE',
+    'January 2027 AMONG THE 3 CHEAPEST\t$494\t-10%\t$173\t$294\t$633',
+    'February 2027\t$547\t+0%\t$211\t$328\t$696',
+    'Every figure is Disney’s own average price per night for a four-night midweek stay, as published on Disney’s own site in September 2026.',
+  ].join('\n')
+
+  beforeAll(async () => {
+    client = postgres(url!, { max: 4, prepare: false })
+    db = drizzle(client, { schema })
+    const [a] = await db.insert(schema.households).values({ name: `Nights ${crypto.randomUUID()}` }).returning()
+    const [b] = await db.insert(schema.households).values({ name: `Other ${crypto.randomUUID()}` }).returning()
+    householdId = a!.id
+    otherId = b!.id
+    engine = new Engine({ householdId, actorUserId: null, db, today: TODAY })
+    other = new Engine({ householdId: otherId, actorUserId: null, db, today: TODAY })
+    await db.delete(schema.lodgingRates)
+  })
+
+  afterAll(async () => {
+    await db.delete(schema.lodgingRates)
+    await client?.end()
+  })
+
+  it('holds a pasted page until it is kept, refuses a page with nothing readable, and keeps it once', async () => {
+    await expect(engine.readLodgingPaste('nothing here')).rejects.toThrow(EngineError)
+    const pull = await engine.readLodgingPaste(PAGE)
+    expect(pull.rates).toHaveLength(8)
+    expect(await engine.lodgingStays()).toEqual([])
+    expect(await engine.keepLodgingPull()).toBe(8)
+    expect(await engine.pendingLodgingPull()).toBeNull()
+    expect(await engine.lodgingStays()).toEqual(['all', 'tier:value', 'tier:moderate', 'tier:deluxe'])
+    // The same page again replaces, never doubles.
+    await engine.readLodgingPaste(PAGE)
+    await engine.keepLodgingPull()
+    expect(await engine.lodgingRates({ from: '2027-01-01', to: '2027-02-28' })).toHaveLength(8)
+  })
+
+  it("prices Explore's windows night by night, a quote over Disney's rate, each change an event, another household's quote out of reach", async () => {
+    await engine.setTripShape({ ...DEFAULT_TRIP_SHAPE, parkDaysMin: 3, parkDaysMax: 3, stay: { kind: 'tier', tier: 'moderate' } })
+    await engine.setBlackoutDates([
+      { from: '2026-11-01', to: '2027-01-09', label: 'Not yet' },
+      { from: '2027-01-20', to: '2027-12-31', label: 'Not then' },
+    ])
+    const before = await engine.explore()
+    expect(before.stay).toBe('tier:moderate')
+    const w = before.top[0]!
+    // No drive looked up: full travel days, so the resort nights are the travel day down and each park day.
+    expect(w.price?.lodging).toMatchObject({ perNightCents: 294_00, weakest: 'rates_month' })
+    expect(w.reasons).toContain('about $294.00 a night')
+
+    const q = await engine.typeLodgingQuote({ stay: 'tier:moderate', fromDate: w.resortNights[0]!, toDate: w.resortNights.at(-1)!, nightlyCents: 150_00, note: 'Phone' })
+    const after = (await engine.explore()).top.find((t) => t.startDate === w.startDate)!
+    expect(after.price?.lodging).toMatchObject({ perNightCents: 150_00, weakest: 'typed', disagrees: true })
+
+    await expect(other.removeLodgingQuote(q.id)).rejects.toThrow(EngineError)
+    await engine.removeLodgingQuote(q.id)
+    expect(await engine.lodgingQuotes()).toEqual([])
+    const log = await db.select().from(schema.events).where(and(eq(schema.events.householdId, householdId), eq(schema.events.kind, 'lodging_quote_changed')))
+    expect(log).toHaveLength(2)
+  })
+})
