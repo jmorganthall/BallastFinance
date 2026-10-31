@@ -41,7 +41,7 @@ principles, and they are non-negotiable.
 | --- | --- |
 | `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `trip-shape.ts` is the family's trip shape (D55): park days, the easy stretch, the split-drive rules and the "Plan this" layout. `explore.ts` ranks the best times to go in that shape, with no trip, and shades the year strip. `night-cost.ts` is what a night costs (D55 (5)): the trust ladder, a window's price, and the resortings.com parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
 | `src/db/` | Drizzle schema and the connection. Facts only |
-| `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
+| `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `self-update.ts` is the one call to the household's own Watchtower on the LAN ("Update now"), off unless `WATCHTOWER_URL` is set; `db-backup.ts` runs `pg_dump` for the bootstrap. `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
 | `drizzle/` | Migrations. `0001` is the append-only enforcement — read it before touching events |
 | `scripts/` | Bootstrap, seed, backup, quickstart, and the Disney demo for checking against the spreadsheet |
@@ -518,7 +518,7 @@ principles, and they are non-negotiable.
   never an average** (PRD D55 (5)). `nightCosts` in
   `src/domain/night-cost.ts`: a quote we typed for those nights
   (`lodging_quotes`, household facts, each change a
-  `lodging_quote_changed` event, migration 0024), then Disney's rate for
+  `lodging_quote_changed` event, migration 0025), then Disney's rate for
   the week, then the month (`lodging_rates`, reference data with no
   household, unique on source + stay + period + start, written only
   through the engine); the newest wins within a level. `stay` is "all",
@@ -640,6 +640,34 @@ principles, and they are non-negotiable.
   paystub line without an amount is dropped, and one that comes to $0 is not
   shown. The income forms keep what was typed when the engine refuses
   (`IncomeFormState`): an error never costs a person their input.
+- **"Update now" goes through Watchtower, and a migration is backed up first**
+  (design `docs/superpowers/specs/2026-10-29-update-now-design.md`, modelled on
+  PathBrain). `src/server/self-update.ts`: with `WATCHTOWER_URL` set and the
+  container on the published image at the update check's tag
+  (`selfUpdateOffered`, from `BALLAST_IMAGE`; unset is assumed published), the
+  footer's notice has `UpdateNow`, which calls `updateNowAction`:
+  `POST {url}/v1/update?image=<repo>` with `Authorization: Bearer
+  WATCHTOWER_TOKEN`, so only Ballast is updated. The token is read from the
+  environment for that one call and is never stored, shown or logged. A
+  successful update kills this container mid-request, so a cut connection is
+  `dropped` (started: the browser sees a bare network `TypeError`; an error Next.js answers with a `digest` is a failed press, never "updating") and the page polls the public `/api/version` until a
+  different revision answers, giving up after 4 minutes; refused, unknown host
+  or connect timeout is `unreachable`, a non-2xx `rejected`. "Test connection"
+  only ever GETs Watchtower's root. Every press is an `update_attempts` row
+  written before the request and settled on read by `settleAttempt`
+  (`updated` only when a different build started within ten minutes of the press, so a later pull by hand never reads as the button working; `no_change` ten minutes on; `failed`), on the first page the new build serves (the footer) and on Settings,
+  because Watchtower answers 200 for a container outside its scope. The
+  bootstrap, when a migration is waiting on a database already migrated
+  (`pendingMigrations`, drizzle's own rule), takes `takeBackup` in
+  `src/server/db-backup.ts` first: `pg_dump` gzipped to `/backups`
+  (`BALLAST_BACKUP_DIR`), refused unless that is a mount point, kept only if it
+  holds the events table, capped at 2 minutes, named so `backup.sh`'s prune
+  covers it. **A failed backup never stops a start** (the household's call):
+  the `database_backups` row is written after the migrations and the footer
+  says so until each person presses Got it (`backup_notice_dismissals`). The
+  three tables (migration 0024) belong to no household and are not events;
+  only the engine writes them, except the backup row, which the bootstrap
+  writes as it does the seed.
 - **Nothing is seeded but the household and the allowlist.** Account names
   belong to a family's real bank, not to the software. The trip planner's
   usual figures are a constant in `src/domain/trip.ts`, laid over by a
@@ -648,7 +676,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 899 tests. Database tests skip when DATABASE_URL is unset
+npm test            # 946 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

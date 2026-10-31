@@ -1,5 +1,5 @@
 {
-  "id": "89fa6b00-85b3-4720-9a27-f4a39330e076",
+  "id": "47603a81-8c08-4880-9ce9-94edd89d7367",
   "prevId": "c4484bfb-5ba2-4957-be9d-c4fd99aa41fb",
   "version": "7",
   "dialect": "postgresql",
@@ -153,6 +153,73 @@
       },
       "isRLSEnabled": false
     },
+    "public.backup_notice_dismissals": {
+      "name": "backup_notice_dismissals",
+      "schema": "",
+      "columns": {
+        "backup_id": {
+          "name": "backup_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dismissed_at": {
+          "name": "dismissed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "backup_notice_dismissals_backup_id_database_backups_id_fk": {
+          "name": "backup_notice_dismissals_backup_id_database_backups_id_fk",
+          "tableFrom": "backup_notice_dismissals",
+          "tableTo": "database_backups",
+          "columnsFrom": [
+            "backup_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "backup_notice_dismissals_user_id_users_id_fk": {
+          "name": "backup_notice_dismissals_user_id_users_id_fk",
+          "tableFrom": "backup_notice_dismissals",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "backup_notice_dismissals_backup_id_user_id_pk": {
+          "name": "backup_notice_dismissals_backup_id_user_id_pk",
+          "columns": [
+            "backup_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.crowd_levels": {
       "name": "crowd_levels",
       "schema": "",
@@ -246,6 +313,96 @@
         "crowd_levels_level_range": {
           "name": "crowd_levels_level_range",
           "value": "\"crowd_levels\".\"level\" between 1 and 10"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.database_backups": {
+      "name": "database_backups",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "taken_at": {
+          "name": "taken_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revision": {
+          "name": "revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "migrations": {
+          "name": "migrations",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ok": {
+          "name": "ok",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file": {
+          "name": "file",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bytes": {
+          "name": "bytes",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "elapsed_ms": {
+          "name": "elapsed_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "database_backups_taken_idx": {
+          "name": "database_backups_taken_idx",
+          "columns": [
+            {
+              "expression": "taken_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "database_backups_ok_file": {
+          "name": "database_backups_ok_file",
+          "value": "\"database_backups\".\"ok\" = (\"database_backups\".\"file\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -1306,219 +1463,6 @@
         "line_items_recurrence_is_whole": {
           "name": "line_items_recurrence_is_whole",
           "value": "(\"line_items\".\"recur_every\" is null) = (\"line_items\".\"recur_unit\" is null)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.lodging_quotes": {
-      "name": "lodging_quotes",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "household_id": {
-          "name": "household_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stay": {
-          "name": "stay",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "from_date": {
-          "name": "from_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "to_date": {
-          "name": "to_date",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "nightly_cents": {
-          "name": "nightly_cents",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "note": {
-          "name": "note",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "recorded_on": {
-          "name": "recorded_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "lodging_quotes_household_idx": {
-          "name": "lodging_quotes_household_idx",
-          "columns": [
-            {
-              "expression": "household_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "lodging_quotes_household_id_households_id_fk": {
-          "name": "lodging_quotes_household_id_households_id_fk",
-          "tableFrom": "lodging_quotes",
-          "tableTo": "households",
-          "columnsFrom": [
-            "household_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "lodging_quotes_nights_in_order": {
-          "name": "lodging_quotes_nights_in_order",
-          "value": "\"lodging_quotes\".\"to_date\" >= \"lodging_quotes\".\"from_date\""
-        },
-        "lodging_quotes_price_positive": {
-          "name": "lodging_quotes_price_positive",
-          "value": "\"lodging_quotes\".\"nightly_cents\" > 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.lodging_rates": {
-      "name": "lodging_rates",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "source": {
-          "name": "source",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "stay": {
-          "name": "stay",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "period": {
-          "name": "period",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "period_start": {
-          "name": "period_start",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "nightly_cents": {
-          "name": "nightly_cents",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "observed_on": {
-          "name": "observed_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "fetched_on": {
-          "name": "fetched_on",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_url": {
-          "name": "source_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        }
-      },
-      "indexes": {
-        "lodging_rates_key_idx": {
-          "name": "lodging_rates_key_idx",
-          "columns": [
-            {
-              "expression": "source",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "stay",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "period",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "period_start",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "lodging_rates_period": {
-          "name": "lodging_rates_period",
-          "value": "\"lodging_rates\".\"period\" in ('week', 'month')"
-        },
-        "lodging_rates_price_positive": {
-          "name": "lodging_rates_price_positive",
-          "value": "\"lodging_rates\".\"nightly_cents\" > 0"
         }
       },
       "isRLSEnabled": false
@@ -3052,6 +2996,145 @@
       },
       "isRLSEnabled": false
     },
+    "public.update_attempts": {
+      "name": "update_attempts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "url": {
+          "name": "url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_sent": {
+          "name": "token_sent",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision_before": {
+          "name": "revision_before",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "http_status": {
+          "name": "http_status",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response_body": {
+          "name": "response_body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "error": {
+          "name": "error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "elapsed_ms": {
+          "name": "elapsed_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "verdict": {
+          "name": "verdict",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "verdict_at": {
+          "name": "verdict_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revision_after": {
+          "name": "revision_after",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "update_attempts_created_idx": {
+          "name": "update_attempts_created_idx",
+          "columns": [
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "update_attempts_actor_user_id_users_id_fk": {
+          "name": "update_attempts_actor_user_id_users_id_fk",
+          "tableFrom": "update_attempts",
+          "tableTo": "users",
+          "columnsFrom": [
+            "actor_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "update_attempts_outcome": {
+          "name": "update_attempts_outcome",
+          "value": "\"update_attempts\".\"outcome\" in ('requested', 'accepted', 'dropped', 'rejected', 'unreachable')"
+        },
+        "update_attempts_verdict": {
+          "name": "update_attempts_verdict",
+          "value": "\"update_attempts\".\"verdict\" in ('pending', 'updated', 'no_change', 'failed')"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.users": {
       "name": "users",
       "schema": "",
@@ -3345,8 +3428,7 @@
         "spend_recorded",
         "round_finished",
         "round_saved_back_up",
-        "event_undone",
-        "lodging_quote_changed"
+        "event_undone"
       ]
     },
     "public.frequency": {

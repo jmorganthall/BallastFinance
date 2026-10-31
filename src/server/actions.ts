@@ -21,6 +21,16 @@ import {
   type TripPark,
 } from '@/domain'
 import type { Engine } from '@/server/engine'
+import { runningBuild } from '@/server/version'
+import {
+  callWatchtower,
+  selfUpdateConfig,
+  selfUpdateOffered,
+  testWatchtower,
+  updateUrl,
+  watchtowerToken,
+} from '@/server/self-update'
+import { DEFAULT_BACKUP_DIR, checkBackupFolder } from '@/server/db-backup'
 
 export interface FormState {
   problems: { path: string; message: string }[]
@@ -2259,4 +2269,81 @@ export async function removeIncomePaymentAction(formData: FormData): Promise<voi
   await thenBack(`/income#source-${String(formData.get('income_source_id'))}`, (engine) =>
     engine.removeIncomePayment(String(formData.get('id'))),
   )
+}
+
+// ---------------------------------------------------------------- "Update now"
+
+export interface UpdateNowResult {
+  started: boolean
+  message: string
+}
+
+/**
+ * Ask Watchtower to update Ballast. The attempt is recorded before the request
+ * goes out, because a successful update stops this container -- often before
+ * this action can answer, which the page reads as started.
+ */
+export async function updateNowAction(): Promise<UpdateNowResult> {
+  const { engine } = await requireEngine()
+  const config = selfUpdateConfig()
+  if (!selfUpdateOffered() || !config.url) {
+    return { started: false, message: 'Updates through Watchtower are not set up.' }
+  }
+  const token = watchtowerToken()
+  const attemptId = await engine.recordUpdateAttempt({
+    url: updateUrl(config.url, config.image),
+    tokenSent: token !== null,
+    revisionBefore: runningBuild().revision,
+  })
+  const call = await callWatchtower({ url: config.url, token, image: config.image })
+  const failed = call.outcome === 'rejected' || call.outcome === 'unreachable'
+  await engine.finishUpdateAttempt(attemptId, {
+    outcome: call.outcome,
+    httpStatus: call.httpStatus,
+    responseBody: call.body,
+    error: call.reason,
+    elapsedMs: call.elapsedMs,
+    verdict: failed ? 'failed' : undefined,
+  })
+  revalidatePath('/settings')
+  if (call.outcome === 'rejected') {
+    const hint = call.httpStatus === 401 || call.httpStatus === 403 ? ' — check WATCHTOWER_TOKEN' : ''
+    return { started: false, message: `Watchtower turned it down (HTTP ${call.httpStatus})${hint}. Nothing was updated.` }
+  }
+  if (call.outcome === 'unreachable') {
+    return { started: false, message: `Could not reach Watchtower at ${config.url}: ${call.reason}. Nothing was updated.` }
+  }
+  return { started: true, message: 'Updating — back in a minute' }
+}
+
+export interface UpdateConnectionTest {
+  ok: boolean
+  watchtower: string
+  backups: string
+}
+
+/** Is Watchtower there, and can a backup be written? Never starts an update. */
+export async function testUpdateConnectionAction(): Promise<UpdateConnectionTest> {
+  await requireEngine()
+  const config = selfUpdateConfig()
+  const dir = process.env.BALLAST_BACKUP_DIR?.trim() || DEFAULT_BACKUP_DIR
+  const [wt, folder] = await Promise.all([
+    config.url ? testWatchtower({ url: config.url }) : Promise.resolve(null),
+    checkBackupFolder(dir),
+  ])
+  const watchtower = !config.url
+    ? 'Watchtower is not set up: set WATCHTOWER_URL and WATCHTOWER_TOKEN.'
+    : wt?.reachable
+      ? `Watchtower answers at ${config.url}${config.tokenSet ? '' : ', but no token is set'}. The token is checked for real when you press Update now: a wrong one updates nothing.`
+      : `Could not reach Watchtower at ${config.url}: ${wt?.reason}. Check the address and port, and that this container can reach it.`
+  const backups = folder.ok
+    ? `Backups before an update go to ${dir}, and it can be written.`
+    : `No backup could be taken before an update: ${folder.reason}.`
+  return { ok: Boolean(config.url && wt?.reachable && folder.ok), watchtower, backups }
+}
+
+export async function dismissBackupNoticeAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  await engine.dismissBackupNotice(String(formData.get('backup_id')))
+  revalidatePath('/', 'layout')
 }

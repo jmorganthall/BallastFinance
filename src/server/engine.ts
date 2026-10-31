@@ -10,7 +10,7 @@
  * this file calls but never duplicates: there is no arithmetic in this layer.
  */
 
-import { and, count, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import { db as defaultDb, type Db } from '@/db/client'
 import {
@@ -33,6 +33,9 @@ import {
   incomePayments as incomePaymentsTable,
   householdMembers as householdMembersTable,
   users as usersTable,
+  updateAttempts as updateAttemptsTable,
+  databaseBackups as databaseBackupsTable,
+  backupNoticeDismissals as backupNoticeDismissalsTable,
   schoolDaysOff as schoolDaysOffTable,
   tripDays as tripDaysTable,
   tripLines as tripLinesTable,
@@ -42,6 +45,12 @@ import {
   trips as tripsTable,
 } from '@/db/schema'
 import { randomUUID } from 'node:crypto'
+import {
+  settleAttempt,
+  type AttemptOutcome,
+  type AttemptVerdict,
+  type UpdateAttempt,
+} from '@/server/self-update'
 import {
   parseResortingsPrices,
   RESORTINGS_SOURCE,
@@ -357,6 +366,26 @@ export interface LodgingPull {
 }
 
 export class EngineError extends Error {}
+
+/** How an "Update now" call went, filled in after the request. */
+export interface AttemptFinish {
+  outcome: AttemptOutcome
+  httpStatus?: number | null
+  responseBody?: string | null
+  error?: string | null
+  elapsedMs?: number | null
+  verdict?: AttemptVerdict
+}
+
+export type DatabaseBackup = typeof databaseBackupsTable.$inferSelect
+
+/** A migration that ran without a backup, for the footer until this person says "Got it". */
+export interface BackupNotice {
+  id: Id
+  takenAt: Date
+  reason: string
+  migrations: string[]
+}
 
 /** One spend, finish or save back up on a plan's page (D53 (6)), with whether it was taken back. */
 export interface RoundHistoryEntry {
@@ -5821,6 +5850,124 @@ export class Engine {
         target: [settingsTable.householdId, settingsTable.key, settingsTable.effectiveFrom],
         set: { value },
       })
+  }
+
+  // ---------------------------------------------------------------- server upkeep ("Update now")
+  //
+  // Each press of "Update now" and each backup the bootstrap took before a
+  // migration. These are facts about the server, not the household this engine
+  // is bound to, so these methods deliberately ignore householdId: both
+  // spouses see the same history, and a second household on the same server
+  // would too. The token is never passed in here and never stored.
+
+  /** Written before the request goes out, so an update that kills this container still leaves a record. */
+  async recordUpdateAttempt(input: { url: string; tokenSent: boolean; revisionBefore: string | null }): Promise<Id> {
+    const [row] = await this.db
+      .insert(updateAttemptsTable)
+      .values({
+        actorUserId: this.actorUserId,
+        url: input.url,
+        tokenSent: input.tokenSent,
+        revisionBefore: input.revisionBefore,
+        outcome: 'requested',
+      })
+      .returning({ id: updateAttemptsTable.id })
+    if (!row) throw new EngineError('Could not record the update attempt')
+    return row.id
+  }
+
+  async finishUpdateAttempt(id: Id, fields: AttemptFinish): Promise<void> {
+    await this.db
+      .update(updateAttemptsTable)
+      .set({
+        outcome: fields.outcome,
+        httpStatus: fields.httpStatus ?? null,
+        responseBody: fields.responseBody ?? null,
+        error: fields.error ?? null,
+        elapsedMs: fields.elapsedMs ?? null,
+        ...(fields.verdict && fields.verdict !== 'pending' ? { verdict: fields.verdict, verdictAt: new Date() } : {}),
+      })
+      .where(eq(updateAttemptsTable.id, id))
+  }
+
+  /**
+   * The newest attempts, each settled against the build running now
+   * (`settleAttempt`) and the settled ones written back, so the verdict is
+   * reached on the first read after the restart and never re-judged.
+   */
+  async updateHistory(input: {
+    runningRevision: string | null
+    now?: Date
+    /** When this build started; a different build counts only if it started soon after the press. */
+    runningSince?: Date
+    limit?: number
+  }): Promise<UpdateAttempt[]> {
+    const now = input.now ?? new Date()
+    const runningSince = input.runningSince ?? new Date(Date.now() - process.uptime() * 1000)
+    const rows = await this.db
+      .select()
+      .from(updateAttemptsTable)
+      .orderBy(desc(updateAttemptsTable.createdAt), desc(updateAttemptsTable.id))
+      .limit(Math.max(1, Math.min(input.limit ?? 10, 50)))
+    const attempts: UpdateAttempt[] = []
+    for (const row of rows) {
+      let attempt: UpdateAttempt = {
+        ...row,
+        outcome: row.outcome as AttemptOutcome,
+        verdict: row.verdict as AttemptVerdict,
+      }
+      const settled = settleAttempt(attempt, input.runningRevision, now, runningSince)
+      if (settled) {
+        await this.db
+          .update(updateAttemptsTable)
+          .set({ verdict: settled.verdict, verdictAt: now, revisionAfter: settled.revisionAfter })
+          .where(and(eq(updateAttemptsTable.id, row.id), eq(updateAttemptsTable.verdict, 'pending')))
+        attempt = { ...attempt, ...settled, verdictAt: now }
+      }
+      attempts.push(attempt)
+    }
+    return attempts
+  }
+
+  async latestBackup(): Promise<DatabaseBackup | null> {
+    const [row] = await this.db
+      .select()
+      .from(databaseBackupsTable)
+      .orderBy(desc(databaseBackupsTable.takenAt), desc(databaseBackupsTable.id))
+      .limit(1)
+    return row ?? null
+  }
+
+  /** The latest backup, when it failed and this person has not said "Got it" to it. */
+  async backupNotice(): Promise<BackupNotice | null> {
+    const latest = await this.latestBackup()
+    if (!latest || latest.ok) return null
+    if (this.actorUserId) {
+      const [seen] = await this.db
+        .select({ backupId: backupNoticeDismissalsTable.backupId })
+        .from(backupNoticeDismissalsTable)
+        .where(
+          and(
+            eq(backupNoticeDismissalsTable.backupId, latest.id),
+            eq(backupNoticeDismissalsTable.userId, this.actorUserId),
+          ),
+        )
+      if (seen) return null
+    }
+    return {
+      id: latest.id,
+      takenAt: latest.takenAt,
+      reason: latest.reason ?? 'the reason was not recorded',
+      migrations: latest.migrations,
+    }
+  }
+
+  async dismissBackupNotice(backupId: Id): Promise<void> {
+    if (!this.actorUserId) throw new EngineError('Saying "Got it" needs someone signed in')
+    await this.db
+      .insert(backupNoticeDismissalsTable)
+      .values({ backupId, userId: this.actorUserId })
+      .onConflictDoNothing()
   }
 }
 
