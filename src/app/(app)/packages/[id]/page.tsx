@@ -360,7 +360,7 @@ export default async function PackageDetailPage({
                   </p>
                 </div>
                 {/* All of it there and waiting is not a warning (D38): the bar says Ready to spend. */}
-                {(part ? part.isOverdue : item.isOverdue) && part?.status !== 'ready_to_spend' ? (
+                {(part ? part.datePassed : item.isOverdue) ? (
                   <Pill tone="behind">Date has passed</Pill>
                 ) : null}
               </div>

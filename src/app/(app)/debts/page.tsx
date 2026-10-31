@@ -19,7 +19,6 @@ import {
   debtStatusLine,
   isPaidOff,
   parseAmountToCents,
-  projectPayoff,
   shareOfLargest,
 } from '@/domain'
 import { PayoffImpact } from '@/components/payoff-impact'
@@ -75,8 +74,9 @@ export default async function DebtsPage({
   // Everything the table shows, worked out here: the table only renders.
   const rate = (basisPoints: number) => `${(basisPoints / 100).toFixed(2)}%`
   const rows: DebtRow[] = ladder.map((rung) => {
-    const projection = projectPayoff({ debt: rung.debt, today })
     const view = viewOf.get(rung.debt.id)
+    // The payoff is the debt's one status's, as on its own page (D56 (6)).
+    const projection = view?.payoff ?? { months: 0, payoffDate: today, totalInterestCents: 0 }
     return {
       id: rung.debt.id,
       rank: rung.rank,

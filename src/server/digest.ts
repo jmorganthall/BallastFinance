@@ -19,7 +19,8 @@ import {
   instructionSentence,
   isTransferDay,
   moneySinceSentence,
-  transferWeeksBetween,
+  accountsToCheckIn,
+  dueWithinTransfers,
 } from '@/domain'
 
 export interface DigestInput {
@@ -179,12 +180,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   }
 
   // Anything landing in the next fortnight, so nothing arrives as a surprise.
-  const upcoming = position.accounts
-    .flatMap((a) => a.parts)
-    .filter((part) => {
-      const weeks = transferWeeksBetween(today, part.lineItem.dueDate, transferWeekday)
-      return weeks > 0 && weeks <= 2
-    })
+  const upcoming = dueWithinTransfers(position, 2, transferWeekday)
   if (upcoming.length > 0) {
     lines.push('', '## Coming up in the next two weeks', '')
     for (const part of upcoming) {
@@ -267,18 +263,10 @@ export async function buildCheckInNudge(
 ): Promise<NotificationPayload | null> {
   const engine = engineFor(input)
   const afterWeeks = input.afterWeeks ?? (await engine.getSetting('check_in_nudge_weeks', 2))
-  const today = engine.today()
 
   const [position, transferWeekday] = await Promise.all([engine.position(), engine.transferWeekday()])
-  const accounts = position.accounts.filter((a) => a.parts.length > 0)
-  if (accounts.length === 0) return null
-
-  // The last count is the position's (D35): the one it starts from, chosen
-  // by the order the events were recorded.
-  const stale = accounts.filter(
-    ({ money }) =>
-      money.from !== 'count' || transferWeeksBetween(money.on!, today, transferWeekday) >= afterWeeks,
-  )
+  if (!position.accounts.some((a) => a.parts.length > 0)) return null
+  const stale = accountsToCheckIn(position, afterWeeks, transferWeekday)
   if (stale.length === 0) return null
 
   return {

@@ -335,7 +335,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-ink)]" />
           This plan, on the transfer set up now
-          {endsShort ? ` (ends ${formatCents(chart.targetCents - last.cents)} short)` : ''}
+          {chart.endsShortCents > 0 ? ` (ends ${formatCents(chart.endsShortCents)} short)` : ''}
         </span>
         {ownLine ? (
           <span className="flex items-center gap-1.5">

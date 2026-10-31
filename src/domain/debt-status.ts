@@ -25,8 +25,10 @@ import {
   chargedBackInterestCents,
   DEFAULT_PROMO_LEAD_WEEKS,
   monthlyPaymentCents,
+  projectPayoff,
   promoCliff,
   type Debt,
+  type Projection,
 } from './debt'
 import type { CivilDate } from './dates'
 import type { SentencePart } from './instructions'
@@ -68,6 +70,12 @@ export interface DebtView {
    * been paid. Null when the open payments clear it.
    */
   missAfterAsks: DebtDealMiss | null
+  /**
+   * From today to payoff at the payment set up now (§6's projection): when
+   * it is paid off, null when never at this payment, and the interest left
+   * to pay. Debts, the debt's page and the table all read this one.
+   */
+  payoff: Projection
   balanceAgeDays: number
   /** Its stated balance is older than `BALANCE_STALE_AFTER_DAYS`. */
   balanceStale: boolean
@@ -145,7 +153,15 @@ export function debtStatuses(args: {
       const missAfterAsks = coming > 0 ? missOf({ ...debt, balanceCents: debt.balanceCents - coming }, args.today) : miss
       const status: DebtStatus =
         miss === null ? 'on_track' : miss.monthsLeft * WEEKS_PER_MONTH <= leadWeeks ? 'short' : 'misses_deal'
-      return { debt, status, miss, missAfterAsks, balanceAgeDays: freshness.ageDays, balanceStale: freshness.stale }
+      return {
+        debt,
+        status,
+        miss,
+        missAfterAsks,
+        payoff: projectPayoff({ debt, today: args.today }),
+        balanceAgeDays: freshness.ageDays,
+        balanceStale: freshness.stale,
+      }
     })
 
   const todos: DebtTodo[] = []

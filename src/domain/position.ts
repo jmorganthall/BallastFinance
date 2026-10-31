@@ -269,6 +269,11 @@ export interface PartPosition {
    * What "+ $Y to make up" says.
    */
   shortByCents: Cents
+  /**
+   * Its date has passed and it is not all there and waiting (D38): the
+   * "Date has passed" mark. A part Ready to spend never carries it.
+   */
+  datePassed: boolean
 }
 
 export interface AccountMoneyToday {
@@ -1320,6 +1325,7 @@ function accountPosition(args: {
         tickCents,
         status: partStatus,
         shortByCents: partStatus === 'short' ? Math.max(0, tickCents - countedCents) : 0,
+        datePassed: f.isOverdue && partStatus !== 'ready_to_spend',
       }
     })
 
@@ -1669,6 +1675,41 @@ export function shortReasons(p: Pick<HouseholdPosition, 'accounts' | 'todos'>): 
   return reasons
 }
 
+/**
+ * The parts due within the next few transfers (the digest's "Coming up in
+ * the next two weeks"): after today, on or before the n-th transfer day.
+ */
+export function dueWithinTransfers(
+  p: Pick<HouseholdPosition, 'accounts' | 'today'>,
+  transfers: number,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): PartPosition[] {
+  return p.accounts
+    .flatMap((a) => a.parts)
+    .filter((part) => {
+      const weeks = transferWeeksBetween(p.today, part.lineItem.dueDate, transferWeekday)
+      return weeks > 0 && weeks <= transfers
+    })
+}
+
+/**
+ * The accounts with plans whose count is old enough to nudge about: never
+ * counted, or last counted this many transfers ago or more. The last count
+ * is the position's (D35), chosen by the order the events were recorded.
+ */
+export function accountsToCheckIn(
+  p: Pick<HouseholdPosition, 'accounts' | 'today'>,
+  afterTransfers: number,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): AccountPosition[] {
+  return p.accounts
+    .filter((a) => a.parts.length > 0)
+    .filter(
+      ({ money }) =>
+        money.from !== 'count' || transferWeeksBetween(money.on!, p.today, transferWeekday) >= afterTransfers,
+    )
+}
+
 /** The words for a part's or plan's status (D35, D38), everywhere. */
 export const PART_STATUS_WORDS: Record<PartStatus, string> = {
   ready_to_spend: 'Ready to spend',
@@ -1836,6 +1877,8 @@ export interface PlanChart {
   /** What is counted today, for the dot on the chart. */
   countedToday: PlanChartPoint
   targetCents: Cents
+  /** How far below the total the plan ends on the transfer set up now; 0 when it reaches it. */
+  endsShortCents: Cents
   /**
    * Saving it on its own (D50 (2)): each part saving evenly from its Saving
    * since to its due date (the one pace), on the same dates as `actual`. A
@@ -2196,6 +2239,7 @@ export function planChart(args: {
     afterFix: fixable ? points(planTotals(run(true))) : null,
     countedToday: { date: today, cents: plan.countedCents },
     targetCents: plan.totalCents,
+    endsShortCents: Math.max(0, plan.totalCents - actual.at(-1)!.cents),
     onItsOwn,
     dipsBelow: onItsOwn.some((x, i) => x.cents > actual[i]!.cents),
     dueMarks: dueMarksOf(plan.parts, today),

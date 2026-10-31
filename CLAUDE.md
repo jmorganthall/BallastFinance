@@ -272,6 +272,33 @@ principles, and they are non-negotiable.
   is a comparison and never a target: nothing judges a plan
   by it, and no screen says "behind", "lent" or "guaranteed". This brings
   back the line D40 (5) took off the chart, with that job and that name.
+- **One to-do list, and an open ask is money on its way** (PRD D56, rev
+  110). This week, the digest and the share-out read one household view,
+  `householdView` in `src/domain/household-view.ts` through `Engine.view()`:
+  the position's to-dos, the debts' that block, the asks still open (a
+  share-out's, as `HouseholdTodo` with `from: 'ask'`), then the debts'
+  housekeeping, with `caughtUp`, `blockingCount`, `optionalCount`,
+  `moneyToDo`, `needsAttention` and the `headline`. No screen adds, drops,
+  counts or orders to-dos itself. An ask still open (`onItsWayOf` in
+  `instructions.ts`: every open one-time move into an account but a
+  left-over, less every open move out; every open "Pay $X toward" a debt)
+  changes no balance and no status, but every to-do is worked out as if it
+  arrives: `PositionInput.onItsWay` goes through the same `pendingCents`
+  path as the move between accounts (a Short account takes only what it
+  would still miss, a lender lends only what it has to spare both on the
+  facts and with its asks done), and `DebtView.missAfterAsks` sizes "Raise
+  the monthly payment" and the share-out's debt shortfall.
+  `AccountPosition.onItsWayCents` says how much, and the "Fix on This week"
+  line names it. An open ask blocks "All caught up" exactly when its account
+  or debt is not On track; the rest are optional. Invariant 10 in
+  `position.test.ts`: with random open asks every balance and status is
+  unchanged and the to-dos equal the to-dos as if the asks were done.
+  Migration 0026 ended every ask from before D35 still open. A screen, a
+  component and the digest may not import the calculations behind a money
+  figure (`src/__tests__/layers.test.ts`); a figure a screen needs belongs
+  in the domain (`planRows`, `PlanChart.endsShortCents`,
+  `PartPosition.datePassed`, `DebtView.payoff`, `currentDeal`,
+  `dealEndMark`, `dueWithinTransfers`, `accountsToCheckIn`).
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
   order the events were recorded (`recorded_at`, then id), answered only by
@@ -295,9 +322,8 @@ principles, and they are non-negotiable.
   do, with the position's likely balance in the box, through the ordinary
   `confirmBalancesAction` (with `back=home`). The last count is
   `money.from === 'count'` and `money.on`; the check-in nudge reads it
-  there. An open "cover what is short" move, like an old catch-up, stands in
-  for the one-time move the position would ask for, so the same money is
-  never asked for twice. "Record spend" left blank records what the round
+  there. An ask still open is money on its way (D56 (2)), never money
+  there: see the D56 entry below. "Record spend" left blank records what the round
   still holds (D53), read by the engine, never a figure the form posted. The to-do
   sentence marks the account the money goes to, and the screen sets it in
   bold and the accent colour.
@@ -687,7 +713,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 956 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 967 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

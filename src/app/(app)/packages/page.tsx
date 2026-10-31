@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { nextDue, type DueUrgency } from '@/domain/next-due'
+import { type DueUrgency } from '@/domain/next-due'
 import { Card, Empty, Hint, humanDate, Money, PageHeader, Pill, When, Zzz } from '@/components/ui'
 import { MakeUp, ProgressBar } from '@/components/progress-bar'
 import {
   orderPlans,
   PLAN_SORTS,
   planOrderAfterTap,
+  planRows,
   readPlanOrder,
   shortReasons,
   type PlanOrder,
@@ -45,7 +46,6 @@ export default async function PackagesPage({
   ])
   // Every figure on a live plan's card is the one position's (D35): the same
   // numbers the plan's own page, This week and the check-in read.
-  const plans = new Map(position.plans.map((p) => [p.package.id, p]))
   const reasons = shortReasons(position)
   // A plan with a snoozed "did this get spent?" carries the Zzz (D38), with
   // the soonest day one wakes in its tooltip.
@@ -55,37 +55,8 @@ export default async function PackagesPage({
   const accountNames = new Map(position.accounts.map((a) => [a.account.id, a.account.name]))
 
   // Each plan with the figures its card shows and the list is ordered by,
-  // every one of them the position's (D41): the order is the domain's.
-  const rows = orderPlans(
-    views.map((view) => {
-      const plan = view.package.state === 'active' ? plans.get(view.package.id) : undefined
-      // A live plan's next date is its rounds' (D53): the round saving now
-      // for a date ahead, so a round still open past its date -- asked
-      // about under "did this get spent?" -- never holds the plan back.
-      const ahead = plan ? plan.parts.filter((x) => !x.round.past) : []
-      const next =
-        view.package.state === 'retired'
-          ? null
-          : nextDue(
-              plan && plan.parts.length > 0
-                ? (ahead.length > 0 ? ahead : plan.parts).map((x) => x.lineItem)
-                : view.items.map((item) => item.lineItem),
-              today,
-            )
-      return {
-        view,
-        plan,
-        next,
-        name: view.package.name,
-        state: view.package.state,
-        nextDue: next?.dueDate ?? null,
-        perWeekCents: plan ? plan.steadyPerWeekCents : null,
-        totalCents: plan && plan.parts.length > 0 ? plan.totalCents : view.totalCents,
-        shortByCents: plan ? plan.shortByCents : null,
-      }
-    }),
-    order,
-  )
+  // every one of them worked out in the domain (D41, D56 (6)).
+  const rows = orderPlans(planRows({ views, plans: position.plans, today }), order)
 
   return (
     <>
