@@ -138,6 +138,8 @@ export const eventKindEnum = pgEnum('event_kind', [
   'round_saved_back_up',
   /** An earlier spend, finish or save back up taken back: { event_id }. Never an edit (migration 0001). */
   'event_undone',
+  /** A nightly price we were quoted, typed or removed (migration 0025, PRD D55): { before, after }. */
+  'lodging_quote_changed',
 ])
 
 export const tripLineCategoryEnum = pgEnum('trip_line_category', [
@@ -679,6 +681,61 @@ export const dvcListings = pgTable(
     uniqueIndex('dvc_listings_key_idx').on(t.source, t.resort, t.room, t.checkIn, t.nights),
     check('dvc_listings_nights_range', sql`${t.nights} between 1 and 60`),
     check('dvc_listings_price_not_negative', sql`${t.priceCents} is null or ${t.priceCents} >= 0`),
+  ],
+)
+
+/**
+ * Disney's published nightly rate for a stay over a week or a month (D55
+ * (5)), as a public page reproduced it: resortings.com, captured on
+ * observed_on. `stay` is "all", "tier:value|moderate|deluxe" or a resort's
+ * name; a week starts on its check-in date, a month on its first day.
+ * Reference data shared across households like crowd levels, written only
+ * through the engine, shown before it is kept; the night's figure is
+ * derived (night-cost.ts), never stored.
+ */
+export const lodgingRates = pgTable(
+  'lodging_rates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    source: text('source').notNull(),
+    stay: text('stay').notNull(),
+    period: text('period').notNull(),
+    periodStart: date('period_start').notNull(),
+    nightlyCents: cents('nightly_cents').notNull(),
+    observedOn: date('observed_on').notNull(),
+    fetchedOn: date('fetched_on').notNull(),
+    sourceUrl: text('source_url').notNull(),
+  },
+  (t) => [
+    uniqueIndex('lodging_rates_key_idx').on(t.source, t.stay, t.period, t.periodStart),
+    check('lodging_rates_period', sql`${t.period} in ('week', 'month')`),
+    check('lodging_rates_price_positive', sql`${t.nightlyCents} > 0`),
+  ],
+)
+
+/**
+ * A nightly price the household was quoted for a stay over some nights
+ * (D55 (5)), the most trusted figure for those nights. `to_date` is the
+ * last night. Every change is a lodging_quote_changed event.
+ */
+export const lodgingQuotes = pgTable(
+  'lodging_quotes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    stay: text('stay').notNull(),
+    fromDate: date('from_date').notNull(),
+    toDate: date('to_date').notNull(),
+    nightlyCents: cents('nightly_cents').notNull(),
+    note: text('note').notNull().default(''),
+    recordedOn: date('recorded_on').notNull(),
+  },
+  (t) => [
+    index('lodging_quotes_household_idx').on(t.householdId),
+    check('lodging_quotes_nights_in_order', sql`${t.toDate} >= ${t.fromDate}`),
+    check('lodging_quotes_price_positive', sql`${t.nightlyCents} > 0`),
   ],
 )
 

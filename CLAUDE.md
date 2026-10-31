@@ -39,7 +39,7 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `trip-shape.ts` is the family's trip shape (D55): park days, the easy stretch, the split-drive rules and the "Plan this" layout. `explore.ts` ranks the best times to go in that shape, with no trip, and shades the year strip. `night-cost.ts` is what a night costs (D55 (5)): the trust ladder, a window's price, and the resortings.com parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `self-update.ts` is the one call to the household's own Watchtower on the LAN ("Update now"), off unless `WATCHTOWER_URL` is set; `db-backup.ts` runs `pg_dump` for the bootstrap. `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -405,6 +405,10 @@ principles, and they are non-negotiable.
   scored and the top ten shown with reasons. The formula is documented at the
   top of `src/domain/trip-when.ts`: quiet, then cheap, then no school missed
   (`trip_week_weights`, 3/2/1), each part normalised across the candidates,
+  each weight picked on screen as A lot / Some / A little / Not at all (3 to
+  0, `importanceOf`) and said back as each part's share of the score
+  (`weightsSentence`: "Quiet parks count for 50% of how a week is judged, a
+  cheap stay 33%, and missing no school 17%"), never as bare numbers,
   price among candidates of the same length, a blackout excludes. Federal
   holidays are computed with the observed-day rules. `school_days_off`
   (migration 0013) is the household's own calendar — typed, imported from an
@@ -488,6 +492,54 @@ principles, and they are non-negotiable.
   days, solid accent for a plan, accent stripes with an outline while
   being worked out, so the stage never rests on colour alone. Nothing is
   stored.
+- **Explore ranks the best times to go before there is a trip, in the
+  family's shape** (PRD D55, rev 109; D42's first slice). Length is park
+  days, never nights: setting `trip_shape` (`Engine.tripShape`, 3-4 park
+  days, 2 adult drivers, an easy stretch of 2 hours a driver unless typed,
+  split when free, where we stay), and `?parks=2-6` on `/trips` searches
+  another length without saving it. `shapeWindow` in
+  `src/domain/trip-shape.ts` lays each window out by the rules at its top:
+  a travel day each side; on the way down an evening leg, a night on the
+  road and a quick park day when the full travel day would cost school and
+  the morning leg is easy (needed), an evening leg and a travel-day arrival
+  when the drive is over one stretch and it is free (preferred), always
+  over two stretches; home split only by preference on a trip of
+  `HOME_SPLIT_MIN_PARK_DAYS` or more. Leaving in the evening costs no
+  school. `explore` in `src/domain/explore.ts` scores every first park day
+  and length with `scoresOf` (shared with the per-trip list): busy over park
+  days only, school over travel and park days, price within the same
+  number of park days, and an unknown price at the midpoint with "no price
+  yet" (it used to rank as the cheapest). The top ten never overlap. The
+  year strip shades each day by the best window leaving it
+  (`YearStripDay.start`, five rank steps on `--color-busy-1..5`; equal
+  scores share a step) and the month numbers the top ten. The drive from
+  home is the same `driveSettingKey` setting a trip reads, kept without a
+  trip by `Engine.recordHomeDrive`. "Plan this" opens the New trip form
+  with `?layout=` (one letter a day, `shapeCode` / `layoutFromCode`), and
+  `createTrip` lays the days out (travel, and `rest` for park days so "Use
+  this plan" picks the parks). Nothing about Explore is stored.
+- **A night's price comes from the most trusted fact that covers it,
+  never an average** (PRD D55 (5)). `nightCosts` in
+  `src/domain/night-cost.ts`: a quote we typed for those nights
+  (`lodging_quotes`, household facts, each change a
+  `lodging_quote_changed` event, migration 0025), then Disney's rate for
+  the week, then the month (`lodging_rates`, reference data with no
+  household, unique on source + stay + period + start, written only
+  through the engine); the newest wins within a level. `stay` is "all",
+  "tier:value|moderate|deluxe" or a resort's name (`stayKey`), matched
+  exactly, and the family's choice lives in `trip_shape`. A window's price
+  is known only when every resort night is (`windowLodging`), plus each
+  night on the road at `midway_hotel_per_night`; only these change with the
+  dates, so tickets and food stay out of the ranking. A window says its
+  weakest level; a tap says the source, a figure older than 180 days, and a
+  lower level more than 25% away. The rates are resortings.com's
+  prices-by-month page (Disney's own average a night for a four-night
+  midweek stay, dated by the month the page says Disney published them),
+  pasted and read by `parseResortingsPrices`, held in setting
+  `trip_lodging_pull` and shown before kept, credited with a link wherever
+  they show. Fetching the page, its by-week page and DVC point charts
+  (levels 5-6) are later steps: resortings.com's robots.txt and
+  dvcrequest.com's terms are read first.
 - **Which park, which day is a derivation, and "Use this plan" is the only
   write** (PRD D32, rev 45). `src/domain/park-day-plan.ts` documents the fit
   at its top: the busyness level (`MISSING_BUSYNESS` 5.5 when nothing is
@@ -628,7 +680,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 905 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 948 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

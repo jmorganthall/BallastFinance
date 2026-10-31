@@ -22,6 +22,8 @@ import {
   reserveAccounts as reserveAccountsTable,
   settings as settingsTable,
   crowdLevels as crowdLevelsTable,
+  lodgingQuotes as lodgingQuotesTable,
+  lodgingRates as lodgingRatesTable,
   dvcListings as dvcListingsTable,
   parkHours as parkHoursTable,
   parkWeather as parkWeatherTable,
@@ -50,6 +52,23 @@ import {
   type UpdateAttempt,
 } from '@/server/self-update'
 import {
+  parseResortingsPrices,
+  RESORTINGS_SOURCE,
+  RESORTINGS_URL,
+  stayKey,
+  validateLodgingQuote,
+  validateLodgingRate,
+  windowPrice,
+  staysIn,
+  type LodgingQuote,
+  type LodgingRate,
+  DEFAULT_TRIP_SHAPE,
+  type LaidOutDay,
+  easyStretchMinutes,
+  explore,
+  validateTripShape,
+  type Explore,
+  type TripShape,
   apportion,
   debtStatuses,
   debtTermsChanged,
@@ -197,7 +216,6 @@ import {
   comingUpTasks,
   cutDays,
   dayPlan,
-  DEFAULT_PACK_TEMPLATE,
   mergeTimeline,
   reservationMoney,
   sortReservations,
@@ -334,6 +352,16 @@ interface DoneInstructionInput {
   targetLabel: string
   purpose?: InstructionPurpose
   note?: string
+}
+
+/** A rates page read and held for a person to keep (D55 (5)). */
+export interface LodgingPull {
+  source: string
+  label: string
+  url: string
+  basis: string | null
+  rates: LodgingRate[]
+  fetchedOn: CivilDate
 }
 
 export class EngineError extends Error {}
@@ -476,7 +504,6 @@ export interface TripPlanView {
   weeks: WeekComparisonRow[]
   crowdLevels: CrowdLevel[]
   blackoutDates: BlackoutRange[]
-  packTemplate: string[]
   pendingPull: CrowdPull | null
   /** The top ten dates across the horizon, with the reasons (D25). */
   bestWeeks: BestWeeks
@@ -3367,6 +3394,8 @@ export class Engine {
     endDate: CivilDate
     travelers: Traveler[]
     car: TripCar | null
+    /** Days laid out by Explore's "Plan this" (D55 (7)); absent, the usual cut. */
+    layout?: readonly LaidOutDay[] | null
   }): Promise<Trip> {
     const name = input.name.trim()
     const travelers = input.travelers.map((t) => ({ name: t.name.trim(), band: t.band }))
@@ -3393,6 +3422,15 @@ export class Engine {
       await this.recordTripChange(tx, { trip_id: trip.id, before: null, after: tripEventShape(trip) })
       // The days and the first to-dos come with the trip (D22).
       await this.applyDayCut(tx, trip, false)
+      if (input.layout) {
+        for (const day of await this.daysOf(tx, trip.id)) {
+          const laid = input.layout.find((l) => l.date === day.date)
+          if (!laid || (laid.park === day.park && laid.notes === day.plan.notes)) continue
+          const after: TripDay = { ...day, park: laid.park, plan: { ...day.plan, notes: laid.notes } }
+          validateDayInputs(after)
+          await tx.update(tripDaysTable).set({ park: after.park, plan: after.plan }).where(eq(tripDaysTable.id, day.id))
+        }
+      }
       await this.refreshTimeline(tx, trip)
       return trip
     })
@@ -3715,7 +3753,7 @@ export class Engine {
     const trip = (await this.listTrips()).find((t) => t.id === tripId)
     if (!trip) return null
     const days = await this.listTripDays(tripId)
-    const [variants, reservations, tasks, referencePrices, drive, gas, maxDriveMinutes, blackoutDates, packTemplate, pendingPull] = await Promise.all([
+    const [variants, reservations, tasks, referencePrices, drive, gas, maxDriveMinutes, blackoutDates, pendingPull] = await Promise.all([
       this.variantsWithLines(tripId),
       this.listReservations(tripId),
       this.listTasks(tripId),
@@ -3724,7 +3762,6 @@ export class Engine {
       this.gasPrice(),
       this.maxDriveMinutes(),
       this.blackoutDates(),
-      this.packTemplate(),
       this.pendingCrowdPull(),
     ])
     const variant = planningVariant(trip, variants)
@@ -3751,7 +3788,6 @@ export class Engine {
       weeks: weekComparison({ ...pricing, days, crowdLevels, busyness, blackoutDates }),
       crowdLevels,
       blackoutDates,
-      packTemplate,
       pendingPull,
       bestWeeks: bestWeeks({ ...pricing, days, crowdLevels, busyness, daysOff, blackoutDates, horizonMonths, weights: weekWeights }),
       horizonMonths,
@@ -4129,17 +4165,6 @@ export class Engine {
     await this.putSetting('trip_blackout_dates', tidy)
   }
 
-  async packTemplate(): Promise<string[]> {
-    const stored = await this.getSetting<string[] | null>('trip_pack_template', null)
-    return stored ?? [...DEFAULT_PACK_TEMPLATE]
-  }
-
-  async setPackTemplate(labels: readonly string[]): Promise<void> {
-    const tidy = labels.map((l) => l.trim()).filter((l) => l !== '')
-    validatePackTemplate(tidy)
-    await this.putSetting('trip_pack_template', tidy)
-  }
-
   // -- the school calendar (D25): the household's own days off, and where they come from
 
   /** Days off school, in date order; within a range when one is given. */
@@ -4256,6 +4281,218 @@ export class Engine {
   async setWeekWeights(weights: WeekWeights): Promise<void> {
     validateWeekWeights(weights)
     await this.putSetting('trip_week_weights', weights)
+  }
+
+  /** The family's usual trip shape (D55): park days, drivers, the easy stretch, splitting, where we stay. */
+  async tripShape(): Promise<TripShape> {
+    const stored = await this.getSetting<Partial<TripShape> | null>('trip_shape', null)
+    return { ...DEFAULT_TRIP_SHAPE, ...(stored ?? {}) }
+  }
+
+  async setTripShape(shape: TripShape): Promise<void> {
+    validateTripShape(shape)
+    await this.putSetting('trip_shape', shape)
+  }
+
+  /**
+   * Explore (D42, D55): the best times to go in the family's shape, needing
+   * no trip. A search may ask for other park days (from the address, never
+   * saved). The facts are gathered here; the ranking is the domain's.
+   */
+  async explore(
+    search: { parkDays?: { min: number; max: number } | null; stay?: string | null } = {},
+    destination: TripDestination = 'wdw',
+  ): Promise<Explore & { shape: TripShape; stay: string }> {
+    const today = this.today()
+    const [shape, horizonMonths, weights, daysOff, blackoutDates, home, prices] = await Promise.all([
+      this.tripShape(),
+      this.horizonMonths(),
+      this.weekWeights(),
+      this.schoolDaysOff(),
+      this.blackoutDates(),
+      this.homeLocation(),
+      this.referencePrices(),
+    ])
+    const parkDays = search.parkDays ?? { min: shape.parkDaysMin, max: shape.parkDaysMax }
+    const stay = search.stay?.trim() || stayKey(shape.stay)
+    const until = addDays(addMonths(today, horizonMonths), parkDays.max + 7)
+    const [busyness, drive, rates, quotes] = await Promise.all([
+      this.busynessSources({ from: today, to: until }, destination),
+      this.driveEstimate({ home, destination }),
+      this.lodgingRates({ from: addDays(today, -40), to: until }, stay),
+      this.lodgingQuotes(),
+    ])
+    const roadNightCents = prices.find((p) => p.key === 'midway_hotel_per_night')?.amountCents ?? 0
+    const result = explore({
+      today,
+      horizonMonths,
+      parkDays,
+      stretchMinutes: easyStretchMinutes(shape),
+      splitWhenFree: shape.splitWhenFree,
+      driveMinutes: drive?.minutes ?? null,
+      busyness,
+      daysOff,
+      blackoutDates,
+      weights,
+      priceOf: (w) => windowPrice(w, { stay, rates, quotes, today, roadNightCents }),
+    })
+    return { ...result, shape, stay }
+  }
+
+  // -- what a night costs (D55 (5))
+
+  /** Disney's rates for a stay over a stretch of dates, as kept from resortings.com. */
+  async lodgingRates(range: { from: CivilDate; to: CivilDate }, stay?: string): Promise<LodgingRate[]> {
+    const rows = await this.db
+      .select()
+      .from(lodgingRatesTable)
+      .where(
+        and(
+          gte(lodgingRatesTable.periodStart, addDays(range.from, -31)),
+          lte(lodgingRatesTable.periodStart, range.to),
+          stay === undefined ? undefined : eq(lodgingRatesTable.stay, stay),
+        ),
+      )
+    return rows.map((r) => ({
+      source: r.source,
+      stay: r.stay,
+      period: r.period as LodgingRate['period'],
+      periodStart: r.periodStart,
+      nightlyCents: r.nightlyCents,
+      observedOn: r.observedOn,
+      fetchedOn: r.fetchedOn,
+      sourceUrl: r.sourceUrl,
+    }))
+  }
+
+  /** Every stay the kept rates can price: all resorts, the tiers, each resort. */
+  async lodgingStays(): Promise<string[]> {
+    const rows = await this.db.selectDistinct({ stay: lodgingRatesTable.stay }).from(lodgingRatesTable)
+    return staysIn(rows)
+  }
+
+  /** Keep rates: one row per stay, period and start, the newest capture over an older one. One trip_changed event says what came in. */
+  async recordLodgingRates(rates: readonly LodgingRate[]): Promise<number> {
+    for (const r of rates) validateLodgingRate(r)
+    if (rates.length === 0) return 0
+    await this.db.transaction(async (tx) => {
+      for (const r of rates) {
+        await tx
+          .insert(lodgingRatesTable)
+          .values(r)
+          .onConflictDoUpdate({
+            target: [lodgingRatesTable.source, lodgingRatesTable.stay, lodgingRatesTable.period, lodgingRatesTable.periodStart],
+            set: { nightlyCents: r.nightlyCents, observedOn: r.observedOn, fetchedOn: r.fetchedOn, sourceUrl: r.sourceUrl },
+          })
+      }
+      const starts = rates.map((r) => r.periodStart).sort()
+      await this.recordTripChange(tx, {
+        lodging_rates: { source: rates[0]!.source, count: rates.length, from: starts[0], to: starts[starts.length - 1], observed_on: rates[0]!.observedOn, fetched_on: rates[0]!.fetchedOn },
+      })
+    })
+    return rates.length
+  }
+
+  async pendingLodgingPull(): Promise<LodgingPull | null> {
+    const stored = await this.getSetting<LodgingPull | false | null>('trip_lodging_pull', null)
+    return stored && typeof stored === 'object' && Array.isArray(stored.rates) ? stored : null
+  }
+
+  /** Hold a pull for a person to look at; nothing is a rate until they keep it. A cleared hold is false: a setting is never null. */
+  async stashLodgingPull(pull: LodgingPull | null): Promise<void> {
+    await this.putSetting('trip_lodging_pull', pull ?? false)
+  }
+
+  /**
+   * The resortings.com page as a person pasted it (D55 (5)): read by the
+   * parser and held, never kept until a person says so. A paste with
+   * nothing readable is a refusal with the parser's reason.
+   */
+  async readLodgingPaste(text: string): Promise<LodgingPull> {
+    const parsed = parseResortingsPrices(text)
+    if (parsed.reason) throw new EngineError(parsed.reason)
+    const fetchedOn = this.today()
+    const pull: LodgingPull = {
+      source: RESORTINGS_SOURCE,
+      label: 'resortings.com',
+      url: RESORTINGS_URL,
+      basis: parsed.basis,
+      rates: parsed.rates.map((r) => ({ ...r, fetchedOn, sourceUrl: RESORTINGS_URL })),
+      fetchedOn,
+    }
+    for (const r of pull.rates) validateLodgingRate(r)
+    await this.stashLodgingPull(pull)
+    return pull
+  }
+
+  async keepLodgingPull(): Promise<number> {
+    const pull = await this.pendingLodgingPull()
+    if (!pull) throw new EngineError('There is nothing waiting to be kept.')
+    const kept = await this.recordLodgingRates(pull.rates)
+    await this.stashLodgingPull(null)
+    return kept
+  }
+
+  /** The nightly prices this household was quoted, newest first. */
+  async lodgingQuotes(): Promise<LodgingQuote[]> {
+    const rows = await this.db.select().from(lodgingQuotesTable).where(eq(lodgingQuotesTable.householdId, this.householdId))
+    return rows
+      .map((r) => ({ id: r.id, stay: r.stay, fromDate: r.fromDate, toDate: r.toDate, nightlyCents: r.nightlyCents, note: r.note, recordedOn: r.recordedOn }))
+      .sort((a, b) => compareDates(b.recordedOn, a.recordedOn) || compareDates(a.fromDate, b.fromDate))
+  }
+
+  /** A price we were quoted for some nights: the most trusted figure for them (D55 (5)). */
+  async typeLodgingQuote(input: { stay: string; fromDate: CivilDate; toDate: CivilDate; nightlyCents: Cents; note?: string }): Promise<LodgingQuote> {
+    const quote = { stay: input.stay.trim(), fromDate: input.fromDate, toDate: input.toDate, nightlyCents: input.nightlyCents, note: (input.note ?? '').trim(), recordedOn: this.today() }
+    validateLodgingQuote(quote)
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(lodgingQuotesTable)
+        .values({ householdId: this.householdId, ...quote })
+        .returning()
+      if (!row) throw new EngineError('Could not keep the quote')
+      await this.recordLodgingQuoteChange(tx, { before: null, after: { ...quote, id: row.id } })
+      return { ...quote, id: row.id }
+    })
+  }
+
+  async removeLodgingQuote(id: Id): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(lodgingQuotesTable)
+        .where(and(eq(lodgingQuotesTable.id, id), eq(lodgingQuotesTable.householdId, this.householdId)))
+      if (!row) throw new EngineError('No such quote in this household')
+      await tx.delete(lodgingQuotesTable).where(eq(lodgingQuotesTable.id, id))
+      await this.recordLodgingQuoteChange(tx, {
+        before: { id: row.id, stay: row.stay, fromDate: row.fromDate, toDate: row.toDate, nightlyCents: row.nightlyCents, note: row.note, recordedOn: row.recordedOn },
+        after: null,
+      })
+    })
+  }
+
+  private async recordLodgingQuoteChange(tx: Conn, payload: { before: LodgingQuote | null; after: LodgingQuote | null }): Promise<void> {
+    await tx.insert(events).values({
+      householdId: this.householdId,
+      kind: 'lodging_quote_changed',
+      occurredAt: this.today(),
+      actorUserId: this.actorUserId,
+      source: 'manual',
+      payload,
+    })
+  }
+
+  /** The drive from home, looked up without a trip (D55), kept where every trip from this home reads it. */
+  async homeDrive(destination: TripDestination = 'wdw'): Promise<DriveEstimate | null> {
+    return this.driveEstimate({ home: await this.homeLocation(), destination })
+  }
+
+  async recordHomeDrive(drive: DriveEstimate, destination: TripDestination = 'wdw'): Promise<void> {
+    validateDriveEstimate(drive)
+    const home = await this.homeLocation()
+    if (!home) throw new EngineError('Set where home is first, under Trips.')
+    if (!homeIsLocated(home)) throw new EngineError('Home has not been found on the map yet, so the drive cannot be measured. Save the address again under Trips.')
+    await this.putSetting(driveSettingKey(home, destination), drive)
   }
 
   /**
@@ -4822,14 +5059,14 @@ export class Engine {
   }
 
   /** The twelve-month strip above the calendar (D48), from this month on: how busy and whether we can go, a sliver a day. */
-  async calendarYear(destination: TripDestination = 'wdw'): Promise<YearStripMonth[]> {
+  async calendarYear(destination: TripDestination = 'wdw', startSteps?: Readonly<Record<CivilDate, number>>): Promise<YearStripMonth[]> {
     const fromMonth = monthOf(this.today())
     const [busyness, blackouts, trips] = await Promise.all([
       this.busynessSources(yearStripBounds(fromMonth), destination),
       this.blackoutDates(),
       this.calendarTrips(destination),
     ])
-    return yearStrip({ fromMonth, busyness, blackouts, today: this.today(), trips })
+    return yearStrip({ fromMonth, busyness, blackouts, today: this.today(), trips, startSteps })
   }
 
   /** The household's trips to a destination as the calendar draws them (D54): every one not put away, with its stage. */
@@ -4946,7 +5183,7 @@ export class Engine {
     const variants = (await tx.select().from(tripVariantsTable).where(eq(tripVariantsTable.tripId, trip.id))).map(toVariant)
     const variant = planningVariant(trip, variants)
     const lines = variant ? await this.linesOf(tx, variant.id) : []
-    const generated = bookingTimeline(trip, variant, this.today(), { packTemplate: await this.packTemplate() })
+    const generated = bookingTimeline(trip, variant, this.today())
     const merge = mergeTimeline(generated, await this.tasksOf(tx, trip.id))
     // A generated to-do points at the part it books or pays for, when the way has one.
     const lineFor = (category: TripLineCategory | null): Id | null => {

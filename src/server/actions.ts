@@ -1136,10 +1136,12 @@ function tripFacts(formData: FormData) {
 export async function createTripAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const facts = tripFacts(formData)
+  const { layoutFromCode } = await import('@/domain')
   const made = await tripRefusalOf(async () => {
     assertCivilDate(facts.startDate)
     assertCivilDate(facts.endDate)
-    return engine.createTrip(facts)
+    // Explore's "Plan this" (D55 (7)) carries the days laid out; a code that no longer fits the dates is dropped.
+    return engine.createTrip({ ...facts, layout: layoutFromCode(facts.startDate, facts.endDate, String(formData.get('layout') ?? '')) })
   })
   if (made.message !== null) {
     revalidatePath('/trips')
@@ -1329,6 +1331,83 @@ export async function checkDriveAction(formData: FormData): Promise<void> {
   backToTrip(tripId, null, `drive=${drive.miles}:${drive.minutes}`)
 }
 
+// -- what a night costs (D55 (5)): resortings.com pasted and held, and the prices we were quoted
+
+export async function readLodgingPasteAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(() => engine.readLodgingPaste(String(formData.get('text') ?? '')))
+  backToTrips(done.message, 'saved=1', '#night-cost')
+}
+
+export async function keepLodgingPullAction(): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(() => engine.keepLodgingPull())
+  backToTrips(done.message, 'saved=1', '#night-cost')
+}
+
+export async function discardLodgingPullAction(): Promise<void> {
+  const { engine } = await requireEngine()
+  await engine.stashLodgingPull(null)
+  backToTrips(null, 'saved=1', '#night-cost')
+}
+
+export async function typeLodgingQuoteAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { parseAmountToCents } = await import('@/domain')
+  const done = await tripRefusalOf(async () => {
+    const fromDate = String(formData.get('from_date') ?? '')
+    const toDate = String(formData.get('to_date') ?? '')
+    assertCivilDate(fromDate)
+    assertCivilDate(toDate)
+    await engine.typeLodgingQuote({
+      stay: String(formData.get('stay') ?? ''),
+      fromDate,
+      toDate,
+      nightlyCents: parseAmountToCents(String(formData.get('nightly') ?? '')),
+      note: String(formData.get('note') ?? ''),
+    })
+  })
+  backToTrips(done.message, 'saved=1', '#night-cost')
+}
+
+export async function removeLodgingQuoteAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(() => engine.removeLodgingQuote(String(formData.get('quote_id') ?? '')))
+  backToTrips(done.message, 'saved=1', '#night-cost')
+}
+
+/** The drive from home with no trip (D55): looked up and shown on Trips before it is kept. */
+export async function checkHomeDriveAction(): Promise<void> {
+  const { engine } = await requireEngine()
+  const { fetchDrive, tripFetchEnabled } = await import('@/server/trip-fetch')
+  const { homeIsLocated } = await import('@/domain')
+  if (!tripFetchEnabled()) backToTrips('Looking things up is switched off on this machine (TRIP_FETCH=off). Type the hours instead.', '', '#explore')
+  const home = await engine.homeLocation()
+  if (!home) backToTrips('Set where home is first, under Where home is.', '', '#explore')
+  if (!homeIsLocated(home)) backToTrips('Home has not been found on the map yet, so the drive cannot be looked up. Save the address again.', '', '#explore')
+  let drive: Awaited<ReturnType<typeof fetchDrive>> = null
+  try {
+    drive = await fetchDrive(home, 'wdw', engine.today())
+  } catch (error) {
+    backToTrips(`Could not look up the drive: ${(error as Error).message}`, '', '#explore')
+  }
+  if (!drive) backToTrips('The route service did not answer with a drive. Try again later, or type the hours.', '', '#explore')
+  backToTrips(null, `drive=${drive.miles}:${drive.minutes}`, '#explore')
+}
+
+export async function useHomeDriveAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { TripPlanError } = await import('@/domain')
+  const done = await tripRefusalOf(async () => {
+    const miles = Number(formData.get('miles'))
+    const hours = Number(String(formData.get('hours') ?? '').trim())
+    const minutes = formData.has('hours') ? Math.round(hours * 60) : Number(formData.get('minutes'))
+    if (!Number.isFinite(minutes) || minutes <= 0) throw new TripPlanError('The drive is a number of hours, like 7.5.')
+    await engine.recordHomeDrive({ miles: Math.round(miles), minutes, fetchedOn: engine.today() })
+  })
+  backToTrips(done.message, 'saved=1', '#explore')
+}
+
 export async function useDriveAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const tripId = String(formData.get('trip_id'))
@@ -1468,17 +1547,6 @@ export async function saveParkDataSourcesAction(formData: FormData): Promise<voi
   const done = await tripRefusalOf(() => engine.setParkDataSources({ outlookUrl: String(formData.get('outlook_url') ?? ''), waitParkNames }))
   revalidatePath('/trips')
   redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}#sources` : '/trips?saved=1#sources')
-}
-
-export async function savePackTemplateAction(formData: FormData): Promise<void> {
-  const { engine } = await requireEngine()
-  const lines = String(formData.get('pack_template') ?? '')
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l !== '')
-  const done = await tripRefusalOf(() => engine.setPackTemplate(lines))
-  revalidatePath('/trips')
-  redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
 }
 
 // -- planning a trip (D22, D23)
@@ -1809,7 +1877,7 @@ export async function discardSchoolCalendarAction(): Promise<void> {
 
 export async function saveWeekSettingsAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const { TripPlanError } = await import('@/domain')
+  const { TripPlanError, stayFromKey } = await import('@/domain')
   const done = await tripRefusalOf(async () => {
     const number = (name: string) => {
       const raw = String(formData.get(name) ?? '').trim()
@@ -1819,6 +1887,27 @@ export async function saveWeekSettingsAction(formData: FormData): Promise<void> 
     }
     await engine.setHorizonMonths(number('horizon_months'))
     await engine.setWeekWeights({ busy: number('weight_busy'), price: number('weight_price'), school: number('weight_school') })
+    if (formData.has('park_days_min')) {
+      // The family's usual shape (D55 (2)); a blank easy stretch is two hours a driver.
+      const whole = (name: string, words: string) => {
+        const n = Number(String(formData.get(name) ?? '').trim())
+        if (!Number.isInteger(n)) throw new TripPlanError(words)
+        return n
+      }
+      const stretch = String(formData.get('easy_stretch_hours') ?? '').trim()
+      const hours = Number(stretch)
+      if (stretch !== '' && !Number.isFinite(hours)) throw new TripPlanError('An easy stretch is a number of hours, like 4 or 3.5, or blank.')
+      const shape = await engine.tripShape()
+      await engine.setTripShape({
+        ...shape,
+        parkDaysMin: whole('park_days_min', 'Park days are whole numbers.'),
+        parkDaysMax: whole('park_days_max', 'Park days are whole numbers.'),
+        adultDrivers: whole('adult_drivers', 'Adult drivers is a whole number.'),
+        easyStretchMinutes: stretch === '' ? null : Math.round(hours * 60),
+        splitWhenFree: formData.get('split_when_free') === 'on',
+        stay: formData.has('stay') ? stayFromKey(String(formData.get('stay'))) : shape.stay,
+      })
+    }
   })
   backToTrips(done.message, 'saved=1', '#best-weeks')
 }

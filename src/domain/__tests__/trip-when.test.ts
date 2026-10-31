@@ -32,6 +32,9 @@ import {
   validateDayOff,
   validateSchoolCalendarSources,
   validateWeekWeights,
+  importanceOf,
+  weightShares,
+  weightsSentence,
   weekday,
   type Candidate,
   type MeasuredCandidate,
@@ -443,5 +446,26 @@ describe('DVC listings', () => {
       '2027-06-12 null',
       '2027-06-14 900',
     ])
+  })
+})
+
+describe('the weights in words', () => {
+  it('says each part\'s share of how a week is judged, adding up to 100', () => {
+    expect(weightShares(DEFAULT_WEEK_WEIGHTS).map((x) => [x.key, x.percent])).toEqual([
+      ['busy', 50],
+      ['price', 33],
+      ['school', 17],
+    ])
+    expect(weightShares({ busy: 1, price: 1, school: 1 }).map((x) => x.percent)).toEqual([34, 33, 33])
+  })
+
+  it('reads as one sentence, biggest share first, and says what does not count', () => {
+    expect(weightsSentence(DEFAULT_WEEK_WEIGHTS)).toBe('Quiet parks count for 50% of how a week is judged, a cheap stay 33%, and missing no school 17%.')
+    expect(weightsSentence({ busy: 1, price: 3, school: 0 })).toBe('A cheap stay counts for 75% of how a week is judged, and quiet parks 25%. Missing no school does not count.')
+    expect(weightsSentence({ busy: 0, price: 0, school: 2 })).toBe('Missing no school is all that counts. Quiet parks and a cheap stay do not count.')
+  })
+
+  it('shows a weight saved before the choices as the nearest one', () => {
+    expect([0, 0.4, 1.6, 2.5, 7].map(importanceOf)).toEqual([0, 0, 2, 3, 3])
   })
 })

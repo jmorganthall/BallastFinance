@@ -255,23 +255,6 @@ export interface GeneratedTask {
   category: TripLineCategory | null
 }
 
-/** A short packing list to start from; the household lays its own over it (setting trip_pack_template). */
-export const DEFAULT_PACK_TEMPLATE: readonly string[] = [
-  'Park tickets or MagicBands',
-  'Phone chargers and a battery pack',
-  'Ponchos',
-  'Sunscreen',
-  'Medications',
-  'Snacks',
-  'Stroller',
-  'Documents: IDs, confirmations, insurance cards',
-]
-
-/** A stable key from a packing label, so the same item is found again on a rebuild. */
-export function packKey(label: string): string {
-  return `pack:${label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`
-}
-
 export const DINING_WINDOW_DAYS = 60
 export const LIGHTNING_LANE_RESORT_DAYS = 7
 export const LIGHTNING_LANE_OTHER_DAYS = 3
@@ -291,7 +274,6 @@ export function bookingTimeline(
   trip: Pick<Trip, 'startDate' | 'endDate'>,
   variant: Pick<TripVariant, 'choices'> | null,
   today: CivilDate,
-  options: { packTemplate?: readonly string[] | null } = {},
 ): GeneratedTask[] {
   const start = trip.startDate
   const before = (days: number) => addDays(start, -days)
@@ -322,14 +304,6 @@ export function bookingTimeline(
   }
   push('memory_maker', 'buy', 'Buy Memory Maker', before(MEMORY_MAKER_DAYS), 'photos')
 
-  const template = options.packTemplate ?? DEFAULT_PACK_TEMPLATE
-  const seen = new Set<string>()
-  for (const label of template) {
-    const key = packKey(label)
-    if (!label.trim() || seen.has(key)) continue
-    seen.add(key)
-    push(key, 'pack', label.trim(), before(1), null)
-  }
   return tasks
 }
 

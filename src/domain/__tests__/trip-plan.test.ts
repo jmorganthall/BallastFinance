@@ -18,13 +18,11 @@ import {
   cutDays,
   dateFromText,
   dayPlan,
-  DEFAULT_PACK_TEMPLATE,
   defaultPark,
   levelFromValue,
   mergeTimeline,
   monthsOf,
   nominatimUrl,
-  packKey,
   parkFromText,
   parseCrowdPage,
   parseNominatim,
@@ -188,17 +186,11 @@ describe('what to book, and when', () => {
   it('no park days: no tickets; no way chosen yet: only what every trip needs', () => {
     expect(bookingTimeline(trip, variant({ parkDays: 0 }), TODAY).find((t) => t.key === 'tickets')).toBeUndefined()
     const bare = bookingTimeline(trip, null, TODAY)
-    expect(bare.map((t) => t.key).filter((k) => !k.startsWith('pack:'))).toEqual(['dining', 'tickets', 'memory_maker'])
+    expect(bare.map((t) => t.key)).toEqual(['dining', 'tickets', 'memory_maker'])
   })
 
-  it('the packing list comes from the template, due the day before, with stable keys and no doubles', () => {
-    const tasks = bookingTimeline(trip, variant(), TODAY)
-    const pack = tasks.filter((t) => t.kind === 'pack')
-    expect(pack).toHaveLength(DEFAULT_PACK_TEMPLATE.length)
-    expect(pack.every((t) => t.dueOn === '2027-06-11')).toBe(true)
-    expect(packKey('Park tickets or MagicBands')).toBe('pack:park_tickets_or_magicbands')
-    const custom = bookingTimeline(trip, variant(), TODAY, { packTemplate: ['Ponchos', ' ponchos ', '', 'Bear'] }).filter((t) => t.kind === 'pack')
-    expect(custom.map((t) => t.key)).toEqual(['pack:ponchos', 'pack:bear'])
+  it('makes no packing to-dos: the packing list is gone', () => {
+    expect(bookingTimeline(trip, variant(), TODAY).filter((t) => t.kind === 'pack')).toEqual([])
   })
 
   it('a date already gone is kept as it is, never moved to today', () => {

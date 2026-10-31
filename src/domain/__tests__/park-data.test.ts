@@ -465,10 +465,15 @@ describe('the calendar', () => {
     })
     expect(strip.map((m) => m.label)).toEqual(['Oct', 'Nov', 'Dec', 'Jan 27', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'])
     expect(strip.map((m) => m.days.length)).toEqual([31, 30, 31, 31, 28, 31, 30, 31, 30, 31, 31, 30])
-    expect(strip[0]!.days[3]).toEqual({ date: '2026-10-04', level: null, cantGo: false, past: true, trip: null })
-    expect(strip[0]!.days[11]).toEqual({ date: '2026-10-12', level: 7, cantGo: false, past: false, trip: null })
-    expect(strip[4]!.days[14]).toEqual({ date: '2027-02-15', level: 9, cantGo: true, past: false, trip: null })
+    expect(strip[0]!.days[3]).toEqual({ date: '2026-10-04', level: null, cantGo: false, past: true, trip: null, start: null })
+    expect(strip[0]!.days[11]).toEqual({ date: '2026-10-12', level: 7, cantGo: false, past: false, trip: null, start: null })
+    expect(strip[4]!.days[14]).toEqual({ date: '2027-02-15', level: 9, cantGo: true, past: false, trip: null, start: null })
     expect(yearStripBounds('2026-10')).toEqual({ from: '2026-10-01', to: '2027-09-30' })
+  })
+
+  it("carries Explore's step for a trip leaving each day, and none where no trip leaves (D55)", () => {
+    const strip = yearStrip({ fromMonth: '2026-10', busyness: {}, blackouts: [], today: '2026-10-05', startSteps: { '2026-10-15': 1, '2026-10-16': 5 } })
+    expect(strip[0]!.days.slice(13, 17).map((d) => d.start)).toEqual([null, 1, 5, null])
   })
 
   it("a tapped day carries each park's own figure from its own best tier, beside the resort's one figure (D54)", () => {

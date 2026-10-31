@@ -109,6 +109,7 @@ export function ParkCalendar({
   monthHref,
   dayHref,
   refresh,
+  ranks,
   children,
 }: {
   calendar: CalendarMonth
@@ -121,6 +122,8 @@ export function ParkCalendar({
   dayHref: (date: string) => string
   /** The "Refresh park data" form, rendered by the page so it can say where to come back to. */
   refresh: ReactNode
+  /** Explore's top start days (D55), marked on the month by their place in the list. */
+  ranks?: Readonly<Record<string, number>>
   /** What the page offers on the tapped day: "Use these dates" or "Start a trip here". */
   children?: ReactNode
 }) {
@@ -164,6 +167,14 @@ export function ParkCalendar({
                   >
                     {c?.trips.slice(0, 2).map((t, row) => <TripBand key={t.id} trip={t} row={row} />)}
                     {c ? <DayCell cell={c} href={dayHref(c.date)} selected={c.date === selected} /> : null}
+                    {c && ranks?.[c.date] ? (
+                      <span
+                        className="pointer-events-none absolute right-0.5 top-0.5 min-w-[1.4em] rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-semibold leading-[1.4em] text-white"
+                        title={`Number ${ranks[c.date]} of the best times to go leaves this day`}
+                      >
+                        {ranks[c.date]}
+                      </span>
+                    ) : null}
                   </td>
                 ))}
               </tr>
@@ -272,8 +283,14 @@ const STRIP_TRIP: Record<CalendarTripDay['stage'], CSSProperties> = {
   working: { background: 'repeating-linear-gradient(90deg, var(--color-accent) 0 2px, transparent 2px 4px)' },
 }
 
-/** Twelve months, a sliver a day, coloured by how busy (grey where nothing is known); a tap opens that month (D48). */
+/**
+ * Twelve months, a sliver a day; a tap opens that month (D48). Coloured by
+ * how good a trip leaving that day is once Explore has ranked them (D55,
+ * D48 (3)), else by how busy; grey where nothing is known or no trip leaves.
+ */
 function YearStrip({ months, current, monthHref }: { months: YearStripMonth[]; current: string; monthHref: (month: string) => string }) {
+  const byStart = months.some((m) => m.days.some((d) => d.start !== null))
+  const step = (d: YearStripMonth['days'][number]) => (byStart ? d.start : d.level !== null ? busynessStep(d.level) : null)
   return (
     <nav aria-label="The next twelve months" className="grid grid-cols-4 gap-2 sm:grid-cols-6 xl:grid-cols-12">
       {months.map((m) => (
@@ -295,7 +312,7 @@ function YearStrip({ months, current, monthHref }: { months: YearStripMonth[]; c
               <span
                 key={d.date}
                 className={`relative flex-1 ${d.past ? 'opacity-30' : ''}`}
-                style={{ background: d.level !== null ? `var(--color-busy-${busynessStep(d.level)})` : 'var(--color-line)' }}
+                style={{ background: step(d) !== null ? `var(--color-busy-${step(d)})` : 'var(--color-line)' }}
               >
                 {d.cantGo ? <span className="absolute inset-0" style={CANT_GO} /> : null}
               </span>

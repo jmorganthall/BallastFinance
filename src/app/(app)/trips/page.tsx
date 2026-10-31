@@ -6,7 +6,7 @@
 
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Empty, humanDate, PageHeader, Pill } from '@/components/ui'
+import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
 import {
   addSchoolDayOffAction,
   createTripAction,
@@ -19,20 +19,35 @@ import {
   removeSchoolDayOffAction,
   saveBlackoutDatesAction,
   saveHomeAddressAction,
-  savePackTemplateAction,
   saveParkDataSourcesAction,
   saveReferencePricesAction,
   saveSchoolCalendarSourcesAction,
   saveWeekSettingsAction,
+  discardLodgingPullAction,
+  keepLodgingPullAction,
+  readLodgingPasteAction,
+  removeLodgingQuoteAction,
+  typeLodgingQuoteAction,
 } from '@/server/actions'
 import { readerEnabled } from '@/server/reader'
 import {
   addDays,
   crowdPullSummary,
   dollarsForInput,
+  easyStretchField,
+  importanceOf,
+  IMPORTANCES,
+  IMPORTANCE_WORDS,
+  weightsSentence,
   headCount,
   homeIsLocated,
+  layoutFromCode,
   PARK_LABELS,
+  parseParkDays,
+  ratesPullSummary,
+  RESORTINGS_CREDIT,
+  stayKey,
+  stayWords,
   percentForInput,
   referenceFreshness,
   shortDate,
@@ -46,6 +61,7 @@ import {
 } from '@/domain'
 import { TravelerFields } from './traveler-fields'
 import { ParkCalendar } from './park-calendar'
+import { ExploreSection } from './explore'
 
 export const dynamic = 'force-dynamic'
 
@@ -55,6 +71,13 @@ const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text
 const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium'
 const sectionTitle = 'mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
 const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium'
+
+/** The three questions behind the score (D25), each answered A lot / Some / A little / Not at all. */
+const WEIGHT_QUESTIONS: readonly { key: 'busy' | 'price' | 'school'; field: string; label: string }[] = [
+  { key: 'busy', field: 'weight_busy', label: 'Quiet parks' },
+  { key: 'price', field: 'weight_price', label: 'A cheap stay' },
+  { key: 'school', field: 'weight_school', label: 'Missing no school' },
+]
 
 const SOURCE_KIND_WORDS: Record<SchoolCalendarSourceKind, string> = { ical: 'Calendar feed (.ics)', pdf: 'PDF', page: 'Web page' }
 
@@ -85,17 +108,42 @@ function tripStatus(trip: Trip): { tone: 'neutral' | 'accent' | 'ahead'; label: 
 export default async function TripsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; saved?: string; month?: string; day?: string; refreshed?: string; start?: string; end?: string }>
+  searchParams: Promise<{
+    error?: string
+    saved?: string
+    month?: string
+    day?: string
+    refreshed?: string
+    start?: string
+    end?: string
+    name?: string
+    layout?: string
+    parks?: string
+    stay?: string
+    drive?: string
+  }>
 }) {
-  const { error, saved, month: monthParam, day: dayParam, refreshed, start: startParam, end: endParam } = await searchParams
+  const {
+    error,
+    saved,
+    month: monthParam,
+    day: dayParam,
+    refreshed,
+    start: startParam,
+    end: endParam,
+    name: nameParam,
+    layout: layoutParam,
+    parks: parksParam,
+    stay: stayParam,
+    drive: driveParam,
+  } = await searchParams
   const { engine } = await requireEngine()
-  const [trips, prices, home, blackouts, packTemplate, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames, pendingCrowds] =
+  const [trips, prices, home, blackouts, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames, pendingCrowds] =
     await Promise.all([
       engine.listTrips(),
       engine.referencePrices(),
       engine.homeLocation(),
       engine.blackoutDates(),
-      engine.packTemplate(),
       Promise.resolve(engine.today()),
       engine.schoolDaysOff(),
       engine.schoolCalendarSources(),
@@ -113,12 +161,28 @@ export default async function TripsPage({
 
   // The calendar (D29): this month unless the URL says another; a tapped day offers to start a trip there.
   const month = monthParam && /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : today.slice(0, 7)
-  const [calendar, year] = await Promise.all([engine.calendarMonth(month), engine.calendarYear()])
+  // Explore (D55): the park days asked for in the address, else the family's usual; its ranking shades the strip and numbers the month.
+  const parkDays = parseParkDays(parksParam)
+  const [explored, homeDrive, lodgingPull, quotes, stays] = await Promise.all([
+    engine.explore({ parkDays, stay: stayParam ?? null }),
+    engine.homeDrive(),
+    engine.pendingLodgingPull(),
+    engine.lodgingQuotes(),
+    engine.lodgingStays(),
+  ])
+  const stayChoices = stays.includes(stayKey(explored.shape.stay)) ? stays : [...stays, stayKey(explored.shape.stay)]
+  const ranks: Record<string, number> = {}
+  explored.top.forEach((w, i) => {
+    ranks[w.startDate] ??= i + 1
+  })
+  const lookedUp = /^\d+:\d+$/.test(driveParam ?? '') ? { miles: Number(driveParam!.split(':')[0]), minutes: Number(driveParam!.split(':')[1]) } : null
+  const [calendar, year] = await Promise.all([engine.calendarMonth(month), engine.calendarYear('wdw', explored.startSteps)])
   const isDate = (d: string | undefined): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d)
   const tappedDay = isDate(dayParam) ? dayParam : null
   const calendarHref = (m: string, d?: string) => `/trips?month=${m}${d ? `&day=${d}` : ''}#calendar`
   const newTripStart = isDate(startParam) ? startParam : ''
   const newTripEnd = isDate(endParam) ? endParam : ''
+  const newTripLayout = newTripStart && newTripEnd ? layoutFromCode(newTripStart, newTripEnd, layoutParam) : null
 
   return (
     <>
@@ -208,6 +272,7 @@ export default async function TripsPage({
           selected={tappedDay}
           monthHref={(m) => calendarHref(m)}
           dayHref={(d) => calendarHref(month, d)}
+          ranks={ranks}
           refresh={
             <form action={refreshParkDataAction}>
               <input type="hidden" name="month" value={month} />
@@ -225,6 +290,13 @@ export default async function TripsPage({
         </ParkCalendar>
       </Card>
 
+      <h2 id="explore" className={sectionTitle}>
+        Best times to go
+      </h2>
+      <Card>
+        <ExploreSection result={explored} parks={parkDays ? parksParam!.trim() : null} drive={homeDrive} lookedUp={lookedUp} judged={weightsSentence(weekWeights)} />
+      </Card>
+
       {/* Wide screens: the calendar across the page, the rest in columns (D48). */}
       <div data-wide="" className="lg:columns-2 lg:gap-6 2xl:columns-3">
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
@@ -235,7 +307,7 @@ export default async function TripsPage({
             <form action={createTripAction} className="space-y-3">
               <label className="block text-sm font-medium">
                 What to call it
-                <input name="name" required placeholder="Disney, June 2027" className={input} />
+                <input name="name" required placeholder="Disney, June 2027" defaultValue={newTripLayout ? (nameParam ?? '') : ''} className={input} />
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block text-sm font-medium">
@@ -247,6 +319,13 @@ export default async function TripsPage({
                   <input name="end_date" type="date" required defaultValue={newTripEnd} className={input} />
                 </label>
               </div>
+              {newTripLayout ? (
+                <p className="rounded-lg bg-[var(--color-accent-soft)] p-2 text-xs">
+                  <input type="hidden" name="layout" value={layoutParam} />
+                  From the best times to go: the days come laid out, travel days and park days, and the trip&apos;s page can choose the parks. Change the dates and
+                  the usual days are used instead.
+                </p>
+              ) : null}
               <TravelerFields />
               <div className="grid grid-cols-2 gap-3">
                 <label className="block text-sm font-medium">
@@ -522,49 +601,187 @@ export default async function TripsPage({
 
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
           <h2 id="best-weeks" className={sectionTitle}>
-            How the best weeks are picked
+            How we like to go
           </h2>
           <Card>
             <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
-              Each trip lists its ten best weeks across the months ahead: every week of the trip&apos;s length, and every long
-              weekend a holiday or a day off school makes. Quiet counts most, then cheap, then no school missed; a week you
-              cannot go is left out. Change the weights to say what matters more to you.
+              The best times to go above are trips of this shape: park days with a travel day each side. A drive longer than an easy stretch
+              can leave the evening before and finish in the morning; when a travel day would cost school, that makes the first day a quick park
+              day. Each trip also lists its ten best weeks of its own length. A week you cannot go is left out.
             </p>
             <form action={saveWeekSettingsAction} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Fewest park days
+                <input name="park_days_min" inputMode="numeric" defaultValue={explored.shape.parkDaysMin} className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Most park days
+                <input name="park_days_max" inputMode="numeric" defaultValue={explored.shape.parkDaysMax} className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Adult drivers
+                <input name="adult_drivers" inputMode="numeric" defaultValue={explored.shape.adultDrivers} className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Easy stretch, hours
+                <input
+                  name="easy_stretch_hours"
+                  inputMode="decimal"
+                  defaultValue={easyStretchField(explored.shape).typed}
+                  placeholder={easyStretchField(explored.shape).usual}
+                  className={input}
+                />
+              </label>
+              <label className="col-span-2 flex items-center gap-2 text-sm sm:col-span-4">
+                <input type="checkbox" name="split_when_free" defaultChecked={explored.shape.splitWhenFree} />
+                Split a long drive whenever it costs nothing
+              </label>
+              <label className="col-span-2 block text-xs text-[var(--color-ink-soft)] sm:col-span-4">
+                Where we usually stay, for what a night costs
+                <select name="stay" defaultValue={stayKey(explored.shape.stay)} className={input}>
+                  {(stayChoices.length > 0 ? stayChoices : ['all']).map((k) => (
+                    <option key={k} value={k}>
+                      {stayWords(k)}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label className="block text-xs text-[var(--color-ink-soft)]">
                 Months ahead
                 <input name="horizon_months" inputMode="numeric" defaultValue={horizonMonths} className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
-                Quiet matters
-                <input name="weight_busy" inputMode="decimal" defaultValue={weekWeights.busy} className={input} />
-              </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
-                Cheap matters
-                <input name="weight_price" inputMode="decimal" defaultValue={weekWeights.price} className={input} />
-              </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
-                School matters
-                <input name="weight_school" inputMode="decimal" defaultValue={weekWeights.school} className={input} />
-              </label>
+              <div className="col-span-2 space-y-2 sm:col-span-4">
+                <p className="text-sm font-medium">How much does each matter?</p>
+                {WEIGHT_QUESTIONS.map((q) => (
+                  <fieldset key={q.field} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <legend className="float-left w-40 text-sm">{q.label}</legend>
+                    <div className="flex flex-wrap gap-1">
+                      {IMPORTANCES.map((level) => (
+                        <label key={level} className="cursor-pointer">
+                          <input
+                            type="radio"
+                            name={q.field}
+                            value={level}
+                            defaultChecked={importanceOf(weekWeights[q.key]) === level}
+                            className="peer sr-only"
+                          />
+                          <span className="inline-block rounded-full border border-[var(--color-line)] px-3 py-1 text-sm peer-checked:border-[var(--color-accent)] peer-checked:bg-[var(--color-accent-soft)] peer-checked:font-medium peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-accent)]">
+                            {IMPORTANCE_WORDS[level]}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
+                ))}
+                <p className="rounded-lg bg-[var(--color-accent-soft)] p-2 text-xs">{weightsSentence(weekWeights)}</p>
+              </div>
               <button type="submit" className={secondaryButton + ' col-span-2 sm:col-span-4'}>
-                Save how weeks are picked
+                Save how we like to go
               </button>
             </form>
           </Card>
         </section>
 
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
-          <h2 className={sectionTitle}>What we always pack</h2>
+          <h2 id="night-cost" className={sectionTitle}>
+            What a night costs
+          </h2>
           <Card>
             <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
-              One item a line. Every trip&apos;s to-do list gets these, due the day before it starts. Changing the list
-              here reaches a trip when its timeline is rebuilt.
+              The best times to go are priced night by night from the surest figure there is: a price we were quoted for those nights, then
+              Disney&apos;s rate for the week, then for the month. Disney&apos;s rates come from{' '}
+              <a href={RESORTINGS_CREDIT.url} className="underline">
+                resortings.com
+              </a>
+              : open its prices-by-month page, copy the whole page and paste it here. It is shown before it is kept.
             </p>
-            <form action={savePackTemplateAction} className="space-y-2">
-              <textarea name="pack_template" rows={Math.max(4, packTemplate.length + 1)} defaultValue={packTemplate.join('\n')} className={input} />
+            {lodgingPull ? (
+              <div className="mb-3 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
+                <p className="font-semibold">Disney&apos;s rates, as {lodgingPull.label} lists them</p>
+                {(() => {
+                  const sum = ratesPullSummary(lodgingPull.rates)
+                  return (
+                    <p className="mt-1">
+                      {sum.rates} rates: all resorts, the three tiers and {sum.resorts} resorts by month
+                      {sum.weeks > 0 ? `, and ${sum.weeks} weeks by check-in day` : ''}
+                      {sum.from && sum.to ? `, ${shortDate(sum.from)} ${sum.from.slice(0, 4)} to ${shortDate(sum.to)} ${sum.to.slice(0, 4)}` : ''}. Keep them?
+                    </p>
+                  )
+                })()}
+                {lodgingPull.basis ? <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{lodgingPull.basis}.</p> : null}
+                <div className="mt-3 flex gap-2">
+                  <form action={keepLodgingPullAction} className="flex-1">
+                    <button type="submit" className={primaryButton}>
+                      Keep these
+                    </button>
+                  </form>
+                  <form action={discardLodgingPullAction} className="flex-1">
+                    <button type="submit" className={secondaryButton}>
+                      Not now
+                    </button>
+                  </form>
+                </div>
+              </div>
+            ) : null}
+            <form action={readLodgingPasteAction} className="space-y-2">
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                The resortings.com page, pasted
+                <textarea name="text" rows={3} className={input} placeholder="What a night costs, month by month…" />
+              </label>
               <button type="submit" className={secondaryButton}>
-                Save the packing list
+                Read the page
+              </button>
+            </form>
+            <h3 className="mt-5 text-sm font-semibold">Prices we were quoted</h3>
+            {quotes.length === 0 ? (
+              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">None yet. A quote beats Disney&apos;s published rate for its nights.</p>
+            ) : (
+              <ul className="mt-1 divide-y divide-[var(--color-line)] text-sm">
+                {quotes.map((q) => (
+                  <li key={q.id} className="flex items-center justify-between gap-2 py-1.5">
+                    <span>
+                      {stayWords(q.stay)}, nights of {shortDate(q.fromDate)} to {shortDate(q.toDate)} {q.toDate.slice(0, 4)}: <Money cents={q.nightlyCents} /> a night
+                      {q.note ? <span className="text-[var(--color-ink-soft)]"> · {q.note}</span> : null}
+                    </span>
+                    <form action={removeLodgingQuoteAction}>
+                      <input type="hidden" name="quote_id" value={q.id} />
+                      <button type="submit" className={smallButton}>
+                        Remove
+                      </button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form action={typeLodgingQuoteAction} className="mt-2 grid grid-cols-2 gap-2">
+              <label className="col-span-2 block text-xs text-[var(--color-ink-soft)]">
+                Where
+                <select name="stay" defaultValue={stayKey(explored.shape.stay)} className={input}>
+                  {(stayChoices.length > 0 ? stayChoices : ['all']).map((k) => (
+                    <option key={k} value={k}>
+                      {stayWords(k)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                First night
+                <input name="from_date" type="date" required className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Last night
+                <input name="to_date" type="date" required className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                A night, $
+                <input name="nightly" inputMode="decimal" required placeholder="310" className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                From
+                <input name="note" placeholder="Disney's site, phone quote…" className={input} />
+              </label>
+              <button type="submit" className={secondaryButton + ' col-span-2'}>
+                Keep this quote
               </button>
             </form>
           </Card>
