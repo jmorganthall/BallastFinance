@@ -17,10 +17,9 @@ flowchart TD
     log["Event log, append-only<br/>counts · transfers confirmed · moves · spends<br/>rounds · asks issued / confirmed / ended · payments"]
   end
 
-  subgraph L2["2 · Cleaned-up facts (src/server/engine.ts)"]
-    pin["Engine.positionInput()<br/>last count, moves and spends since,<br/>confirmed transfers, open asks"]
-    din["Engine.listDebts()<br/>stated balance less payments since"]
-    rin["roundEvents · closeOutPrompts · cycle starts"]
+  subgraph L2["2 · The ledger (src/domain/ledger.ts)"]
+    read["Engine.ledger() · Engine.positionInput()<br/>one read-only snapshot of the rows and events"]
+    led["ledgerOf()<br/>events in recorded order · the latest count · moves and spends since<br/>each Done once · undone left out · debt payments since stated"]
   end
 
   subgraph L3["3 · Derived figures (src/domain)"]
@@ -36,11 +35,10 @@ flowchart TD
     digest["Weekly digest · promo push"]
   end
 
-  rows --> pin & din & rin
-  log --> pin & din & rin
-  pin --> pos
-  rin --> pos
-  din --> debt
+  rows --> read
+  log --> read
+  read --> led
+  led --> pos & debt
   pos --> home & plans & alloc & digest
   debt --> home & debts & alloc & digest
   home -. "Done · a count · a spend" .-> log
@@ -52,9 +50,13 @@ flowchart TD
    Counts, confirmations, moves, spends and payments are events, never edited (migration
    `0001` enforces that). Plans, parts and debts are rows that are edited, with an event
    beside most edits.
-2. **Cleaned-up facts.** The engine reads the facts and puts them in order: the last
-   count, then every move and spend recorded after it; every confirmed transfer, at the
-   amount said; each "Done" counted once; spends taken back left out.
+2. **The ledger.** The engine reads the rows and events in one read-only snapshot and
+   hands the events to `ledgerOf`, which answers every question of order and of what
+   counts, once: the last count, then every move and spend recorded after it; every
+   confirmed transfer, at the amount said; each "Done" counted once, the first; spends
+   taken back left out; a spend in the account it came out of; a debt payment against
+   the balance only when recorded after that balance was stated. Account money, the
+   rounds, the instructions, debt balances and both histories all read this one answer.
 3. **Derived figures.** Pure functions, with no database and today passed in.
    `position()` is the only place a weekly amount, a status, a one-time move or a to-do
    is worked out. `debtStatuses()` does the same for debts. A screen only formats what
@@ -83,30 +85,32 @@ goes away when it no longer does, whatever changed the figures (`accountPosition
 
 ## Where the layers still bend
 
-Found in the audit of 2026-10-31. Each item is a place where a figure depends on more
-than the three layers above, so it is worth knowing when a number looks odd. They are
-the work of the later phases of the layering plan.
+Found in the audit of 2026-10-31. The ledger (Phase 2) has since closed the ones about
+reading the same facts two ways. Each item left is a place where a figure depends on
+more than the three layers above, so it is worth knowing when a number looks odd. They
+are the work of the later phases of the layering plan.
+
+**One snapshot per read, not per page.**
+- Each engine read is consistent within itself, but a screen makes several (the position,
+  the open asks, the debt statuses). A write landing between two of them can show one
+  figure from before it and one from after, until the next page drawn.
+
 
 **Stored asks beside the derived to-dos.**
 - A share-out writes asks to the log. Only an open `cover` (or old `catch_up`) move is
   taken off what the position asks for, and only off the one-time move. The move between
   accounts, the transfer change, the "Fix on This week" line and the debt to-dos do not
-  see it (`openMovesIn` in `positionInput`).
+  see it (`openMovesIn` in `Engine.positionInput`).
 - Asks from before D35 (`set_weekly_transfer`, `rate_bump`, `rate_cut`, `catch_up`) can
   still be open. They show on This week and in the digest beside the derived to-dos.
-
-**Two ways of reading the same facts.**
-- Account money is read in `positionInput()`. Debt payments are read in `debtsAsOfNow()`,
-  and again in `debtHistory()`. Each puts the events in order itself, from separate
-  queries.
 
 **Facts rewritten by code, with no event of their own.**
 - `line_items.due_date` is moved to the oldest open round by `settleRounds`.
 - A debt's balance is set to zero, and its state to paid off, by `settleDebtIfCleared`.
 
-**Old events read through today's rows.**
-- A spend is put in the account its part is in *now*. Moving a part to another account
-  moves its past spends with it.
+**Old spends read through today's rows.**
+- A spend recorded before spends carried their account (before the ledger) is put in
+  the account its part is in now. Spends recorded since keep their own account.
 
 **Figures shaped on a screen.**
 - This week works out its own "needs attention" count and headline (`page.tsx`).
@@ -117,8 +121,6 @@ the work of the later phases of the layering plan.
 
 ## The target
 
-- **Layer 2** becomes one pure function over one consistent read of the facts. It serves
-  account money, debt payments and rounds alike.
 - **Layer 3** becomes one household view that every screen and the digest read. Its
   to-dos take every open ask into account the same way.
 - A test fails if a screen imports a domain calculation, or if the engine updates a fact

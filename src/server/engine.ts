@@ -11,7 +11,6 @@
  */
 
 import { and, count, desc, eq, gte, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm'
-import { alias } from 'drizzle-orm/pg-core'
 import { db as defaultDb, type Db } from '@/db/client'
 import {
   assets as assetsTable,
@@ -71,7 +70,6 @@ import {
   type TripShape,
   apportion,
   debtStatuses,
-  debtTermsChanged,
   type DebtHistoryEntry,
   type DebtStatuses,
   likelyDebtBalance,
@@ -87,6 +85,9 @@ import {
   DEFAULT_TRANSFER_ROUND_UP_CENTS,
   DEFAULT_TRANSFER_WEEKDAY,
   isWeekday,
+  ledgerOf,
+  type Ledger,
+  type RecordedEvent,
   type Weekday,
   findShortfalls,
   formatCents,
@@ -108,7 +109,6 @@ import {
   driftAdjustmentsFrom,
   openCommitmentsFor,
   outstandingInstructions,
-  doneMoveOf,
   packageViews,
   todayIn,
   validateIntake,
@@ -117,7 +117,6 @@ import {
   type PlanChart,
   type HouseholdPosition,
   type PositionInput,
-  type ConfirmedTransfer,
   type CivilDate,
   type EndedInstruction,
   minDate,
@@ -416,6 +415,26 @@ export type CreatePackageResult =
 /** A transaction handle, or the connection itself for a read outside one. */
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0]
 type Conn = Db | Tx
+
+/** The event kinds the ledger reads (`src/domain/ledger.ts`); every other kind is history only. */
+const LEDGER_EVENT_KINDS = [
+  'package_committed',
+  'line_item_added',
+  'opening_recorded',
+  'balance_confirmed',
+  'spend_confirmed',
+  'spend_recorded',
+  'round_finished',
+  'round_saved_back_up',
+  'event_undone',
+  'close_out_snoozed',
+  'instruction_issued',
+  'instruction_confirmed',
+  'instruction_ended',
+  'payment_confirmed',
+  'debt_balance_updated',
+  'debt_updated',
+] as const
 
 /**
  * A crowd calendar pull, held for the person to look at before it is kept
@@ -1248,67 +1267,7 @@ export class Engine {
    * check-in that counted money already in the account toward a part.
    */
   async listCycleStarts(): Promise<LineItemCycle[]> {
-    // In the order they were recorded: a same-day tie between two starts is
-    // decided by that order, so it has to be the database's, not chance.
-    const rows = await this.db
-      .select()
-      .from(events)
-      .where(eq(events.householdId, this.householdId))
-      .orderBy(events.recordedAt, events.id)
-
-    const cycles: LineItemCycle[] = []
-    const next = () => cycles.length
-    for (const row of rows) {
-      const on = row.occurredAt as CivilDate
-      const p = row.payload as Record<string, unknown>
-      switch (row.kind) {
-        case 'package_committed':
-          for (const o of (p.openings as { line_item_id: Id; amount_cents: Cents }[] | undefined) ?? []) {
-            if (o.amount_cents > 0) {
-              cycles.push({
-                lineItemId: o.line_item_id,
-                startDate: on,
-                openingCents: o.amount_cents,
-                recordedOrder: next(),
-                origin: 'commit',
-              })
-            }
-          }
-          break
-        case 'line_item_added':
-          cycles.push({
-            lineItemId: p.line_item_id as Id,
-            startDate: on,
-            openingCents: 0,
-            recordedOrder: next(),
-            origin: 'added',
-          })
-          break
-        case 'spend_confirmed':
-          if (p.rolled_to) {
-            cycles.push({
-              lineItemId: p.line_item_id as Id,
-              startDate: on,
-              openingCents: 0,
-              recordedOrder: next(),
-              origin: 'rolled',
-            })
-          }
-          break
-        case 'opening_recorded':
-          cycles.push({
-            lineItemId: p.line_item_id as Id,
-            startDate: on,
-            openingCents: p.opening_cents as Cents,
-            recordedOrder: next(),
-            origin: 'counted',
-          })
-          break
-        default:
-          break
-      }
-    }
-    return cycles
+    return (await this.ledger()).cycleStarts
   }
 
   /** Every recorded plan change, in the shape the accrual math consumes. */
@@ -1342,8 +1301,8 @@ export class Engine {
    * versioned like the others): nearest $10 unless they say otherwise, zero
    * for exact.
    */
-  async transferRoundUpCents(): Promise<Cents> {
-    return this.getSetting<number>('transfer_round_up_cents', DEFAULT_TRANSFER_ROUND_UP_CENTS)
+  async transferRoundUpCents(db: Conn = this.db): Promise<Cents> {
+    return this.settingIn<number>(db, 'transfer_round_up_cents', DEFAULT_TRANSFER_ROUND_UP_CENTS)
   }
 
   /**
@@ -1354,8 +1313,8 @@ export class Engine {
    * -- a hand-edited row, say -- reads as the default rather than breaking
    * every screen.
    */
-  async transferWeekday(): Promise<Weekday> {
-    const stored = await this.getSetting<unknown>('transfer_weekday', DEFAULT_TRANSFER_WEEKDAY)
+  async transferWeekday(db: Conn = this.db): Promise<Weekday> {
+    const stored = await this.settingIn<unknown>(db, 'transfer_weekday', DEFAULT_TRANSFER_WEEKDAY)
     return isWeekday(stored) ? stored : DEFAULT_TRANSFER_WEEKDAY
   }
 
@@ -1386,134 +1345,129 @@ export class Engine {
   // ---------------------------------------------------------------- the one position (D35)
 
   /**
-   * Every fact the position reads, in one place (PRD §5, "The one position").
-   * The questions of order are answered here -- which count is the latest,
-   * which moves and spends came after it, which transfer was confirmed when
-   * -- by the order the events were recorded, so a count entered later the
-   * same day supersedes a move marked done that morning (D34). The domain
-   * only sums.
+   * Every fact the position reads, in one consistent read (PRD §5, "The one
+   * position"): the rows, the two settings and the ledger, all inside one
+   * read-only snapshot, so a write landing halfway can never give the
+   * position a count from after it and a move from before. What came after
+   * which count, which "Done" counts and which spends are taken back is the
+   * ledger's (`src/domain/ledger.ts`); this only hands its answers on.
    */
   async positionInput(): Promise<PositionInput> {
-    const [
-      accounts,
-      packages,
-      lineItems,
-      cycleStarts,
-      transferRoundUpCents,
-      transferWeekday,
-      adjustments,
-      issued,
-      outstanding,
-      rows,
-      rounds,
-    ] = await Promise.all([
-      this.listReserveAccounts(),
-      this.listPackages(),
-      this.listLineItems(),
-      this.listCycleStarts(),
-      this.transferRoundUpCents(),
-      this.transferWeekday(),
-      this.driftAdjustments(),
-      this.listIssuedInstructions(),
-      this.outstandingInstructions(),
-      this.db
-        .select()
-        .from(events)
-        .where(
-          and(
-            eq(events.householdId, this.householdId),
-            inArray(events.kind, ['balance_confirmed', 'instruction_confirmed', 'spend_confirmed', 'spend_recorded']),
-          ),
-        )
-        .orderBy(events.recordedAt, events.id),
-      this.roundEvents(),
-    ])
+    return this.inSnapshot(async (tx) => {
+      const [accounts, packages, lineItems, transferRoundUpCents, transferWeekday, ledger] = await Promise.all([
+        tx
+          .select()
+          .from(reserveAccountsTable)
+          .where(eq(reserveAccountsTable.householdId, this.householdId))
+          .then((rows) => rows.map(toReserveAccount)),
+        tx
+          .select()
+          .from(packagesTable)
+          .where(eq(packagesTable.householdId, this.householdId))
+          .then((rows) => rows.map(toPackage)),
+        tx
+          .select()
+          .from(lineItemsTable)
+          .where(eq(lineItemsTable.householdId, this.householdId))
+          .then((rows) => rows.map(toLineItem)),
+        this.transferRoundUpCents(tx),
+        this.transferWeekday(tx),
+        this.ledger(tx),
+      ])
+      const adjustments = driftAdjustmentsFrom({
+        issued: ledger.issued,
+        confirmed: ledger.confirmed,
+        ended: ledger.ended,
+        transferWeekday,
+      })
+      // A catch-up from before D35 or a share-out's "cover what is short" move
+      // still on the to-do list is money already asked for: the position takes
+      // it off the one-time move it derives, so the same money is never asked
+      // for twice.
+      const openMovesIn = outstandingInstructions({
+        issued: ledger.issued,
+        confirmed: ledger.confirmed,
+        ended: ledger.ended,
+        today: this.today(),
+      })
+        .filter((i) => i.type === 'one_time_move' && ['catch_up', 'cover'].includes(i.purpose ?? 'catch_up'))
+        .map((i) => ({ accountId: i.targetId, amountCents: i.amountCents }))
 
-    const issuedById = new Map(issued.map((i) => [i.instructionId, i]))
-    const accountOfItem = new Map(lineItems.map((li) => [li.id, li.reserveAccountId]))
-    const counts = new Map<Id, { amountCents: Cents; on: CivilDate }>()
-    const moves = new Map<Id, Cents[]>()
-    const spends = new Map<Id, Cents>()
-    const transfers: ConfirmedTransfer[] = []
-    const confirmedOnce = new Set<Id>()
-    const add = (map: Map<Id, Cents>, id: Id, cents: Cents) => map.set(id, (map.get(id) ?? 0) + cents)
+      return {
+        today: this.today(),
+        accounts,
+        packages,
+        lineItems,
+        cycleStarts: ledger.cycleStarts,
+        counts: ledger.counts,
+        transfers: ledger.transfers,
+        adjustments: adjustments.accepted,
+        movesSinceCount: ledger.movesSinceCount,
+        spendsSinceCount: ledger.spendsSinceCount,
+        openMovesIn,
+        transferRoundUpCents,
+        transferWeekday,
+        roundEvents: ledger.roundEvents,
+      }
+    })
+  }
 
-    for (const row of rows) {
-      const on = row.occurredAt as CivilDate
-      if (row.kind === 'balance_confirmed') {
-        const p = row.payload as { reserve_account_id: Id; amount_cents: Cents }
-        counts.set(p.reserve_account_id, { amountCents: p.amount_cents, on })
-        // A count includes everything recorded before it.
-        moves.delete(p.reserve_account_id)
-        spends.delete(p.reserve_account_id)
-        continue
-      }
-      if (row.kind === 'spend_confirmed') {
-        const p = row.payload as { line_item_id: Id; actual_amount_cents: Cents }
-        const accountId = accountOfItem.get(p.line_item_id)
-        if (accountId) add(spends, accountId, p.actual_amount_cents)
-        continue
-      }
-      // A spend against a round (D53), unless it was taken back.
-      if (row.kind === 'spend_recorded') {
-        if (rounds.undone.has(row.id)) continue
-        const p = row.payload as { line_item_id: Id; amount_cents: Cents }
-        const accountId = accountOfItem.get(p.line_item_id)
-        if (accountId) add(spends, accountId, p.amount_cents)
-        continue
-      }
-      const p = row.payload as { instruction_id: Id; actual_amount_cents: Cents | null }
-      const instruction = issuedById.get(p.instruction_id)
-      if (!instruction) continue
-      // An instruction is done once, however many times "Done" was recorded:
-      // the first confirmation is the one that counts (as for debts).
-      if (confirmedOnce.has(p.instruction_id)) continue
-      confirmedOnce.add(p.instruction_id)
-      const confirmation = {
-        instructionId: p.instruction_id,
-        confirmedOn: on,
-        actualAmountCents: p.actual_amount_cents ?? undefined,
-      }
-      if (instruction.type === 'set_weekly_transfer') {
-        transfers.push({
-          accountId: instruction.targetId,
-          perWeekCents: confirmation.actualAmountCents ?? instruction.amountCents,
-          confirmedOn: on,
+  // ---------------------------------------------------------------- the ledger
+
+  /**
+   * The household's events put in order once (`ledgerOf`, the middle layer):
+   * every read of counts, transfers, moves, spends, rounds, snoozes,
+   * instructions and debt payments goes through here. Given a transaction,
+   * it reads inside it (a write checking what is there now); otherwise in a
+   * snapshot of its own.
+   */
+  async ledger(db?: Conn): Promise<Ledger> {
+    if (db) return this.ledgerFrom(db)
+    return this.inSnapshot((tx) => this.ledgerFrom(tx))
+  }
+
+  private async ledgerFrom(db: Conn): Promise<Ledger> {
+    const [recorded, lineItems, debts] = await Promise.all([
+      db
+        .select({
+          id: events.id,
+          kind: events.kind,
+          on: events.occurredAt,
+          recordedAtMicros: sql<string>`(extract(epoch from ${events.recordedAt}) * 1000000)::bigint::text`,
+          payload: events.payload,
         })
-        continue
-      }
-      // One entry per move, so the position can say what went in and what
-      // went out, not only the net.
-      const move = doneMoveOf(instruction, confirmation)
-      if (move) moves.set(instruction.targetId, [...(moves.get(instruction.targetId) ?? []), move.amountCents])
-    }
-
-    // A catch-up from before D35 or a share-out's "cover what is short" move
-    // still on the to-do list is money already asked for: the position takes
-    // it off the one-time move it derives, so the same money is never asked
-    // for twice.
-    const openMovesIn = outstanding
-      .filter(
-        (i) => i.type === 'one_time_move' && ['catch_up', 'cover'].includes(i.purpose ?? 'catch_up'),
-      )
-      .map((i) => ({ accountId: i.targetId, amountCents: i.amountCents }))
-
-    return {
-      today: this.today(),
-      accounts,
-      packages,
+        .from(events)
+        .where(and(eq(events.householdId, this.householdId), inArray(events.kind, LEDGER_EVENT_KINDS))),
+      db
+        .select({ id: lineItemsTable.id, reserveAccountId: lineItemsTable.reserveAccountId })
+        .from(lineItemsTable)
+        .where(eq(lineItemsTable.householdId, this.householdId)),
+      db
+        .select({
+          id: debtsTable.id,
+          balanceRecordedAtMicros: sql<string>`(extract(epoch from ${debtsTable.balanceRecordedAt}) * 1000000)::bigint::text`,
+        })
+        .from(debtsTable)
+        .where(eq(debtsTable.householdId, this.householdId)),
+    ])
+    return ledgerOf({
+      events: recorded.map(
+        (row): RecordedEvent => ({
+          id: row.id,
+          kind: row.kind,
+          on: row.on as CivilDate,
+          recordedAtMicros: row.recordedAtMicros,
+          payload: (row.payload ?? {}) as Record<string, unknown>,
+        }),
+      ),
       lineItems,
-      cycleStarts,
-      counts: [...counts].map(([accountId, c]) => ({ accountId, ...c })),
-      transfers,
-      adjustments: adjustments.accepted,
-      movesSinceCount: [...moves].flatMap(([accountId, list]) => list.map((amountCents) => ({ accountId, amountCents }))),
-      spendsSinceCount: [...spends].map(([accountId, amountCents]) => ({ accountId, amountCents })),
-      openMovesIn,
-      transferRoundUpCents,
-      transferWeekday,
-      roundEvents: rounds.events,
-    }
+      debts,
+    })
+  }
+
+  /** A read-only transaction that sees one moment of the database. */
+  private inSnapshot<T>(run: (tx: Tx) => Promise<T>): Promise<T> {
+    return this.db.transaction(run, { isolationLevel: 'repeatable read', accessMode: 'read only' })
   }
 
   /** The one position: every money figure any screen, the digest or a to-do shows (D35). */
@@ -1673,7 +1627,11 @@ export class Engine {
   // ---------------------------------------------------------------- settings
 
   async getSetting<T>(key: string, fallback: T): Promise<T> {
-    const rows = await this.db
+    return this.settingIn(this.db, key, fallback)
+  }
+
+  private async settingIn<T>(db: Conn, key: string, fallback: T): Promise<T> {
+    const rows = await db
       .select()
       .from(settingsTable)
       .where(and(eq(settingsTable.householdId, this.householdId), eq(settingsTable.key, key)))
@@ -1712,13 +1670,13 @@ export class Engine {
    * once the to-do is done (`AccountView.pendingWeekly`).
    */
   async driftAdjustments(): Promise<{ accepted: DriftAdjustment[]; pending: DriftAdjustment[] }> {
-    const [issued, confirmed, ended, transferWeekday] = await Promise.all([
-      this.listIssuedInstructions(),
-      this.listConfirmedInstructions(),
-      this.listEndedInstructions(),
-      this.transferWeekday(),
-    ])
-    return driftAdjustmentsFrom({ issued, confirmed, ended, transferWeekday })
+    const [ledger, transferWeekday] = await Promise.all([this.ledger(), this.transferWeekday()])
+    return driftAdjustmentsFrom({
+      issued: ledger.issued,
+      confirmed: ledger.confirmed,
+      ended: ledger.ended,
+      transferWeekday,
+    })
   }
 
   /**
@@ -1779,15 +1737,7 @@ export class Engine {
 
   /** Every snooze recorded (D38), in the order it was recorded. */
   private async closeOutSnoozes(): Promise<CloseOutSnooze[]> {
-    const rows = await this.db
-      .select()
-      .from(events)
-      .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'close_out_snoozed')))
-      .orderBy(events.recordedAt, events.id)
-    return rows.map((row) => {
-      const p = row.payload as { line_item_id: Id; due_date: CivilDate; until: CivilDate }
-      return { lineItemId: p.line_item_id, dueDate: p.due_date, until: p.until }
-    })
+    return (await this.ledger()).snoozes
   }
 
   /**
@@ -1835,35 +1785,9 @@ export class Engine {
    * the order recorded, with the ones taken back by an `event_undone` left
    * out -- and the ids of those taken back, for the money and the history.
    */
-  async roundEvents(db: Pick<Db, 'select'> = this.db): Promise<{ events: RoundEvent[]; undone: Set<Id> }> {
-    const rows = await db
-      .select()
-      .from(events)
-      .where(
-        and(
-          eq(events.householdId, this.householdId),
-          inArray(events.kind, ['spend_recorded', 'round_finished', 'round_saved_back_up', 'event_undone']),
-        ),
-      )
-      .orderBy(events.recordedAt, events.id)
-    const undone = new Set(
-      rows.filter((r) => r.kind === 'event_undone').map((r) => (r.payload as { event_id: Id }).event_id),
-    )
-    const kinds = { spend_recorded: 'spend', round_finished: 'finish', round_saved_back_up: 'save_back_up' } as const
-    const out: RoundEvent[] = []
-    for (const row of rows) {
-      if (row.kind === 'event_undone' || undone.has(row.id)) continue
-      const p = row.payload as { line_item_id: Id; round_due: CivilDate; amount_cents?: Cents }
-      out.push({
-        eventId: row.id,
-        kind: kinds[row.kind as keyof typeof kinds],
-        lineItemId: p.line_item_id,
-        roundDue: p.round_due,
-        amountCents: p.amount_cents ?? 0,
-        on: row.occurredAt as CivilDate,
-      })
-    }
-    return { events: out, undone }
+  async roundEvents(db?: Conn): Promise<{ events: RoundEvent[]; undone: Set<Id> }> {
+    const ledger = await this.ledger(db)
+    return { events: ledger.roundEvents, undone: new Set(ledger.undone) }
   }
 
   /**
@@ -1936,7 +1860,14 @@ export class Engine {
         occurredAt: this.today(),
         actorUserId: this.actorUserId,
         source: 'manual',
-        payload: { line_item_id: item.id, round_due: round.dueDate, amount_cents: amountCents },
+        // The account it came out of, so moving the part later never moves
+        // this spend with it (the ledger reads it from here).
+        payload: {
+          line_item_id: item.id,
+          reserve_account_id: item.reserveAccountId,
+          round_due: round.dueDate,
+          amount_cents: amountCents,
+        },
       })
       await this.settleRounds(tx, item, item.dueDate)
     })
@@ -2043,41 +1974,12 @@ export class Engine {
    * with whether it was taken back, for the history on the plan's page.
    */
   async roundHistory(packageId: Id): Promise<RoundHistoryEntry[]> {
-    const items = (await this.listLineItems()).filter((li) => li.packageId === packageId)
-    const byId = new Map(items.map((li) => [li.id, li]))
-    const rows = await this.db
-      .select()
-      .from(events)
-      .where(
-        and(
-          eq(events.householdId, this.householdId),
-          inArray(events.kind, ['spend_recorded', 'round_finished', 'round_saved_back_up', 'event_undone']),
-        ),
-      )
-      .orderBy(events.recordedAt, events.id)
-    const undone = new Set(
-      rows.filter((r) => r.kind === 'event_undone').map((r) => (r.payload as { event_id: Id }).event_id),
-    )
-    const kinds = { spend_recorded: 'spend', round_finished: 'finish', round_saved_back_up: 'save_back_up' } as const
-    return rows
-      .flatMap((row): RoundHistoryEntry[] => {
-        if (row.kind === 'event_undone') return []
-        const p = row.payload as { line_item_id: Id; round_due: CivilDate; amount_cents?: Cents }
-        const item = byId.get(p.line_item_id)
-        if (!item) return []
-        return [
-          {
-            eventId: row.id,
-            kind: kinds[row.kind as keyof typeof kinds],
-            lineItemId: item.id,
-            label: item.label,
-            recurrence: item.recurrence,
-            roundDue: p.round_due,
-            amountCents: p.amount_cents ?? 0,
-            on: row.occurredAt as CivilDate,
-            undone: undone.has(row.id),
-          },
-        ]
+    const [items, ledger] = await Promise.all([this.listLineItems(), this.ledger()])
+    const byId = new Map(items.filter((li) => li.packageId === packageId).map((li) => [li.id, li]))
+    return ledger.roundLog
+      .flatMap((entry): RoundHistoryEntry[] => {
+        const item = byId.get(entry.lineItemId)
+        return item ? [{ ...entry, label: item.label, recurrence: item.recurrence }] : []
       })
       .reverse()
   }
@@ -2198,79 +2100,26 @@ export class Engine {
   }
 
   async listEndedInstructions(): Promise<EndedInstruction[]> {
-    const rows = await this.db
-      .select()
-      .from(events)
-      .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_ended')))
-
-    return rows.map((row) => {
-      const p = row.payload as { instruction_id: Id }
-      return { instructionId: p.instruction_id, endedOn: row.occurredAt as CivilDate }
-    })
+    return (await this.ledger()).ended
   }
 
   async listIssuedInstructions(): Promise<IssuedInstruction[]> {
-    // In the order recorded: two asks of the same kind issued the same day
-    // are settled by which came later (D18), and that must not depend on
-    // how the rows happen to come back.
-    const rows = await this.db
-      .select()
-      .from(events)
-      .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_issued')))
-      .orderBy(events.recordedAt, events.id)
-
-    return rows.map((row) => {
-      const p = row.payload as {
-        instruction_id: Id
-        type: InstructionType
-        amount_cents: Cents
-        target_id: Id
-        target_label: string
-        note: string | null
-        ends_on: CivilDate | null
-        purpose?: InstructionPurpose | null
-        available_on?: CivilDate | null
-      }
-      return {
-        instructionId: p.instruction_id,
-        type: p.type,
-        issuedOn: row.occurredAt as CivilDate,
-        amountCents: p.amount_cents,
-        targetId: p.target_id,
-        targetLabel: p.target_label,
-        note: p.note ?? undefined,
-        endsOn: p.ends_on ?? undefined,
-        purpose: p.purpose ?? undefined,
-        availableOn: p.available_on ?? undefined,
-      }
-    })
+    return (await this.ledger()).issued
   }
 
+  /** One confirmation per instruction: the first (the ledger's rule). */
   async listConfirmedInstructions(): Promise<ConfirmedInstruction[]> {
-    const rows = await this.db
-      .select()
-      .from(events)
-      .where(
-        and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_confirmed')),
-      )
-
-    return rows.map((row) => {
-      const p = row.payload as { instruction_id: Id; actual_amount_cents: Cents | null }
-      return {
-        instructionId: p.instruction_id,
-        confirmedOn: row.occurredAt as CivilDate,
-        actualAmountCents: p.actual_amount_cents ?? undefined,
-      }
-    })
+    return (await this.ledger()).confirmed
   }
 
   async outstandingInstructions(): Promise<OutstandingInstruction[]> {
-    const [issued, confirmed, ended] = await Promise.all([
-      this.listIssuedInstructions(),
-      this.listConfirmedInstructions(),
-      this.listEndedInstructions(),
-    ])
-    return outstandingInstructions({ issued, confirmed, ended, today: this.today() })
+    const ledger = await this.ledger()
+    return outstandingInstructions({
+      issued: ledger.issued,
+      confirmed: ledger.confirmed,
+      ended: ledger.ended,
+      today: this.today(),
+    })
   }
 
   // ---------------------------------------------------------------- allocation
@@ -2607,94 +2456,27 @@ export class Engine {
     return this.debtsAsOfNow(this.db)
   }
 
-  private async debtsAsOfNow(db: Db | Tx, extra?: { debtId: Id; payment: DebtPaymentMade }): Promise<Debt[]> {
-    const [rows, paid] = await Promise.all([
-      db.select().from(debtsTable).where(eq(debtsTable.householdId, this.householdId)),
-      this.debtPaymentsSinceStated(db),
-    ])
+  private async debtsAsOfNow(db: Conn, extra?: { debtId: Id; payment: DebtPaymentMade }): Promise<Debt[]> {
+    const read = async (conn: Conn) =>
+      Promise.all([
+        conn.select().from(debtsTable).where(eq(debtsTable.householdId, this.householdId)),
+        this.ledger(conn),
+      ])
+    // Inside a write, read what the write sees; otherwise one snapshot.
+    const [rows, ledger] = db === this.db ? await this.inSnapshot(read) : await read(db)
     const today = this.today()
     return rows.map((row) => {
       const stated = toDebt(row)
-      const payments = [...(paid.get(row.id) ?? []), ...(extra?.debtId === row.id ? [extra.payment] : [])]
+      const payments = [
+        ...(ledger.debtPaymentsSinceStated.get(row.id) ?? []),
+        ...(extra?.debtId === row.id ? [extra.payment] : []),
+      ]
       return {
         ...stated,
         balanceCents: likelyDebtBalance({ debt: stated, payments, today }),
         statedBalanceCents: stated.balanceCents,
       }
     })
-  }
-
-  /**
-   * The payments marked done after each debt's stated balance was recorded
-   * (D49 (1)): one from the payment form, or "Done" on a "Pay $X toward"
-   * to-do, at the amount the person said they paid. The two are the same
-   * fact, so a payment is either one or the other, never both. Which side of
-   * the statement a payment falls is compared in the database, where the
-   * timestamps keep their full precision.
-   */
-  private async debtPaymentsSinceStated(db: Db | Tx): Promise<Map<Id, DebtPaymentMade[]>> {
-    const issued = alias(events, 'issued')
-    const [formPayments, todoPayments] = await Promise.all([
-      db
-        .select({ debtId: debtsTable.id, on: events.occurredAt, payload: events.payload })
-        .from(events)
-        .innerJoin(
-          debtsTable,
-          and(
-            eq(debtsTable.householdId, events.householdId),
-            sql`${debtsTable.id}::text = ${events.payload}->>'debt_id'`,
-            sql`${events.recordedAt} > ${debtsTable.balanceRecordedAt}`,
-          ),
-        )
-        .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'payment_confirmed'))),
-      db
-        .select({ debtId: debtsTable.id, on: events.occurredAt, confirmed: events.payload, issued: issued.payload })
-        .from(events)
-        .innerJoin(
-          issued,
-          and(
-            eq(issued.householdId, events.householdId),
-            eq(issued.kind, 'instruction_issued'),
-            sql`${issued.payload}->>'instruction_id' = ${events.payload}->>'instruction_id'`,
-            sql`${issued.payload}->>'type' = 'debt_payment'`,
-          ),
-        )
-        .innerJoin(
-          debtsTable,
-          and(
-            eq(debtsTable.householdId, events.householdId),
-            sql`${debtsTable.id}::text = ${issued.payload}->>'target_id'`,
-            sql`${events.recordedAt} > ${debtsTable.balanceRecordedAt}`,
-          ),
-        )
-        .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_confirmed')))
-        .orderBy(events.recordedAt, events.id),
-    ])
-
-    const paid = new Map<Id, DebtPaymentMade[]>()
-    const add = (debtId: Id, payment: DebtPaymentMade) => paid.set(debtId, [...(paid.get(debtId) ?? []), payment])
-    // The payment form records the regular payment; a to-do asks for money
-    // on top of it (D49 (3)).
-    for (const row of formPayments) {
-      add(row.debtId, {
-        on: row.on as CivilDate,
-        amountCents: (row.payload as { amount_cents: Cents }).amount_cents,
-        regular: true,
-      })
-    }
-    // An instruction is one payment however many times "Done" was pressed.
-    const counted = new Set<Id>()
-    for (const row of todoPayments) {
-      const confirmed = row.confirmed as { instruction_id: Id; actual_amount_cents: Cents | null }
-      if (counted.has(confirmed.instruction_id)) continue
-      counted.add(confirmed.instruction_id)
-      add(row.debtId, {
-        on: row.on as CivilDate,
-        amountCents: confirmed.actual_amount_cents ?? (row.issued as { amount_cents: Cents }).amount_cents,
-        regular: false,
-      })
-    }
-    return paid
   }
 
   /**
@@ -2975,62 +2757,7 @@ export class Engine {
    * change to its terms. Read from the event log; nothing is stored for it.
    */
   async debtHistory(debtId: Id): Promise<DebtHistoryEntry[]> {
-    const issued = alias(events, 'issued')
-    const [own, todoPayments] = await Promise.all([
-      this.db
-        .select({ kind: events.kind, on: events.occurredAt, payload: events.payload })
-        .from(events)
-        .where(
-          and(
-            eq(events.householdId, this.householdId),
-            inArray(events.kind, ['debt_balance_updated', 'payment_confirmed', 'debt_updated']),
-            sql`${events.payload}->>'debt_id' = ${debtId}`,
-          ),
-        )
-        .orderBy(events.recordedAt, events.id),
-      this.db
-        .select({ on: events.occurredAt, recordedAt: events.recordedAt, confirmed: events.payload, issued: issued.payload })
-        .from(events)
-        .innerJoin(
-          issued,
-          and(
-            eq(issued.householdId, events.householdId),
-            eq(issued.kind, 'instruction_issued'),
-            sql`${issued.payload}->>'instruction_id' = ${events.payload}->>'instruction_id'`,
-            sql`${issued.payload}->>'type' = 'debt_payment'`,
-            sql`${issued.payload}->>'target_id' = ${debtId}`,
-          ),
-        )
-        .where(and(eq(events.householdId, this.householdId), eq(events.kind, 'instruction_confirmed')))
-        .orderBy(events.recordedAt, events.id),
-    ])
-
-    const entries: DebtHistoryEntry[] = []
-    for (const row of own) {
-      const on = row.on as CivilDate
-      if (row.kind === 'debt_balance_updated') {
-        entries.push({ on, kind: 'stated', amountCents: (row.payload as { balance_cents: Cents }).balance_cents })
-      } else if (row.kind === 'payment_confirmed') {
-        entries.push({ on, kind: 'paid', amountCents: (row.payload as { amount_cents: Cents }).amount_cents })
-      } else {
-        const p = row.payload as { before: Record<string, unknown>; after: Record<string, unknown> }
-        const changed = debtTermsChanged(p.before, p.after)
-        if (changed.length > 0) entries.push({ on, kind: 'terms', changed })
-      }
-    }
-    const counted = new Set<string>()
-    for (const row of todoPayments) {
-      const confirmed = row.confirmed as { instruction_id: Id; actual_amount_cents: Cents | null }
-      if (counted.has(confirmed.instruction_id)) continue
-      counted.add(confirmed.instruction_id)
-      entries.push({
-        on: row.on as CivilDate,
-        kind: 'paid_todo',
-        amountCents: confirmed.actual_amount_cents ?? (row.issued as { amount_cents: Cents }).amount_cents,
-      })
-    }
-    // Two lists merged by day; within a day, the order each was recorded.
-    return entries.sort((a, b) => compareDates(a.on, b.on))
+    return (await this.ledger()).debtHistory.get(debtId) ?? []
   }
 
   /** Each open debt's status, its words' figures and its to-dos (PRD D49 (4)-(6)). */
