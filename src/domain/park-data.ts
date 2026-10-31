@@ -619,6 +619,8 @@ export interface YearStripDay {
   past: boolean
   /** A trip on this day (D54): a plan wins over one being worked out. */
   trip: CalendarTrip['stage'] | null
+  /** How good a trip leaving this day is (D55), 1 the best fifth to 5; null when no trip leaves it or no ranking was given. */
+  start: number | null
 }
 
 export interface YearStripMonth {
@@ -638,8 +640,9 @@ export function yearStripBounds(fromMonth: string): { from: CivilDate; to: Civil
 /**
  * The strip of twelve months above the calendar (D48): a sliver a day, how
  * busy for the whole resort (the same busynessFor the month's cells read)
- * and whether we can go, and which days a trip covers (D54). Until
- * Explore's scoring exists (D42) this is what it shows; nothing about it is
+ * and whether we can go, and which days a trip covers (D54). Given
+ * Explore's ranking (D55), each day also carries how good a trip leaving
+ * it is, and the strip is shaded by that (D48 (3)); nothing about it is
  * stored.
  */
 export function yearStrip(input: {
@@ -648,6 +651,8 @@ export function yearStrip(input: {
   blackouts: readonly BlackoutRange[]
   today: CivilDate
   trips?: readonly CalendarTrip[]
+  /** Explore's step for each start date (D55). */
+  startSteps?: Readonly<Record<CivilDate, number>>
 }): YearStripMonth[] {
   const months: YearStripMonth[] = []
   for (let i = 0; i < 12; i++) {
@@ -661,6 +666,7 @@ export function yearStrip(input: {
         cantGo: blackoutsOn(input.blackouts, d).length > 0,
         past: compareDates(d, input.today) < 0,
         trip: tripsOn(input.trips ?? [], d)[0]?.stage ?? null,
+        start: input.startSteps?.[d] ?? null,
       })
     }
     const m = Number(month.slice(5, 7))

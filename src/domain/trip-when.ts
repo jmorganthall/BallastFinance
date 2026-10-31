@@ -423,41 +423,73 @@ export function scoreCandidates(input: {
   weights?: WeekWeights
   limit?: number
 }): ScoredCandidate[] {
-  const weights = input.weights ?? DEFAULT_WEEK_WEIGHTS
   const limit = input.limit ?? BEST_WEEKS_SHOWN
   const eligible = input.candidates.filter((c) => c.blackouts.length === 0)
   if (eligible.length === 0) return []
-  const known = eligible.map((c) => c.crowdAverage).filter((a): a is number => a !== null)
-  const lowestBusy = known.length > 0 ? Math.min(...known) : 0
-  const highestBusy = known.length > 0 ? Math.max(...known) : 0
-  const priceRange = new Map<number, { cheapest: Cents; dearest: Cents }>()
-  for (const c of eligible) {
-    const have = priceRange.get(c.nights)
-    priceRange.set(c.nights, have ? { cheapest: Math.min(have.cheapest, c.priceCents), dearest: Math.max(have.dearest, c.priceCents) } : { cheapest: c.priceCents, dearest: c.priceCents })
-  }
-  const mostMissed = Math.max(...eligible.map((c) => c.schoolDaysMissed))
+  const scores = scoresOf(
+    eligible.map((c) => ({ ...c, priceGroup: c.nights })),
+    input.weights,
+  )
   const current = input.candidates.find((c) => c.current) ?? null
 
-  const scored: ScoredCandidate[] = eligible.map((c) => {
-    const busy = c.crowdAverage === null ? 0.5 : normalise(c.crowdAverage, lowestBusy, highestBusy)
-    const range = priceRange.get(c.nights)!
-    const price = normalise(c.priceCents, range.cheapest, range.dearest)
-    const school = mostMissed > 0 ? c.schoolDaysMissed / mostMissed : 0
-    const score = Math.round((weights.busy * busy + weights.price * price + weights.school * school) * 1000) / 1000
+  const scored: ScoredCandidate[] = eligible.map((c, i) => {
     const reasons: string[] = []
     if (c.anchor) reasons.push(`long weekend: ${c.anchor}`)
-    if (c.crowdAverage === null) reasons.push('no crowd data')
-    else if (c.daysWithData < c.daysCounted) reasons.push(`${crowdWord(c.crowdAverage)} (${c.crowdAverage} avg, ${c.daysWithData} of ${c.daysCounted} days known)`)
-    else reasons.push(`${crowdWord(c.crowdAverage)} (${c.crowdAverage} avg)`)
+    reasons.push(crowdReason(c))
     if (current && !c.current) {
       const diff = c.priceCents - current.priceCents
       if (diff === 0) reasons.push('same price as your current dates')
       else reasons.push(`${formatCents(Math.abs(diff))} ${diff < 0 ? 'under' : 'over'} your current dates`)
     } else if (c.current) reasons.push('your current dates')
-    reasons.push(c.schoolDaysMissed === 0 ? 'no school missed' : `${c.schoolDaysMissed} school ${c.schoolDaysMissed === 1 ? 'day' : 'days'} missed`)
-    return { ...c, score, reasons }
+    reasons.push(schoolReason(c.schoolDaysMissed))
+    return { ...c, score: scores[i]!, reasons }
   })
   return scored.sort((a, b) => a.score - b.score || compareDates(a.startDate, b.startDate) || a.nights - b.nights).slice(0, limit)
+}
+
+/** What a candidate brings to the score (D25, D55 (4)). A null price is not known yet. */
+export interface ScoreTerms {
+  crowdAverage: number | null
+  priceCents: Cents | null
+  /** Prices are compared only within a group: nights inside a trip, park days in Explore. */
+  priceGroup: number
+  schoolDaysMissed: number
+}
+
+/**
+ * The score of each candidate, in order, by the formula at the top of the
+ * file. An unknown price, like an unknown crowd, takes the midpoint (0.5),
+ * so a window neither hides nor wins by having no price yet (D55 (4)).
+ */
+export function scoresOf(items: readonly ScoreTerms[], weights: WeekWeights = DEFAULT_WEEK_WEIGHTS): number[] {
+  const known = items.map((c) => c.crowdAverage).filter((a): a is number => a !== null)
+  const lowestBusy = known.length > 0 ? Math.min(...known) : 0
+  const highestBusy = known.length > 0 ? Math.max(...known) : 0
+  const priceRange = new Map<number, { cheapest: Cents; dearest: Cents }>()
+  for (const c of items) {
+    if (c.priceCents === null) continue
+    const have = priceRange.get(c.priceGroup)
+    priceRange.set(c.priceGroup, have ? { cheapest: Math.min(have.cheapest, c.priceCents), dearest: Math.max(have.dearest, c.priceCents) } : { cheapest: c.priceCents, dearest: c.priceCents })
+  }
+  const mostMissed = Math.max(0, ...items.map((c) => c.schoolDaysMissed))
+  return items.map((c) => {
+    const busy = c.crowdAverage === null ? 0.5 : normalise(c.crowdAverage, lowestBusy, highestBusy)
+    const range = priceRange.get(c.priceGroup)
+    const price = c.priceCents === null || !range ? 0.5 : normalise(c.priceCents, range.cheapest, range.dearest)
+    const school = mostMissed > 0 ? c.schoolDaysMissed / mostMissed : 0
+    return Math.round((weights.busy * busy + weights.price * price + weights.school * school) * 1000) / 1000
+  })
+}
+
+/** "quiet (2.5 avg)", with how many days were known when not all were. */
+export function crowdReason(c: { crowdAverage: number | null; daysWithData: number; daysCounted: number }): string {
+  if (c.crowdAverage === null) return 'no crowd data'
+  if (c.daysWithData < c.daysCounted) return `${crowdWord(c.crowdAverage)} (${c.crowdAverage} avg, ${c.daysWithData} of ${c.daysCounted} days known)`
+  return `${crowdWord(c.crowdAverage)} (${c.crowdAverage} avg)`
+}
+
+export function schoolReason(missed: number): string {
+  return missed === 0 ? 'no school missed' : `${missed} school ${missed === 1 ? 'day' : 'days'} missed`
 }
 
 export interface BestWeeksInput extends WindowPricingInput {

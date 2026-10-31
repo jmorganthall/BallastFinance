@@ -30,9 +30,12 @@ import {
   addDays,
   crowdPullSummary,
   dollarsForInput,
+  easyStretchField,
   headCount,
   homeIsLocated,
+  layoutFromCode,
   PARK_LABELS,
+  parseParkDays,
   percentForInput,
   referenceFreshness,
   shortDate,
@@ -46,6 +49,7 @@ import {
 } from '@/domain'
 import { TravelerFields } from './traveler-fields'
 import { ParkCalendar } from './park-calendar'
+import { ExploreSection } from './explore'
 
 export const dynamic = 'force-dynamic'
 
@@ -85,9 +89,33 @@ function tripStatus(trip: Trip): { tone: 'neutral' | 'accent' | 'ahead'; label: 
 export default async function TripsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; saved?: string; month?: string; day?: string; refreshed?: string; start?: string; end?: string }>
+  searchParams: Promise<{
+    error?: string
+    saved?: string
+    month?: string
+    day?: string
+    refreshed?: string
+    start?: string
+    end?: string
+    name?: string
+    layout?: string
+    parks?: string
+    drive?: string
+  }>
 }) {
-  const { error, saved, month: monthParam, day: dayParam, refreshed, start: startParam, end: endParam } = await searchParams
+  const {
+    error,
+    saved,
+    month: monthParam,
+    day: dayParam,
+    refreshed,
+    start: startParam,
+    end: endParam,
+    name: nameParam,
+    layout: layoutParam,
+    parks: parksParam,
+    drive: driveParam,
+  } = await searchParams
   const { engine } = await requireEngine()
   const [trips, prices, home, blackouts, packTemplate, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames, pendingCrowds] =
     await Promise.all([
@@ -113,12 +141,21 @@ export default async function TripsPage({
 
   // The calendar (D29): this month unless the URL says another; a tapped day offers to start a trip there.
   const month = monthParam && /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam) ? monthParam : today.slice(0, 7)
-  const [calendar, year] = await Promise.all([engine.calendarMonth(month), engine.calendarYear()])
+  // Explore (D55): the park days asked for in the address, else the family's usual; its ranking shades the strip and numbers the month.
+  const parkDays = parseParkDays(parksParam)
+  const [explored, homeDrive] = await Promise.all([engine.explore({ parkDays }), engine.homeDrive()])
+  const ranks: Record<string, number> = {}
+  explored.top.forEach((w, i) => {
+    ranks[w.startDate] ??= i + 1
+  })
+  const lookedUp = /^\d+:\d+$/.test(driveParam ?? '') ? { miles: Number(driveParam!.split(':')[0]), minutes: Number(driveParam!.split(':')[1]) } : null
+  const [calendar, year] = await Promise.all([engine.calendarMonth(month), engine.calendarYear('wdw', explored.startSteps)])
   const isDate = (d: string | undefined): d is string => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d)
   const tappedDay = isDate(dayParam) ? dayParam : null
   const calendarHref = (m: string, d?: string) => `/trips?month=${m}${d ? `&day=${d}` : ''}#calendar`
   const newTripStart = isDate(startParam) ? startParam : ''
   const newTripEnd = isDate(endParam) ? endParam : ''
+  const newTripLayout = newTripStart && newTripEnd ? layoutFromCode(newTripStart, newTripEnd, layoutParam) : null
 
   return (
     <>
@@ -208,6 +245,7 @@ export default async function TripsPage({
           selected={tappedDay}
           monthHref={(m) => calendarHref(m)}
           dayHref={(d) => calendarHref(month, d)}
+          ranks={ranks}
           refresh={
             <form action={refreshParkDataAction}>
               <input type="hidden" name="month" value={month} />
@@ -225,6 +263,13 @@ export default async function TripsPage({
         </ParkCalendar>
       </Card>
 
+      <h2 id="explore" className={sectionTitle}>
+        Best times to go
+      </h2>
+      <Card>
+        <ExploreSection result={explored} parks={parkDays ? parksParam!.trim() : null} drive={homeDrive} lookedUp={lookedUp} />
+      </Card>
+
       {/* Wide screens: the calendar across the page, the rest in columns (D48). */}
       <div data-wide="" className="lg:columns-2 lg:gap-6 2xl:columns-3">
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
@@ -235,7 +280,7 @@ export default async function TripsPage({
             <form action={createTripAction} className="space-y-3">
               <label className="block text-sm font-medium">
                 What to call it
-                <input name="name" required placeholder="Disney, June 2027" className={input} />
+                <input name="name" required placeholder="Disney, June 2027" defaultValue={newTripLayout ? (nameParam ?? '') : ''} className={input} />
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block text-sm font-medium">
@@ -247,6 +292,13 @@ export default async function TripsPage({
                   <input name="end_date" type="date" required defaultValue={newTripEnd} className={input} />
                 </label>
               </div>
+              {newTripLayout ? (
+                <p className="rounded-lg bg-[var(--color-accent-soft)] p-2 text-xs">
+                  <input type="hidden" name="layout" value={layoutParam} />
+                  From the best times to go: the days come laid out, travel days and park days, and the trip&apos;s page can choose the parks. Change the dates and
+                  the usual days are used instead.
+                </p>
+              ) : null}
               <TravelerFields />
               <div className="grid grid-cols-2 gap-3">
                 <label className="block text-sm font-medium">
@@ -522,15 +574,42 @@ export default async function TripsPage({
 
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
           <h2 id="best-weeks" className={sectionTitle}>
-            How the best weeks are picked
+            How we like to go
           </h2>
           <Card>
             <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
-              Each trip lists its ten best weeks across the months ahead: every week of the trip&apos;s length, and every long
-              weekend a holiday or a day off school makes. Quiet counts most, then cheap, then no school missed; a week you
+              The best times to go above are trips of this shape: park days with a travel day each side. A drive longer than an easy stretch
+              can leave the evening before and finish in the morning; when a travel day would cost school, that makes the first day a quick park
+              day. Each trip also lists its ten best weeks of its own length. Quiet counts most, then cheap, then no school missed; a week you
               cannot go is left out. Change the weights to say what matters more to you.
             </p>
             <form action={saveWeekSettingsAction} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Fewest park days
+                <input name="park_days_min" inputMode="numeric" defaultValue={explored.shape.parkDaysMin} className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Most park days
+                <input name="park_days_max" inputMode="numeric" defaultValue={explored.shape.parkDaysMax} className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Adult drivers
+                <input name="adult_drivers" inputMode="numeric" defaultValue={explored.shape.adultDrivers} className={input} />
+              </label>
+              <label className="block text-xs text-[var(--color-ink-soft)]">
+                Easy stretch, hours
+                <input
+                  name="easy_stretch_hours"
+                  inputMode="decimal"
+                  defaultValue={easyStretchField(explored.shape).typed}
+                  placeholder={easyStretchField(explored.shape).usual}
+                  className={input}
+                />
+              </label>
+              <label className="col-span-2 flex items-center gap-2 text-sm sm:col-span-4">
+                <input type="checkbox" name="split_when_free" defaultChecked={explored.shape.splitWhenFree} />
+                Split a long drive whenever it costs nothing
+              </label>
               <label className="block text-xs text-[var(--color-ink-soft)]">
                 Months ahead
                 <input name="horizon_months" inputMode="numeric" defaultValue={horizonMonths} className={input} />
@@ -548,7 +627,7 @@ export default async function TripsPage({
                 <input name="weight_school" inputMode="decimal" defaultValue={weekWeights.school} className={input} />
               </label>
               <button type="submit" className={secondaryButton + ' col-span-2 sm:col-span-4'}>
-                Save how weeks are picked
+                Save how we like to go
               </button>
             </form>
           </Card>

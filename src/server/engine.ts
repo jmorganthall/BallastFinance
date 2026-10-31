@@ -41,6 +41,13 @@ import {
 } from '@/db/schema'
 import { randomUUID } from 'node:crypto'
 import {
+  DEFAULT_TRIP_SHAPE,
+  type LaidOutDay,
+  easyStretchMinutes,
+  explore,
+  validateTripShape,
+  type Explore,
+  type TripShape,
   apportion,
   debtStatuses,
   debtTermsChanged,
@@ -3338,6 +3345,8 @@ export class Engine {
     endDate: CivilDate
     travelers: Traveler[]
     car: TripCar | null
+    /** Days laid out by Explore's "Plan this" (D55 (7)); absent, the usual cut. */
+    layout?: readonly LaidOutDay[] | null
   }): Promise<Trip> {
     const name = input.name.trim()
     const travelers = input.travelers.map((t) => ({ name: t.name.trim(), band: t.band }))
@@ -3364,6 +3373,15 @@ export class Engine {
       await this.recordTripChange(tx, { trip_id: trip.id, before: null, after: tripEventShape(trip) })
       // The days and the first to-dos come with the trip (D22).
       await this.applyDayCut(tx, trip, false)
+      if (input.layout) {
+        for (const day of await this.daysOf(tx, trip.id)) {
+          const laid = input.layout.find((l) => l.date === day.date)
+          if (!laid || (laid.park === day.park && laid.notes === day.plan.notes)) continue
+          const after: TripDay = { ...day, park: laid.park, plan: { ...day.plan, notes: laid.notes } }
+          validateDayInputs(after)
+          await tx.update(tripDaysTable).set({ park: after.park, plan: after.plan }).where(eq(tripDaysTable.id, day.id))
+        }
+      }
       await this.refreshTimeline(tx, trip)
       return trip
     })
@@ -4229,6 +4247,65 @@ export class Engine {
     await this.putSetting('trip_week_weights', weights)
   }
 
+  /** The family's usual trip shape (D55): park days, drivers, the easy stretch, splitting, where we stay. */
+  async tripShape(): Promise<TripShape> {
+    const stored = await this.getSetting<Partial<TripShape> | null>('trip_shape', null)
+    return { ...DEFAULT_TRIP_SHAPE, ...(stored ?? {}) }
+  }
+
+  async setTripShape(shape: TripShape): Promise<void> {
+    validateTripShape(shape)
+    await this.putSetting('trip_shape', shape)
+  }
+
+  /**
+   * Explore (D42, D55): the best times to go in the family's shape, needing
+   * no trip. A search may ask for other park days (from the address, never
+   * saved). The facts are gathered here; the ranking is the domain's.
+   */
+  async explore(search: { parkDays?: { min: number; max: number } | null } = {}, destination: TripDestination = 'wdw'): Promise<Explore & { shape: TripShape }> {
+    const today = this.today()
+    const [shape, horizonMonths, weights, daysOff, blackoutDates, home] = await Promise.all([
+      this.tripShape(),
+      this.horizonMonths(),
+      this.weekWeights(),
+      this.schoolDaysOff(),
+      this.blackoutDates(),
+      this.homeLocation(),
+    ])
+    const parkDays = search.parkDays ?? { min: shape.parkDaysMin, max: shape.parkDaysMax }
+    const [busyness, drive] = await Promise.all([
+      this.busynessSources({ from: today, to: addDays(addMonths(today, horizonMonths), parkDays.max + 7) }, destination),
+      this.driveEstimate({ home, destination }),
+    ])
+    const result = explore({
+      today,
+      horizonMonths,
+      parkDays,
+      stretchMinutes: easyStretchMinutes(shape),
+      splitWhenFree: shape.splitWhenFree,
+      driveMinutes: drive?.minutes ?? null,
+      busyness,
+      daysOff,
+      blackoutDates,
+      weights,
+    })
+    return { ...result, shape }
+  }
+
+  /** The drive from home, looked up without a trip (D55), kept where every trip from this home reads it. */
+  async homeDrive(destination: TripDestination = 'wdw'): Promise<DriveEstimate | null> {
+    return this.driveEstimate({ home: await this.homeLocation(), destination })
+  }
+
+  async recordHomeDrive(drive: DriveEstimate, destination: TripDestination = 'wdw'): Promise<void> {
+    validateDriveEstimate(drive)
+    const home = await this.homeLocation()
+    if (!home) throw new EngineError('Set where home is first, under Trips.')
+    if (!homeIsLocated(home)) throw new EngineError('Home has not been found on the map yet, so the drive cannot be measured. Save the address again under Trips.')
+    await this.putSetting(driveSettingKey(home, destination), drive)
+  }
+
   /**
    * "Read it" on a calendar source (D25, D27). A feed is read by the iCal
    * parser; a PDF or a page has no parser, so only the reader can read it,
@@ -4793,14 +4870,14 @@ export class Engine {
   }
 
   /** The twelve-month strip above the calendar (D48), from this month on: how busy and whether we can go, a sliver a day. */
-  async calendarYear(destination: TripDestination = 'wdw'): Promise<YearStripMonth[]> {
+  async calendarYear(destination: TripDestination = 'wdw', startSteps?: Readonly<Record<CivilDate, number>>): Promise<YearStripMonth[]> {
     const fromMonth = monthOf(this.today())
     const [busyness, blackouts, trips] = await Promise.all([
       this.busynessSources(yearStripBounds(fromMonth), destination),
       this.blackoutDates(),
       this.calendarTrips(destination),
     ])
-    return yearStrip({ fromMonth, busyness, blackouts, today: this.today(), trips })
+    return yearStrip({ fromMonth, busyness, blackouts, today: this.today(), trips, startSteps })
   }
 
   /** The household's trips to a destination as the calendar draws them (D54): every one not put away, with its stage. */
