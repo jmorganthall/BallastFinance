@@ -15,12 +15,12 @@ import {
   debtStatusLine,
   debtTodoSentence,
   derivedTodoSentence,
-  householdCaughtUp,
   formatCents,
   instructionSentence,
   isTransferDay,
   moneySinceSentence,
-  transferWeeksBetween,
+  accountsToCheckIn,
+  dueWithinTransfers,
 } from '@/domain'
 
 export interface DigestInput {
@@ -79,16 +79,13 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   const today = engine.today()
 
   // A snoozed "did this get spent?" stays out of the digest until it wakes (D38).
-  const [position, outstanding, closeOuts, transferWeekday, debtState] = await Promise.all([
-    engine.position(),
-    engine.outstandingInstructions(),
+  const [{ position, debts: debtState, household }, closeOuts, transferWeekday] = await Promise.all([
+    engine.view(),
     engine.closeOutPrompts().then(awakeCloseOuts),
     engine.transferWeekday(),
-    engine.debtStatuses(),
   ])
-  // The headline is the household's (D35, D49): every account covers its
-  // dates and no debt misses its deal.
-  const caughtUp = householdCaughtUp(position, debtState)
+  // The headline and the list are the household view's (D56), as on This week.
+  const caughtUp = household.caughtUp
   const debtsNeeding = debtState.debts.filter((d) => d.status !== 'on_track')
 
   const shown = position.accounts.filter((a) => a.parts.length > 0 || a.bank !== null)
@@ -113,7 +110,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
           : a.status === 'running_down' && a.short
             ? `covers this time round, but the transfer is below what its bills cost a year; the money runs out on ${a.short.on}`
             : a.status === 'unconfirmed'
-              ? `needs ${formatCents(a.weeklyCents)}/week`
+              ? `needs ${formatCents(a.neededPerWeekCents)}/week`
               : a.horizon
                 ? `covers everything through ${a.horizon}`
                 : 'nothing due'
@@ -146,15 +143,18 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
     }
   }
 
-  const dueNow = outstanding.filter((i) => i.dueNow)
-  const comingUp = outstanding.filter((i) => !i.dueNow)
-  if (position.todos.length > 0 || debtState.todos.length > 0 || dueNow.length > 0) {
+  const comingUp = household.comingUp
+  if (household.todos.length > 0) {
     lines.push('', '## Still to do', '')
-    for (const todo of position.todos) lines.push(`- ${derivedTodoSentence(todo)}`)
-    for (const todo of debtState.todos) lines.push(`- ${debtTodoSentence(todo)}`)
-    for (const instruction of dueNow) {
+    for (const item of household.todos) {
       lines.push(
-        `- ${instructionSentence(instruction, transferWeekday)}${instruction.note ? ` (${instruction.note})` : ''}`,
+        `- ${
+          item.from === 'position'
+            ? derivedTodoSentence(item.todo)
+            : item.from === 'debt'
+              ? debtTodoSentence(item.todo)
+              : `${instructionSentence(item.ask, transferWeekday)}${item.ask.note ? ` (${item.ask.note})` : ''}`
+        }`,
       )
     }
   }
@@ -162,9 +162,8 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   // same ask This week makes, in the same words, held back the same way until
   // nothing else that moves money is left to do.
   const toCount = position.accounts.filter((a) => a.money.countOwed)
-  const moneyToDo = position.todos.length > 0 || debtState.todos.some((t) => t.blocking) || dueNow.length > 0
   if (toCount.length > 0) {
-    if (moneyToDo) {
+    if (household.moneyToDo) {
       lines.push(`- When these are done, update what ${toCount.map((a) => a.account.name).join(' and ')} ${toCount.length === 1 ? 'holds' : 'hold'}.`)
     } else {
       lines.push('', '## Update what these accounts hold', '')
@@ -181,12 +180,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   }
 
   // Anything landing in the next fortnight, so nothing arrives as a surprise.
-  const upcoming = position.accounts
-    .flatMap((a) => a.parts)
-    .filter((part) => {
-      const weeks = transferWeeksBetween(today, part.lineItem.dueDate, transferWeekday)
-      return weeks > 0 && weeks <= 2
-    })
+  const upcoming = dueWithinTransfers(position, 2, transferWeekday)
   if (upcoming.length > 0) {
     lines.push('', '## Coming up in the next two weeks', '')
     for (const part of upcoming) {
@@ -194,13 +188,14 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
     }
   }
 
-  const blocking =
-    position.todos.filter((t) => t.blocking).length + debtState.todos.filter((t) => t.blocking).length + dueNow.length
+  const blocking = household.blockingCount
+  const optional = household.optionalCount
   const summary =
     shown.length === 0 && debtsNeeding.length === 0
       ? 'Ballast: nothing to move this week.'
       : caughtUp
         ? 'Ballast: all caught up.' +
+          (optional > 0 ? ` ${optional} optional to-do${optional === 1 ? '' : 's'}.` : '') +
           (closeOuts.length > 0 ? ` ${closeOuts.length} thing(s) need confirming.` : '')
         : `Ballast: ${blocking} thing(s) to do this week` +
           (closeOuts.length > 0 ? `, and ${closeOuts.length} to confirm.` : '.')
@@ -220,7 +215,7 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
         name: a.account.name,
         status: a.status,
         bank_per_week_cents: a.bank?.perWeekCents ?? null,
-        needs_per_week_cents: a.weeklyCents,
+        needs_per_week_cents: a.neededPerWeekCents,
         likely_holds_cents: a.money.totalCents,
         short_on: a.short?.on ?? null,
       })),
@@ -232,8 +227,8 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
         owed_at_end_cents: view.miss?.owedAtEndCents ?? null,
         clear_per_month_cents: view.miss?.clearPerMonthCents ?? null,
       })),
-      todo_count: position.todos.length + debtState.todos.length + dueNow.length,
-      outstanding_count: outstanding.length,
+      todo_count: household.todos.length,
+      outstanding_count: household.todos.filter((t) => t.from === 'ask').length + comingUp.length,
       close_out_count: closeOuts.length,
     },
   }
@@ -268,18 +263,10 @@ export async function buildCheckInNudge(
 ): Promise<NotificationPayload | null> {
   const engine = engineFor(input)
   const afterWeeks = input.afterWeeks ?? (await engine.getSetting('check_in_nudge_weeks', 2))
-  const today = engine.today()
 
   const [position, transferWeekday] = await Promise.all([engine.position(), engine.transferWeekday()])
-  const accounts = position.accounts.filter((a) => a.parts.length > 0)
-  if (accounts.length === 0) return null
-
-  // The last count is the position's (D35): the one it starts from, chosen
-  // by the order the events were recorded.
-  const stale = accounts.filter(
-    ({ money }) =>
-      money.from !== 'count' || transferWeeksBetween(money.on!, today, transferWeekday) >= afterWeeks,
-  )
+  if (!position.accounts.some((a) => a.parts.length > 0)) return null
+  const stale = accountsToCheckIn(position, afterWeeks, transferWeekday)
   if (stale.length === 0) return null
 
   return {
@@ -306,7 +293,7 @@ export async function buildPromoWarnings(input: DigestInput): Promise<Notificati
     kind: 'promo_expiry_warning' as const,
     householdId: input.householdId,
     summary: `Ballast: ${warning.debt.name} stops being 0% on ${warning.untilDate}.`,
-    body: `**${warning.debt.name}** has ${formatCents(warning.debt.balanceCents)} on a promotional rate that ends ${warning.untilDate}.\n\nTo clear it before interest starts, it needs ${formatCents(warning.monthlyToClearCents)} a month from here. After that date it costs ${(warning.debt.aprBasisPoints / 100).toFixed(2)}%.`,
+    body: `**${warning.debt.name}** has ${formatCents(warning.onDealCents)} on a promotional rate that ends ${warning.untilDate}, and the payments set up now will not clear it in time.\n\nTo clear it before interest starts, it needs ${formatCents(warning.monthlyToClearCents)} a month from here. After that date it costs ${(warning.debt.aprBasisPoints / 100).toFixed(2)}%.`,
     link: `${input.baseUrl}/debts`,
     detail: {
       debt_id: warning.debt.id,

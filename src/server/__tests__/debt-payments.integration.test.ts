@@ -169,7 +169,9 @@ describeDb('debt payments reach the balance', () => {
   it("a debt's history lists what was stated, paid and changed, oldest first (D49 (11))", async () => {
     const shield = await balanceOf('Shield 0568')
     const history = await engine.debtHistory(shield.id)
-    expect(history.map((e) => e.kind).sort()).toEqual(['paid', 'paid_todo', 'paid_todo', 'stated'])
+    expect(history.map((e) => e.kind).sort()).toEqual(['paid', 'paid_todo', 'paid_todo', 'stated', 'stated'])
+    // The balance it was entered with comes first, dated by when it was true (Phase 4).
+    expect(history[0]).toEqual({ on: STATED_ON, kind: 'stated', amountCents: 670239 })
     expect(history).toContainEqual({ on: TODAY, kind: 'stated', amountCents: 600000 })
     expect(history).toContainEqual({ on: TODAY, kind: 'paid', amountCents: 2500 })
     expect(history).toContainEqual({ on: TODAY, kind: 'paid_todo', amountCents: 47500 })

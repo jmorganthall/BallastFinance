@@ -36,6 +36,17 @@ export interface FormState {
   problems: { path: string; message: string }[]
 }
 
+/**
+ * Every write refreshes every screen. Every figure on a page is worked out
+ * from the facts when the page is drawn, so what goes stale is only
+ * the browser's copy of a page already visited; refreshing them all after
+ * any change means no screen can show a figure from before it, whichever
+ * pages that change happens to touch.
+ */
+function afterWrite(): void {
+  revalidatePath('/', 'layout')
+}
+
 export async function createPackageAction(
   _previous: FormState,
   formData: FormData,
@@ -70,8 +81,7 @@ export async function createPackageAction(
 
   if (!result.ok) return { problems: result.problems }
 
-  revalidatePath('/packages')
-  revalidatePath('/')
+  afterWrite()
   redirect(`/packages/${result.packageId}`)
 }
 
@@ -135,9 +145,7 @@ export async function commitPackageAction(formData: FormData): Promise<void> {
     if (error instanceof EngineError) fail(error.message)
     throw error
   }
-  revalidatePath('/')
-  revalidatePath('/packages')
-  revalidatePath(`/packages/${packageId}`)
+  afterWrite()
 }
 
 /**
@@ -189,9 +197,7 @@ export async function updateLineItemAction(formData: FormData): Promise<void> {
     throw error
   }
 
-  revalidatePath('/')
-  revalidatePath('/packages')
-  revalidatePath(`/packages/${packageId}`)
+  afterWrite()
   redirect(`/packages/${packageId}?saved=1`)
 }
 
@@ -228,9 +234,7 @@ export async function addLineItemAction(formData: FormData): Promise<void> {
     throw error
   }
 
-  revalidatePath('/')
-  revalidatePath('/packages')
-  revalidatePath(`/packages/${packageId}`)
+  afterWrite()
   redirect(`/packages/${packageId}?saved=1`)
 }
 
@@ -239,9 +243,7 @@ export async function retireLineItemAction(formData: FormData): Promise<void> {
   const lineItemId = String(formData.get('line_item_id'))
   const packageId = String(formData.get('package_id'))
   await engine.retireLineItem(lineItemId)
-  revalidatePath('/')
-  revalidatePath('/packages')
-  revalidatePath(`/packages/${packageId}`)
+  afterWrite()
 }
 
 export async function renamePackageAction(formData: FormData): Promise<void> {
@@ -256,8 +258,7 @@ export async function renamePackageAction(formData: FormData): Promise<void> {
     }
     throw error
   }
-  revalidatePath('/packages')
-  revalidatePath(`/packages/${packageId}`)
+  afterWrite()
   redirect(`/packages/${packageId}?saved=1`)
 }
 
@@ -265,9 +266,7 @@ export async function retirePackageAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const packageId = String(formData.get('package_id'))
   await engine.retirePackage(packageId)
-  revalidatePath('/')
-  revalidatePath('/packages')
-  revalidatePath(`/packages/${packageId}`)
+  afterWrite()
   redirect('/packages')
 }
 
@@ -287,9 +286,7 @@ export async function deletePackageAction(formData: FormData): Promise<void> {
     }
     throw error
   }
-  revalidatePath('/')
-  revalidatePath('/packages')
-  revalidatePath('/check-in')
+  afterWrite()
   redirect('/packages')
 }
 
@@ -307,9 +304,7 @@ export async function confirmTransferAction(formData: FormData): Promise<void> {
     reserveAccountId: String(formData.get('reserve_account_id') ?? ''),
     perWeekCents,
   })
-  revalidatePath('/')
-  revalidatePath('/check-in')
-  revalidatePath('/packages')
+  afterWrite()
 }
 
 /** "Yes, I moved it" for the one-time move the position asks for (D35). */
@@ -322,9 +317,7 @@ export async function confirmMoveInAction(formData: FormData): Promise<void> {
     reserveAccountId: String(formData.get('reserve_account_id') ?? ''),
     amountCents,
   })
-  revalidatePath('/')
-  revalidatePath('/check-in')
-  revalidatePath('/packages')
+  afterWrite()
 }
 
 /**
@@ -342,9 +335,7 @@ export async function confirmMoveBetweenAction(formData: FormData): Promise<void
     toAccountId: String(formData.get('reserve_account_id') ?? ''),
     amountCents,
   })
-  revalidatePath('/')
-  revalidatePath('/check-in')
-  revalidatePath('/packages')
+  afterWrite()
 }
 
 export async function createReserveAccountAction(formData: FormData): Promise<void> {
@@ -364,9 +355,7 @@ export async function createReserveAccountAction(formData: FormData): Promise<vo
       redirect(`/settings?error=${encodeURIComponent((error as Error).message)}`)
     }
   }
-  revalidatePath('/packages/new')
-  revalidatePath('/settings')
-  revalidatePath('/')
+  afterWrite()
 }
 
 // ---------------------------------------------------------------- Phase B
@@ -395,8 +384,7 @@ export async function confirmBalancesAction(formData: FormData): Promise<void> {
     }
   }
 
-  revalidatePath('/')
-  revalidatePath('/check-in')
+  afterWrite()
   // The same form lives on This week (D34); it lands back where it was.
   redirect(formData.get('back') === 'home' ? '/?balances=1' : '/check-in?done=1')
 }
@@ -415,9 +403,7 @@ export async function confirmInstructionAction(formData: FormData): Promise<void
     instructionId: String(formData.get('instruction_id')),
     actualAmountCents: actual ?? undefined,
   })
-  revalidatePath('/')
-  revalidatePath('/debts')
-  revalidatePath('/check-in')
+  afterWrite()
 }
 
 /**
@@ -436,8 +422,7 @@ export async function setDealChargedBackAction(formData: FormData): Promise<void
       rule.chargedBack === undefined ? { ...rule, chargedBack: answer === 'yes' } : rule,
     ),
   })
-  revalidatePath('/')
-  revalidatePath('/debts')
+  afterWrite()
 }
 
 /**
@@ -454,9 +439,7 @@ export async function raiseDebtPaymentAction(formData: FormData): Promise<void> 
     redirect(`/?error=${encodeURIComponent('Enter what you pay each month now, like 478.75.')}`)
   }
   await engine.updateDebt(debtId, { plannedPaymentCents: amountCents })
-  revalidatePath('/')
-  revalidatePath('/debts')
-  revalidatePath('/allocate')
+  afterWrite()
 }
 
 /**
@@ -467,8 +450,7 @@ export async function raiseDebtPaymentAction(formData: FormData): Promise<void> 
 export async function endInstructionAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   await engine.endInstruction({ instructionId: String(formData.get('instruction_id')) })
-  revalidatePath('/')
-  revalidatePath('/check-in')
+  afterWrite()
 }
 
 /** The round a "did this get spent?" form names (D53): the part and the round's due date. */
@@ -480,11 +462,6 @@ function roundOf(formData: FormData): { lineItemId: string; roundDue: string | n
 }
 
 /** After a round changes, every screen that reads the position is stale. */
-function revalidateRounds(): void {
-  revalidatePath('/')
-  revalidatePath('/packages')
-  revalidatePath('/check-in')
-}
 
 /**
  * "Record spend" (D53 (2)): money that went out against a round, any time.
@@ -514,7 +491,7 @@ export async function recordSpendAction(formData: FormData): Promise<void> {
     if (!(error instanceof EngineError)) throw error
     redirect(`${back}?snooze_error=${encodeURIComponent(error.message)}&item=${key}`)
   }
-  revalidateRounds()
+  afterWrite()
   redirect(back)
 }
 
@@ -530,7 +507,7 @@ export async function finishRoundAction(formData: FormData): Promise<void> {
     if (!(error instanceof EngineError)) throw error
     redirect(`${back}?snooze_error=${encodeURIComponent(error.message)}&item=${key}`)
   }
-  revalidateRounds()
+  afterWrite()
   redirect(back)
 }
 
@@ -547,7 +524,7 @@ export async function saveRoundBackUpAction(formData: FormData): Promise<void> {
     if (!(error instanceof EngineError)) throw error
     redirect(`${back}?snooze_error=${encodeURIComponent(error.message)}&item=${key}`)
   }
-  revalidateRounds()
+  afterWrite()
   redirect(back)
 }
 
@@ -562,7 +539,7 @@ export async function undoRoundEventAction(formData: FormData): Promise<void> {
     if (!(error instanceof EngineError)) throw error
     redirect(`${back}?error=${encodeURIComponent(error.message)}`)
   }
-  revalidateRounds()
+  afterWrite()
   redirect(back)
 }
 
@@ -604,8 +581,7 @@ export async function snoozeCloseOutAction(formData: FormData): Promise<void> {
           : 'That did not save. Try again.'
     redirect(`${back}?snooze_error=${encodeURIComponent(message)}&item=${key}`)
   }
-  revalidatePath('/')
-  revalidatePath('/packages')
+  afterWrite()
   redirect(`${back}?snoozed=${key}&until=${until}`)
 }
 
@@ -620,8 +596,7 @@ export async function wakeCloseOutAction(formData: FormData): Promise<void> {
     // Answered in the meantime: there is nothing left to wake.
     if (!(error instanceof EngineError)) throw error
   }
-  revalidatePath('/')
-  revalidatePath('/packages')
+  afterWrite()
   redirect(snoozeBack(formData))
 }
 
@@ -653,9 +628,7 @@ export async function runAllocationAction(formData: FormData): Promise<void> {
     cover,
     ...(from ? { sourceAccountId: from } : {}),
   })
-  revalidatePath('/')
-  revalidatePath('/allocate')
-  revalidatePath('/check-in')
+  afterWrite()
   redirect('/')
 }
 
@@ -695,8 +668,7 @@ export async function createDebtAction(
     throw error
   }
 
-  revalidatePath('/debts')
-  revalidatePath('/allocate')
+  afterWrite()
   return { problems: [], saved: previous.saved + 1 }
 }
 
@@ -732,18 +704,14 @@ export async function updateDebtAction(
     throw error
   }
 
-  revalidatePath('/debts')
-  revalidatePath('/allocate')
-  revalidatePath('/')
+  afterWrite()
   return { problems: [], saved: previous.saved + 1 }
 }
 
 export async function removeDebtAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   await engine.removeDebt(String(formData.get('debt_id')))
-  revalidatePath('/debts')
-  revalidatePath('/allocate')
-  revalidatePath('/')
+  afterWrite()
 }
 
 export async function confirmDebtPaymentAction(formData: FormData): Promise<void> {
@@ -757,8 +725,7 @@ export async function confirmDebtPaymentAction(formData: FormData): Promise<void
   }
 
   await engine.confirmDebtPayment({ debtId, amountCents: amountCents! })
-  revalidatePath('/debts')
-  revalidatePath('/')
+  afterWrite()
 }
 
 /**
@@ -777,9 +744,7 @@ export async function updateDebtBalanceAction(formData: FormData): Promise<void>
   }
 
   await engine.updateDebtBalance({ debtId, balanceCents: balanceCents! })
-  revalidatePath('/debts')
-  revalidatePath('/allocate')
-  revalidatePath('/')
+  afterWrite()
   // From This week's "Check the balance" to-do, or the share-out's warning.
   const back = formData.get('back')
   if (back === 'home') redirect('/')
@@ -792,7 +757,7 @@ export async function setPriorityWeightAction(formData: FormData): Promise<void>
   if (Number.isFinite(weight) && weight >= 0 && weight <= 1) {
     await engine.putSetting('priority_weights', weight)
   }
-  revalidatePath('/debts')
+  afterWrite()
 }
 
 // ---------------------------------------------------------------- settings
@@ -823,8 +788,7 @@ export async function saveAllocationRulesAction(formData: FormData): Promise<voi
     }
   }
 
-  revalidatePath('/settings')
-  revalidatePath('/allocate')
+  afterWrite()
   redirect('/settings?saved=1')
 }
 
@@ -920,11 +884,7 @@ export async function sheetImportAction(
   }
 
   const result = await engine.importSheet(parsed)
-  revalidatePath('/')
-  revalidatePath('/packages')
-  revalidatePath('/debts')
-  revalidatePath('/check-in')
-  revalidatePath('/settings')
+  afterWrite()
   return { phase: 'done', ...result }
 }
 
@@ -942,7 +902,7 @@ export async function saveNotificationPrefsAction(formData: FormData): Promise<v
     ...prefs,
     [viewer.userId]: formData.get('muted') !== 'on',
   })
-  revalidatePath('/settings')
+  afterWrite()
   redirect('/settings?saved=1')
 }
 
@@ -955,8 +915,7 @@ export async function saveTransferRoundingAction(formData: FormData): Promise<vo
     redirect(`/settings?error=${encodeURIComponent('Enter the step as an amount, like 10, or 0 for the exact figure.')}`)
   }
   await engine.putSetting('transfer_round_up_cents', cents)
-  revalidatePath('/')
-  revalidatePath('/settings')
+  afterWrite()
   redirect('/settings?saved=1')
 }
 
@@ -973,7 +932,7 @@ export async function saveTransferWeekdayAction(formData: FormData): Promise<voi
   } catch {
     redirect(`/settings?error=${encodeURIComponent('Pick the day of the week the transfer runs.')}`)
   }
-  revalidatePath('/', 'layout')
+  afterWrite()
   redirect('/settings?saved=1')
 }
 
@@ -987,7 +946,7 @@ export async function saveNudgeSettingsAction(formData: FormData): Promise<void>
   if (Number.isInteger(lead) && lead >= 1 && lead <= 52) {
     await engine.putSetting('promo_lead_weeks', lead)
   }
-  revalidatePath('/settings')
+  afterWrite()
   redirect('/settings?saved=1')
 }
 
@@ -997,7 +956,7 @@ const EQUITY_PATH = '/debts/equity'
 
 /** Back to the equity screen, with a message when something was refused. */
 function backToEquity(message: string | null): never {
-  revalidatePath(EQUITY_PATH)
+  afterWrite()
   redirect(message ? `${EQUITY_PATH}?error=${encodeURIComponent(message)}` : `${EQUITY_PATH}?saved=1`)
 }
 
@@ -1101,8 +1060,7 @@ export async function saveHomeBuyingAction(formData: FormData): Promise<void> {
 
 /** Back to a trip, with a message when something was refused. */
 function backToTrip(tripId: string, message: string | null, query: string = 'saved=1'): never {
-  revalidatePath('/trips')
-  revalidatePath(`/trips/${tripId}`)
+  afterWrite()
   redirect(message ? `/trips/${tripId}?error=${encodeURIComponent(message)}` : `/trips/${tripId}?${query}`)
 }
 
@@ -1144,10 +1102,10 @@ export async function createTripAction(formData: FormData): Promise<void> {
     return engine.createTrip({ ...facts, layout: layoutFromCode(facts.startDate, facts.endDate, String(formData.get('layout') ?? '')) })
   })
   if (made.message !== null) {
-    revalidatePath('/trips')
+    afterWrite()
     redirect(`/trips?error=${encodeURIComponent(made.message)}`)
   }
-  revalidatePath('/trips')
+  afterWrite()
   redirect(`/trips/${made.value.id}`)
 }
 
@@ -1168,7 +1126,7 @@ export async function retireTripAction(formData: FormData): Promise<void> {
   const tripId = String(formData.get('trip_id'))
   const done = await tripRefusalOf(() => engine.retireTrip(tripId))
   if (done.message !== null) backToTrip(tripId, done.message)
-  revalidatePath('/trips')
+  afterWrite()
   redirect('/trips')
 }
 
@@ -1458,10 +1416,7 @@ export async function sendToPlansAction(formData: FormData): Promise<void> {
   const sent = await tripRefusalOf(() => engine.sendVariantToPlans(tripId, variantId, { defaultAccountId: account }))
   if (sent.message !== null) backToTrip(tripId, sent.message)
   if (!sent.value.ok) backToTrip(tripId, sent.value.problems.map((p) => p.message).join(' '))
-  revalidatePath('/')
-  revalidatePath('/packages')
-  revalidatePath('/trips')
-  revalidatePath(`/trips/${tripId}`)
+  afterWrite()
   redirect(`/packages/${sent.value.packageId}`)
 }
 
@@ -1483,7 +1438,7 @@ export async function saveReferencePricesAction(formData: FormData): Promise<voi
     })
     await engine.setReferencePrices(next)
   })
-  revalidatePath('/trips')
+  afterWrite()
   redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
 }
 
@@ -1497,7 +1452,7 @@ export async function saveHomeAddressAction(formData: FormData): Promise<void> {
   const { geocodeAddress, tripFetchEnabled } = await import('@/server/trip-fetch')
   const address = String(formData.get('address') ?? '').trim()
   const backToTrips = (message: string | null, query: string = 'saved=1'): never => {
-    revalidatePath('/trips')
+    afterWrite()
     redirect(message ? `/trips?error=${encodeURIComponent(message)}` : `/trips?${query}`)
   }
   if (!address) backToTrips('Type the address home is at.')
@@ -1534,7 +1489,7 @@ export async function saveBlackoutDatesAction(formData: FormData): Promise<void>
     }
     await engine.setBlackoutDates(ranges.map((r) => ({ ...r, to: r.to || r.from })))
   })
-  revalidatePath('/trips')
+  afterWrite()
   redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}` : '/trips?saved=1')
 }
 
@@ -1545,7 +1500,7 @@ export async function saveParkDataSourcesAction(formData: FormData): Promise<voi
   const waitParkNames: Record<string, string> = {}
   for (const park of parks) waitParkNames[park] = String(formData.get(`wait_name_${park}`) ?? '')
   const done = await tripRefusalOf(() => engine.setParkDataSources({ outlookUrl: String(formData.get('outlook_url') ?? ''), waitParkNames }))
-  revalidatePath('/trips')
+  afterWrite()
   redirect(done.message ? `/trips?error=${encodeURIComponent(done.message)}#sources` : '/trips?saved=1#sources')
 }
 
@@ -1777,8 +1732,7 @@ export async function toggleTaskAction(formData: FormData): Promise<void> {
   const taskId = String(formData.get('task_id'))
   const done = await tripRefusalOf(() => (formData.get('done') === '1' ? engine.untickTask(tripId, taskId) : engine.tickTask(tripId, taskId)))
   if (formData.get('back') === 'home') {
-    revalidatePath('/')
-    revalidatePath(`/trips/${tripId}`)
+    afterWrite()
     redirect(done.message ? `/trips/${tripId}?error=${encodeURIComponent(done.message)}` : '/')
   }
   backToTrip(tripId, done.message, 'saved=1#to-do')
@@ -1802,7 +1756,7 @@ export async function rebuildTimelineAction(formData: FormData): Promise<void> {
 
 /** Back to the Trips page, with a message when something was refused, and an anchor to land on. */
 function backToTrips(message: string | null, query: string = 'saved=1', anchor: string = ''): never {
-  revalidatePath('/trips')
+  afterWrite()
   redirect(message ? `/trips?error=${encodeURIComponent(message)}${anchor}` : `/trips?${query}${anchor}`)
 }
 
@@ -2016,7 +1970,7 @@ async function thenBack(path: string, run: (engine: Engine) => Promise<string | 
     if (!(e instanceof EngineError)) throw e
     error = e.message
   }
-  revalidatePath(path.split('#')[0]!)
+  afterWrite()
   backWith(path, error ? { error } : { saved: saved || '1' })
 }
 
@@ -2158,7 +2112,7 @@ async function onIncomeForm(
     error = e.message
   }
   if (error) return { error, values: postedValues(formData), attempt: previous.attempt + 1 }
-  revalidatePath('/income')
+  afterWrite()
   backWith(back, { saved: '1' })
 }
 
@@ -2294,7 +2248,7 @@ export async function updateNowAction(): Promise<UpdateNowResult> {
     elapsedMs: call.elapsedMs,
     verdict: failed ? 'failed' : undefined,
   })
-  revalidatePath('/settings')
+  afterWrite()
   if (call.outcome === 'rejected') {
     const hint = call.httpStatus === 401 || call.httpStatus === 403 ? ' — check WATCHTOWER_TOKEN' : ''
     return { started: false, message: `Watchtower turned it down (HTTP ${call.httpStatus})${hint}. Nothing was updated.` }
@@ -2334,5 +2288,5 @@ export async function testUpdateConnectionAction(): Promise<UpdateConnectionTest
 export async function dismissBackupNoticeAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   await engine.dismissBackupNotice(String(formData.get('backup_id')))
-  revalidatePath('/', 'layout')
+  afterWrite()
 }

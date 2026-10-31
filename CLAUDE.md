@@ -10,6 +10,9 @@ Claude Docs document that changes as the build teaches us things — see
 here. Read it live before making a design decision; do not trust a summary,
 including this file.
 
+[docs/data-flow.md](docs/data-flow.md) maps how a figure gets from a fact to a
+screen, what re-derives when, and the places that still bend the layers.
+
 ## The four rules that hold the shape
 
 Everything else is detail. These are from PRD §10 and the abstract's data-model
@@ -39,7 +42,7 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `trip-shape.ts` is the family's trip shape (D55): park days, the easy stretch, the split-drive rules and the "Plan this" layout. `explore.ts` ranks the best times to go in that shape, with no trip, and shades the year strip. `night-cost.ts` is what a night costs (D55 (5)): the trust ladder, a window's price, and the resortings.com parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `ledger.ts` is the middle layer: `ledgerOf` puts the household's events in order once (counts, transfers, moves, spends, rounds, snoozes, instructions, debt payments and history) and every reader of those reads it, through `Engine.ledger()`. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `trip-shape.ts` is the family's trip shape (D55): park days, the easy stretch, the split-drive rules and the "Plan this" layout. `explore.ts` ranks the best times to go in that shape, with no trip, and shades the year strip. `night-cost.ts` is what a night costs (D55 (5)): the trust ladder, a window's price, and the resortings.com parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `self-update.ts` is the one call to the household's own Watchtower on the LAN ("Update now"), off unless `WATCHTOWER_URL` is set; `db-backup.ts` runs `pg_dump` for the bootstrap. `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -79,6 +82,19 @@ principles, and they are non-negotiable.
 - **Events are append-only**, enforced by a revoked privilege *and* a trigger
   that fires regardless of role. Never add an UPDATE or DELETE against `events`;
   record a correcting event instead.
+- **Every write to a money fact records its event in the same transaction**
+  (the layering plan's Phase 4, migration 0027). Creating an account, a plan
+  or a debt is `account_added`, `package_created` (the draft as made) or
+  `debt_added` (its terms and the balance stated with it, which opens its
+  history); a new plan name is `package_renamed`; every edit to a part is a
+  `line_item_changed`, a new label or recurrence beside equal money
+  snapshots; a part moved on by its rounds is one with `reason: 'rounds'`;
+  the zero a clearing payment writes is a `debt_balance_updated` with
+  `cleared_by_payment` (the history lists the payment, not a second
+  balance). Use `recordEvent(tx, kind, payload)`. `layers.test.ts` fails on
+  an engine method that writes `reserve_accounts`, `packages`,
+  `line_items` or `debts` without it. Settings append: a change is a new
+  row, two on one day are two, and the latest written is the setting.
 - **The app connects as a restricted role** (`ballast_app`); migrations run as
   the owner. Giving the app the owner's credentials silently undoes the
   append-only guarantee. The bootstrap sets that role's password from
@@ -269,10 +285,41 @@ principles, and they are non-negotiable.
   is a comparison and never a target: nothing judges a plan
   by it, and no screen says "behind", "lent" or "guaranteed". This brings
   back the line D40 (5) took off the chart, with that job and that name.
+- **One to-do list, and an open ask is money on its way** (PRD D56, rev
+  110). This week, the digest and the share-out read one household view,
+  `householdView` in `src/domain/household-view.ts` through `Engine.view()`:
+  the position's to-dos, the debts' that block, the asks still open (a
+  share-out's, as `HouseholdTodo` with `from: 'ask'`), then the debts'
+  housekeeping, with `caughtUp`, `blockingCount`, `optionalCount`,
+  `moneyToDo`, `needsAttention` and the `headline`. No screen adds, drops,
+  counts or orders to-dos itself. An ask still open (`onItsWayOf` in
+  `instructions.ts`: every open one-time move into an account but a
+  left-over, less every open move out; every open "Pay $X toward" a debt)
+  changes no balance and no status, but every to-do is worked out as if it
+  arrives: `PositionInput.onItsWay` goes through the same `pendingCents`
+  path as the move between accounts (a Short account takes only what it
+  would still miss, a lender lends only what it has to spare both on the
+  facts and with its asks done), and `DebtView.missAfterAsks` sizes "Raise
+  the monthly payment" and the share-out's debt shortfall.
+  `AccountPosition.onItsWayCents` says how much, and the "Fix on This week"
+  line names it. An open ask blocks "All caught up" exactly when its account
+  or debt is not On track; the rest are optional. Invariant 10 in
+  `position.test.ts`: with random open asks every balance and status is
+  unchanged and the to-dos equal the to-dos as if the asks were done.
+  Migration 0026 ended every ask from before D35 still open. A screen, a
+  component and the digest may not import the calculations behind a money
+  figure (`src/__tests__/layers.test.ts`); a figure a screen needs belongs
+  in the domain (`planRows`, `PlanChart.endsShortCents`,
+  `PartPosition.datePassed`, `DebtView.payoff`, `currentDeal`,
+  `dealEndMark`, `dueWithinTransfers`, `accountsToCheckIn`).
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
   order the events were recorded (`recorded_at`, then id), answered only by
-  `Engine.positionInput`; `doneMoveOf` decides whether a confirmation is a
+  the ledger (`ledgerOf` in `src/domain/ledger.ts`, read in one snapshot by
+  `Engine.positionInput`): an instruction's first confirmation is the one
+  that counts, and a spend is in the account recorded on it
+  (`reserve_account_id`, falling back to its part's account for one recorded
+  before spends carried it); `doneMoveOf` decides whether a confirmation is a
   move on the ledger (any move into a reserve account or out of it since
   D35; never a "left over" ask, a transfer change or a bump). There is no
   second since-count ledger: the words come from the position's own
@@ -288,9 +335,8 @@ principles, and they are non-negotiable.
   do, with the position's likely balance in the box, through the ordinary
   `confirmBalancesAction` (with `back=home`). The last count is
   `money.from === 'count'` and `money.on`; the check-in nudge reads it
-  there. An open "cover what is short" move, like an old catch-up, stands in
-  for the one-time move the position would ask for, so the same money is
-  never asked for twice. "Record spend" left blank records what the round
+  there. An ask still open is money on its way (D56 (2)), never money
+  there: see the D56 entry below. "Record spend" left blank records what the round
   still holds (D53), read by the engine, never a figure the form posted. The to-do
   sentence marks the account the money goes to, and the screen sets it in
   bold and the accent colour.
@@ -680,7 +726,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 948 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 971 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

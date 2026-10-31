@@ -167,11 +167,12 @@ export interface PositionInput {
   /** Spends confirmed since each account's last count, as money out (positive amounts). */
   spendsSinceCount?: readonly AccountMovement[]
   /**
-   * Catch-up moves into an account still open on the to-do list from before
-   * D35. They count against the one-time move this derives, so the same
-   * money is never asked for twice.
+   * Money on its way (D56 (2)): per account, the asks still open to move
+   * money into it, less those to move money out of it, signed. Never money
+   * there -- no balance and no status reads it -- but every to-do is worked
+   * out as if it arrives, so the same money is never asked for twice.
    */
-  openMovesIn?: readonly AccountMovement[]
+  onItsWay?: readonly AccountMovement[]
   /** The household's step the bank figure is rounded up to; zero for exact. */
   transferRoundUpCents?: Cents
   /** The day the recurring transfer runs (D31). Absent is the default, for pure tests. */
@@ -268,6 +269,11 @@ export interface PartPosition {
    * What "+ $Y to make up" says.
    */
   shortByCents: Cents
+  /**
+   * Its date has passed and it is not all there and waiting (D38): the
+   * "Date has passed" mark. A part Ready to spend never carries it.
+   */
+  datePassed: boolean
 }
 
 export interface AccountMoneyToday {
@@ -323,6 +329,12 @@ export interface AccountPosition {
   /** Every live part in the account, soonest due first. */
   parts: PartPosition[]
   money: AccountMoneyToday
+  /**
+   * Money asked for and not yet moved (D56 (2)): open asks into the account
+   * less those out of it. Never in `money`; every ask on this account is
+   * worked out as if it arrives.
+   */
+  onItsWayCents: Cents
   /** The furthest next due date: how far the run-forward looks. Null with no parts. */
   horizon: CivilDate | null
   /** The parts' steady shares added up. */
@@ -1103,7 +1115,11 @@ function accountPosition(args: {
   input: PositionInput
   packagesById: ReadonlyMap<Id, Package>
   transferWeekday: Weekday
-  /** Money a surplus move into (+) or out of (−) the account would make; for its to-dos only. */
+  /**
+   * Money asked for but not yet moved into (+) or out of (−) the account --
+   * open asks (D56) and the surplus moves this read asks for (D40) -- for
+   * its to-dos only.
+   */
   pendingCents?: Cents
 }): AccountPosition {
   const { account, frames, input, transferWeekday } = args
@@ -1128,8 +1144,8 @@ function accountPosition(args: {
     today,
   })
 
-  // A surplus move between accounts this read is asking for (D40): its to-dos
-  // are worked out as if it were done, and nothing else is.
+  // Money asked for and not yet moved (D40, D56): its to-dos are worked out
+  // as if it were done, and nothing else is.
   if (args.pendingCents) {
     money.movesSinceCents += args.pendingCents
     if (args.pendingCents > 0) money.movesInCents += args.pendingCents
@@ -1280,15 +1296,7 @@ function accountPosition(args: {
       ? { cents: Math.min(bank.perWeekCents, lowerToCents), exactCents: withoutMoveExactCents }
       : { cents: weeklyCents, exactCents: level.weeklyExactCents }
 
-  // A catch-up move still open from before D35 counts against it, so the
-  // same money is never asked for twice.
-  const openIn = (input.openMovesIn ?? [])
-    .filter((m) => m.accountId === account.id)
-    .reduce((s, m) => s + m.amountCents, 0)
-  const oneTimeMove =
-    moveNeeded && moveNeeded.amountCents - openIn > 0
-      ? { amountCents: moveNeeded.amountCents - openIn, byDate: moveNeeded.byDate }
-      : null
+  const oneTimeMove = moveNeeded
 
   const parts: PartPosition[] = [...frames]
     .sort(
@@ -1317,6 +1325,7 @@ function accountPosition(args: {
         tickCents,
         status: partStatus,
         shortByCents: partStatus === 'short' ? Math.max(0, tickCents - countedCents) : 0,
+        datePassed: f.isOverdue && partStatus !== 'ready_to_spend',
       }
     })
 
@@ -1337,6 +1346,7 @@ function accountPosition(args: {
     account,
     parts,
     money,
+    onItsWayCents: 0,
     horizon,
     steadyPerWeekCents,
     // Each part's steady share is rounded up on its own and counts the
@@ -1438,8 +1448,21 @@ export function position(input: PositionInput): HouseholdPosition {
   // and only its extra -- what could leave with every one of its own dates
   // still passing. Each Short account, the soonest to run short first, takes
   // the smaller of what is spare and what it is missing today.
-  const moves = surplusMoves(accounts)
-  const pending = new Map<Id, Cents>()
+  //
+  // Money on its way from an ask still open (D56) is worked out as arrived
+  // first: an account an open move already fills is missing nothing, and a
+  // lender with an open move out has that much less to spare. The statuses
+  // stay the accounts' own, on what has been done.
+  const onItsWay = new Map<Id, Cents>()
+  for (const m of input.onItsWay ?? []) onItsWay.set(m.accountId, (onItsWay.get(m.accountId) ?? 0) + m.amountCents)
+  const expected = accounts.map((a) => {
+    const by = onItsWay.get(a.account.id)
+    return by
+      ? accountPosition({ account: a.account, frames: framesOf(a.account.id), input, packagesById, transferWeekday, pendingCents: by })
+      : a
+  })
+  const moves = surplusMoves(accounts, expected)
+  const pending = new Map<Id, Cents>(onItsWay)
   for (const m of moves) {
     pending.set(m.from.account.id, (pending.get(m.from.account.id) ?? 0) - m.amountCents)
     pending.set(m.to.account.id, (pending.get(m.to.account.id) ?? 0) + m.amountCents)
@@ -1460,7 +1483,7 @@ export function position(input: PositionInput): HouseholdPosition {
         pendingCents: by,
       })
       // An account still Short with the money moved keeps its own fix; one
-      // the move puts right is asked for nothing more until it is done
+      // the moves put right is asked for nothing more until they are done
       // (not even to lower a transfer it may yet need).
       return [a.account.id, by > 0 && as.status === 'on_track' ? { ...as, transferChange: null, oneTimeMove: null } : as] as const
     }),
@@ -1515,9 +1538,10 @@ export function position(input: PositionInput): HouseholdPosition {
   // The accounts carry their own asks: what This week and the card say.
   const shown = accounts.map((actual) => {
     const a = asks.get(actual.account.id)
+    const onItsWayCents = onItsWay.get(actual.account.id) ?? 0
     return a && a !== actual
-      ? { ...actual, transferChange: a.transferChange, oneTimeMove: a.oneTimeMove }
-      : actual
+      ? { ...actual, onItsWayCents, transferChange: a.transferChange, oneTimeMove: a.oneTimeMove }
+      : { ...actual, onItsWayCents }
   })
 
   const withPlans = shown.filter((a) => a.parts.length > 0)
@@ -1549,23 +1573,33 @@ export function position(input: PositionInput): HouseholdPosition {
  */
 function surplusMoves(
   accounts: readonly AccountPosition[],
+  expected: readonly AccountPosition[],
 ): { from: AccountPosition; to: AccountPosition; amountCents: Cents }[] {
+  // On its own facts and with every open ask done (D56): a lender is On
+  // track both ways and lends only what it would still have to spare; a
+  // Short account takes only what it would still be missing.
+  const actual = new Map(accounts.map((a) => [a.account.id, a]))
   const spare = new Map(
-    accounts
+    expected
       .filter(
         (a) =>
           a.status === 'on_track' &&
+          actual.get(a.account.id)!.status === 'on_track' &&
           a.bank !== null &&
           a.bank.perWeekCents >= a.runRatePerWeekCents &&
-          a.extraCents > 0,
+          Math.min(a.extraCents, actual.get(a.account.id)!.extraCents) > 0,
       )
-      .map((a) => [a.account.id, a.extraCents]),
+      // Never money still on its way into it: only what it has to spare both ways.
+      .map((a) => [a.account.id, Math.min(a.extraCents, actual.get(a.account.id)!.extraCents)]),
   )
-  const lenders = accounts
+  const lenders = expected
     .filter((a) => spare.has(a.account.id))
-    .sort((a, b) => b.extraCents - a.extraCents || a.account.name.localeCompare(b.account.name))
-  const short = accounts
-    .filter((a) => a.status === 'short' && a.missingTodayCents > 0)
+    .sort(
+      (a, b) =>
+        spare.get(b.account.id)! - spare.get(a.account.id)! || a.account.name.localeCompare(b.account.name),
+    )
+  const short = expected
+    .filter((a) => a.status === 'short' && actual.get(a.account.id)!.status === 'short' && a.missingTodayCents > 0)
     .sort((a, b) => compareDates(a.short!.on, b.short!.on) || a.account.name.localeCompare(b.account.name))
   const moves: { from: AccountPosition; to: AccountPosition; amountCents: Cents }[] = []
   for (const to of short) {
@@ -1634,9 +1668,46 @@ export function shortReasons(p: Pick<HouseholdPosition, 'accounts' | 'todos'>): 
       if (t.reason === 'raise' || t.reason === 'keep_up') return [`set its transfer to ${formatCents(t.toCents)} a week`]
       return []
     })
+    // Money already asked for comes first: it is part of the fix (D56 (2)).
+    if (a.onItsWayCents > 0) fixes.unshift(`the ${formatCents(a.onItsWayCents)} already asked for`)
     reasons.set(a.account.id, { accountId: a.account.id, accountName: a.account.name, on: a.short.on, fixes })
   }
   return reasons
+}
+
+/**
+ * The parts due within the next few transfers (the digest's "Coming up in
+ * the next two weeks"): after today, on or before the n-th transfer day.
+ */
+export function dueWithinTransfers(
+  p: Pick<HouseholdPosition, 'accounts' | 'today'>,
+  transfers: number,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): PartPosition[] {
+  return p.accounts
+    .flatMap((a) => a.parts)
+    .filter((part) => {
+      const weeks = transferWeeksBetween(p.today, part.lineItem.dueDate, transferWeekday)
+      return weeks > 0 && weeks <= transfers
+    })
+}
+
+/**
+ * The accounts with plans whose count is old enough to nudge about: never
+ * counted, or last counted this many transfers ago or more. The last count
+ * is the position's (D35), chosen by the order the events were recorded.
+ */
+export function accountsToCheckIn(
+  p: Pick<HouseholdPosition, 'accounts' | 'today'>,
+  afterTransfers: number,
+  transferWeekday: Weekday = DEFAULT_TRANSFER_WEEKDAY,
+): AccountPosition[] {
+  return p.accounts
+    .filter((a) => a.parts.length > 0)
+    .filter(
+      ({ money }) =>
+        money.from !== 'count' || transferWeeksBetween(money.on!, p.today, transferWeekday) >= afterTransfers,
+    )
 }
 
 /** The words for a part's or plan's status (D35, D38), everywhere. */
@@ -1806,6 +1877,8 @@ export interface PlanChart {
   /** What is counted today, for the dot on the chart. */
   countedToday: PlanChartPoint
   targetCents: Cents
+  /** How far below the total the plan ends on the transfer set up now; 0 when it reaches it. */
+  endsShortCents: Cents
   /**
    * Saving it on its own (D50 (2)): each part saving evenly from its Saving
    * since to its due date (the one pace), on the same dates as `actual`. A
@@ -2166,6 +2239,7 @@ export function planChart(args: {
     afterFix: fixable ? points(planTotals(run(true))) : null,
     countedToday: { date: today, cents: plan.countedCents },
     targetCents: plan.totalCents,
+    endsShortCents: Math.max(0, plan.totalCents - actual.at(-1)!.cents),
     onItsOwn,
     dipsBelow: onItsOwn.some((x, i) => x.cents > actual[i]!.cents),
     dueMarks: dueMarksOf(plan.parts, today),

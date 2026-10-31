@@ -17,12 +17,10 @@ import { CloseOutCard } from '@/components/close-out-card'
 import { SmartSavingCard } from '@/components/smart-saving'
 import { MoneySince } from '@/components/money-since'
 import {
-  attentionHeadline,
   awakeCloseOuts,
   roundKey,
   debtTodoSentenceParts,
   derivedTodoSentenceParts,
-  householdCaughtUp,
   type DebtTodo,
   latestSnoozeDay,
   snoozeDays,
@@ -34,6 +32,7 @@ import {
   type CivilDate,
   type DerivedTodo,
   type IssuedInstruction,
+  type OutstandingInstruction,
   type SentencePart,
   type Weekday,
 } from '@/domain'
@@ -207,6 +206,65 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
   )
 }
 
+/**
+ * An ask still open (D56): a share-out's, or one from before D35. Done
+ * records it; "Not doing this" withdraws it, and whatever it lowered asks
+ * again. Whether it blocks "All caught up" is the view's.
+ */
+function AskCard({
+  instruction,
+  stale,
+  transferWeekday,
+  today,
+}: {
+  instruction: OutstandingInstruction
+  stale: boolean
+  transferWeekday: Weekday
+  today: CivilDate
+}) {
+  return (
+    <Card>
+      <Sentence instruction={instruction} transferWeekday={transferWeekday} today={today} />
+      {instruction.note ? <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p> : null}
+      <div className="mt-3 flex items-end gap-2">
+        <form action={confirmInstructionAction} className="flex flex-1 items-end gap-2">
+          <input type="hidden" name="instruction_id" value={instruction.instructionId} />
+          {/* A payment toward a debt comes off its balance at what
+              was actually paid (D49 (1)). */}
+          {instruction.type === 'debt_payment' && instruction.targetId !== 'debt' ? (
+            <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+              How much you paid
+              <input
+                name="amount"
+                inputMode="decimal"
+                defaultValue={plain(instruction.amountCents)}
+                className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
+              />
+            </label>
+          ) : null}
+          <button
+            type="submit"
+            className="w-full flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+          >
+            Done
+          </button>
+        </form>
+        {/* Withdraws the ask (PRD D18): it leaves the list and stops
+            counting as on the way. Nothing in the bank changes. */}
+        <form action={endInstructionAction}>
+          <input type="hidden" name="instruction_id" value={instruction.instructionId} />
+          <button type="submit" className="rounded-lg px-3 py-2 text-sm text-[var(--color-ink-soft)] underline">
+            Not doing this
+          </button>
+        </form>
+      </div>
+      {stale ? (
+        <p className="mt-2 text-xs text-[var(--color-behind)]">Asked {instruction.ageInDays} days ago.</p>
+      ) : null}
+    </Card>
+  )
+}
+
 export default async function ThisWeekPage({
   searchParams,
 }: {
@@ -221,15 +279,13 @@ export default async function ThisWeekPage({
 }) {
   const { balances, snoozed, until, snooze_error: snoozeError, item: errorItem, error } = await searchParams
   const { engine, viewer } = await requireEngine()
-  const [position, outstanding, allCloseOuts, commitments, tripToDos, transferWeekday, debtState] =
+  const [{ position, debts: debtState, household }, allCloseOuts, commitments, tripToDos, transferWeekday] =
     await Promise.all([
-      engine.position(),
-      engine.outstandingInstructions(),
+      engine.view(),
       engine.closeOutPrompts(),
       engine.openCommitmentsByAccount(),
       engine.comingUpTripTasks(3),
       engine.transferWeekday(),
-      engine.debtStatuses(),
     ])
   const today = engine.today()
   // A snoozed "did this get spent?" is off this screen until it wakes (D38);
@@ -245,18 +301,12 @@ export default async function ThisWeekPage({
   // (`money.countOwed`); what is missing is the count.
   const toCount = position.accounts.filter((a) => a.money.countOwed)
 
-  // What can be done today, and what is held back until a later day (the
-  // second half of the fun money). Different lists, so "now" is never in doubt.
-  const dueNow = outstanding.filter((i) => i.dueNow)
-  const comingUp = outstanding.filter((i) => !i.dueNow)
-  const todos = position.todos
-  const debtTodos = debtState.todos
-  // A balance to check is housekeeping: it shows with the to-dos but never
-  // holds back the count that follows them.
-  const moneyToDo = todos.length > 0 || debtTodos.some((t) => t.blocking) || dueNow.length > 0
-  const anythingToDo = moneyToDo || debtTodos.length > 0
-  const caughtUp = householdCaughtUp(position, debtState)
-  const debtsNeeding = debtState.debts.filter((d) => d.status !== 'on_track').length
+  // The one list (D56): what to do now, in the view's order, and what is
+  // held back until a later day (the second half of the fun money). Whether
+  // anything blocks, the headline and what counts as optional are the
+  // view's, never this screen's.
+  const { todos, comingUp, caughtUp, moneyToDo } = household
+  const anythingToDo = todos.length > 0
 
   // Every account with a plan or a transfer, and every bump or cut from
   // before D35 still changing a transfer, so it can be stopped (D18).
@@ -271,7 +321,6 @@ export default async function ThisWeekPage({
       }),
     ]),
   )
-  const needAttention = shown.filter((a) => a.status !== 'on_track').length
 
   const firstName = viewer.name?.split(' ')[0] ?? 'there'
   const saving = smartSaving(position)
@@ -319,15 +368,17 @@ export default async function ThisWeekPage({
               The
               bank moves <Money cents={position.bankPerWeekCents} /> a week in all.
             </p>
-            {todos.length + debtTodos.length > 0 ? (
+            {household.optionalCount > 0 ? (
               <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
-                There is an optional to-do below; nothing depends on it.
+                {household.optionalCount === 1
+                  ? 'There is an optional to-do below; nothing depends on it.'
+                  : 'There are optional to-dos below; nothing depends on them.'}
               </p>
             ) : null}
           </Card>
         ) : (
           <Card className="mb-5 bg-[var(--color-caution-soft)]">
-            <p className="font-semibold">{attentionHeadline(needAttention, debtsNeeding)} this week.</p>
+            <p className="font-semibold">{household.headline} this week.</p>
             <p className="mt-1 text-sm">
               The to-dos below are what it takes. Once they are done, every account has the money
               for everything on its date, and every deal is cleared before it ends, without anyone
@@ -386,75 +437,17 @@ export default async function ThisWeekPage({
             To do
           </h2>
           <ul className="space-y-3">
-            {todos.map((todo) => (
-              <li key={`${todo.kind}:${todo.accountId}`}>
-                <DerivedTodoCard todo={todo} today={today} />
+            {todos.map((item) => (
+              <li key={item.key}>
+                {item.from === 'position' ? (
+                  <DerivedTodoCard todo={item.todo} today={today} />
+                ) : item.from === 'debt' ? (
+                  <DebtTodoCard todo={item.todo} today={today} />
+                ) : (
+                  <AskCard instruction={item.ask} stale={item.stale} transferWeekday={transferWeekday} today={today} />
+                )}
               </li>
             ))}
-            {debtTodos
-              .filter((todo) => todo.blocking)
-              .map((todo) => (
-                <li key={`${todo.kind}:${todo.debtId}`}>
-                  <DebtTodoCard todo={todo} today={today} />
-                </li>
-              ))}
-            {dueNow.map((instruction) => (
-              <li key={instruction.instructionId}>
-                <Card>
-                  <Sentence instruction={instruction} transferWeekday={transferWeekday} today={today} />
-                  {instruction.note ? (
-                    <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
-                  ) : null}
-                  <div className="mt-3 flex items-end gap-2">
-                    <form action={confirmInstructionAction} className="flex flex-1 items-end gap-2">
-                      <input type="hidden" name="instruction_id" value={instruction.instructionId} />
-                      {/* A payment toward a debt comes off its balance at what
-                          was actually paid (D49 (1)). */}
-                      {instruction.type === 'debt_payment' && instruction.targetId !== 'debt' ? (
-                        <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
-                          How much you paid
-                          <input
-                            name="amount"
-                            inputMode="decimal"
-                            defaultValue={plain(instruction.amountCents)}
-                            className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
-                          />
-                        </label>
-                      ) : null}
-                      <button
-                        type="submit"
-                        className="w-full flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
-                      >
-                        Done
-                      </button>
-                    </form>
-                    {/* Withdraws the ask (PRD D18): it leaves the list and stops
-                        counting as on the way. Nothing in the bank changes. */}
-                    <form action={endInstructionAction}>
-                      <input type="hidden" name="instruction_id" value={instruction.instructionId} />
-                      <button
-                        type="submit"
-                        className="rounded-lg px-3 py-2 text-sm text-[var(--color-ink-soft)] underline"
-                      >
-                        Not doing this
-                      </button>
-                    </form>
-                  </div>
-                  {instruction.ageInDays > 6 ? (
-                    <p className="mt-2 text-xs text-[var(--color-behind)]">
-                      Asked {instruction.ageInDays} days ago.
-                    </p>
-                  ) : null}
-                </Card>
-              </li>
-            ))}
-            {debtTodos
-              .filter((todo) => !todo.blocking)
-              .map((todo) => (
-                <li key={`${todo.kind}:${todo.debtId}`}>
-                  <DebtTodoCard todo={todo} today={today} />
-                </li>
-              ))}
           </ul>
           {toCount.length > 0 ? (
             <p className="mt-2 text-xs text-[var(--color-ink-soft)]">

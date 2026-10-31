@@ -26,7 +26,9 @@ import {
   parseAmountOrNull,
   paymentSplits,
   payoffSchedule,
-  projectPayoff,
+  currentDeal,
+  dealEndMark,
+  isPaidOff,
   type DebtHistoryEntry,
 } from '@/domain'
 
@@ -76,7 +78,10 @@ export default async function DebtPage({
   const view = debtState.debts.find((v) => v.debt.id === id) ?? null
   const rung = ladder.find((r) => r.debt.id === id) ?? null
 
-  const projection = projectPayoff({ debt, today })
+  // Every figure about where it is headed is its one status's (D49 (4), D56 (6)).
+  // No status: it is paid off (isPaidOff), and nothing is left to project.
+  const paidOff = isPaidOff(debt)
+  const projection = view?.payoff ?? { months: 0, payoffDate: today, totalInterestCents: 0 }
   const months = payoffSchedule({ debt, today })
 
   // A what-if is tried, never kept: only what was typed in the address.
@@ -93,13 +98,8 @@ export default async function DebtPage({
     .filter(Boolean)
     .join(' and ')
 
-  const deal = debt.promoRules
-    .filter((rule) => rule.untilDate > today)
-    .sort((a, b) => (a.untilDate < b.untilDate ? -1 : 1))[0]
-  const dealEnds =
-    deal && (projection.payoffDate === null || deal.untilDate < projection.payoffDate)
-      ? { on: deal.untilDate, label: deal.rateBasisPoints === 0 ? '0% ends' : 'Deal ends' }
-      : null
+  const deal = currentDeal(debt, today)
+  const dealEnds = paidOff ? null : dealEndMark(debt, projection.payoffDate, today)
 
   return (
     <>
@@ -127,7 +127,7 @@ export default async function DebtPage({
               </Link>
             </p>
           </div>
-        ) : debt.state === 'paid_off' || debt.balanceCents === 0 ? (
+        ) : paidOff ? (
           <p className="mb-3 text-sm font-medium text-[var(--color-ahead)]">Paid off.</p>
         ) : (
           <p className="mb-3">

@@ -12,6 +12,7 @@ import {
   planChart,
   position,
   requirementsFor,
+  shortReasons,
   slotTicks,
   smartSaving,
   steadyLineStart,
@@ -498,14 +499,16 @@ describe('the to-dos', () => {
     expect(p.coveredThrough).toBe('2027-09-24')
   })
 
-  it('does not ask twice for a catch-up move still open from before D35', () => {
+  it('does not ask twice for a move still open (D56 (2))', () => {
     const p = position({
       ...base,
       lineItems: [li({ id: 'soon', unitAmountCents: 50000, dueDate: '2026-10-09' })],
       transfers: [{ accountId: gifts.id, perWeekCents: 0, confirmedOn: '2026-09-01' }],
-      openMovesIn: [{ accountId: gifts.id, amountCents: 50000 }],
+      onItsWay: [{ accountId: gifts.id, amountCents: 50000 }],
     })
     expect(p.accounts[0]!.oneTimeMove).toBeNull()
+    // Asked, not done: the account is still judged on what is there.
+    expect(p.accounts[0]!.status).toBe('short')
   })
 })
 
@@ -661,6 +664,27 @@ describe('an account with money to spare and one that is Short (D40)', () => {
     })
     expect(done.accounts.map((a) => a.status)).toEqual(['on_track', 'on_track'])
     expect(done.todos.filter((t) => t.blocking)).toEqual([])
+  })
+
+  it('offers no move into an account an open ask already fills (D56 (2))', () => {
+    const p = position({ ...facts, onItsWay: [{ accountId: soon.id, amountCents: 50000 }] })
+    expect(p.todos.filter((t) => t.blocking)).toEqual([])
+    // Still Short until the ask is done, and the fix it waits on is that money.
+    expect(p.accounts.find((a) => a.account.id === soon.id)!.status).toBe('short')
+    expect(p.fixes.get(soon.id)).toEqual({ nowCents: 50000, perWeekCents: null })
+  })
+
+  it('asks across only for what an open ask leaves missing (D56 (2))', () => {
+    const p = position({ ...facts, onItsWay: [{ accountId: soon.id, amountCents: 20000 }] })
+    expect(p.todos).toEqual([expect.objectContaining({ kind: 'move_between', amountCents: 30000 })])
+    // The line under a Short bar names the money already asked for first.
+    expect(shortReasons(p).get(soon.id)!.fixes).toEqual(['the $200.00 already asked for', 'move $300.00 from Later'])
+  })
+
+  it('lends only what a lender would have left after an open move out of it (D56 (2))', () => {
+    const p = position({ ...facts, onItsWay: [{ accountId: later.id, amountCents: -50000 }] })
+    expect(p.todos.some((t) => t.kind === 'move_between')).toBe(false)
+    expect(p.todos.some((t) => t.kind === 'move_in' && t.accountId === soon.id)).toBe(true)
   })
 
   it('never lends: an account with nothing to spare is not asked', () => {
@@ -1072,7 +1096,53 @@ describe('invariants over randomised households (D35)', () => {
       }
       facts.movesSinceCount = movesSinceCount
       facts.spendsSinceCount = spendsSinceCount
+      // Asks still open (D56): money on its way in, now and then out.
+      const asked = position(facts)
+      if (random() < 0.5) {
+        facts.onItsWay = accounts.flatMap((a) =>
+          random() < 0.5
+            ? [{ accountId: a.id, amountCents: random() < 0.8 ? 1 + int(300000) : -int(Math.max(0, held.get(a.id) ?? 0) + 1) }]
+            : [],
+        )
+      }
+      const wayOf = (id: string) =>
+        (facts.onItsWay ?? []).filter((m) => m.accountId === id).reduce((t, m) => t + m.amountCents, 0)
       const p = position(facts)
+
+      // 10. An open ask is money on its way, never money there (D56 (2)):
+      // it changes no balance and no status, and every to-do is worked out
+      // as if it arrives, so the same money is never asked for twice.
+      for (const a of p.accounts) {
+        const without = asked.accounts.find((x) => x.account.id === a.account.id)!
+        expect(a.money).toEqual(without.money)
+        expect(a.status).toBe(without.status)
+        expect(a.parts.map((x) => [x.status, x.countedCents])).toEqual(without.parts.map((x) => [x.status, x.countedCents]))
+      }
+      // ... and the to-dos with a move still asked for are the to-dos as if it
+      // were done: nothing more, nothing less. (Only a transfer to lower is
+      // held back while money is on its way in; and a lender never lends
+      // money still on its way to it, so a lender with money on its way in
+      // is left out of the comparison.)
+      const coming = (facts.onItsWay ?? []).filter((m) => m.amountCents > 0)
+      if (coming.length > 0) {
+        const done = position({
+          ...facts,
+          onItsWay: (facts.onItsWay ?? []).filter((m) => m.amountCents <= 0),
+          movesSinceCount: [...(facts.movesSinceCount ?? []), ...coming],
+        })
+        const lends = (q: typeof p, id: string) => q.todos.some((t) => t.kind === 'move_between' && t.fromAccountId === id)
+        if (!coming.some((m) => lends(p, m.accountId) || lends(done, m.accountId))) {
+          const asks = (q: typeof p, id: string) => {
+            const x = q.accounts.find((y) => y.account.id === id)!
+            return {
+              move: x.oneTimeMove,
+              transfer: x.transferChange?.reason === 'lower' ? null : x.transferChange,
+              between: q.todos.filter((t) => t.kind === 'move_between' && t.accountId === id),
+            }
+          }
+          for (const a of accounts) expect(asks(p, a.id)).toEqual(asks(done, a.id))
+        }
+      }
 
       for (const a of p.accounts) {
         // 0. What the account likely holds is said in the same pieces it is
@@ -1145,7 +1215,12 @@ describe('invariants over randomised households (D35)', () => {
         // runs out -- beyond the horizon, or within it after them (D40).
         if (a.status === 'running_down') {
           expect(a.parts.some((x) => x.status === 'short')).toBe(false)
-          expect(a.transferChange?.reason === 'keep_up' || a.oneTimeMove !== null).toBe(true)
+          // ... unless money on its way in (D56) carries it, as it would once
+          // done; with a move out of it still asked for, it would be Short, so
+          // the ask is a raise.
+          const way = wayOf(a.account.id)
+          const fix = way < 0 ? ['keep_up', 'raise'] : ['keep_up']
+          expect(fix.includes(a.transferChange?.reason ?? '') || a.oneTimeMove !== null || way > 0).toBe(true)
         }
         // 7. What a part is missing today (D41) is above zero exactly when it
         // is Short, and is never more than its tick: "+ $Y to make up" never
@@ -1181,23 +1256,26 @@ describe('invariants over randomised households (D35)', () => {
         // 4. The status and the asks can never disagree: an account that is
         // fine is asked for nothing it depends on, and a Short one is always
         // told what fixes it.
-        if (a.status === 'on_track') {
+        // (An open move out of it, D56, is asked for and so may need covering.)
+        const asksOut = wayOf(a.account.id) < 0
+        if (a.status === 'on_track' && !asksOut) {
           expect(a.oneTimeMove).toBeNull()
           expect(a.transferChange?.reason).not.toBe('raise')
           expect(a.transferChange?.reason).not.toBe('keep_up')
         }
-        if (a.transferChange?.reason === 'raise') expect(a.status).toBe('short')
+        if (a.transferChange?.reason === 'raise' && !asksOut) expect(a.status).toBe('short')
         // A Short account a surplus move puts right on its current dates may
         // still be asked to keep up (D40); otherwise keeping up is Running down's.
-        if (a.transferChange?.reason === 'keep_up') {
-          const movedIn = p.todos.some((t) => t.kind === 'move_between' && t.accountId === a.account.id)
+        if (a.transferChange?.reason === 'keep_up' && !asksOut) {
+          const movedIn =
+            p.todos.some((t) => t.kind === 'move_between' && t.accountId === a.account.id) || wayOf(a.account.id) > 0
           expect(a.status === 'running_down' || (a.status === 'short' && movedIn)).toBe(true)
         }
         // What could leave today is never more than is there today.
         expect(a.extraCents).toBeLessThanOrEqual(Math.max(0, a.money.totalCents))
         // Lowering is only ever offered to where the account is still fine,
         // with nothing else asked.
-        if (a.transferChange?.reason === 'lower') {
+        if (a.transferChange?.reason === 'lower' && wayOf(a.account.id) === 0) {
           const lowered = position({
             ...facts,
             transfers: [
@@ -1209,8 +1287,11 @@ describe('invariants over randomised households (D35)', () => {
           expect(lowered.oneTimeMove).toBeNull()
         }
         if (a.status === 'short') {
-          const movedIn = p.todos.some((t) => t.kind === 'move_between' && t.accountId === a.account.id)
+          // ... unless an open ask already brings what fixes it (D56).
+          const movedIn =
+            p.todos.some((t) => t.kind === 'move_between' && t.accountId === a.account.id) || wayOf(a.account.id) > 0
           expect(a.transferChange?.reason === 'raise' || a.oneTimeMove !== null || movedIn).toBe(true)
+          expect(p.fixes.has(a.account.id)).toBe(true)
         }
       }
 
@@ -1227,7 +1308,8 @@ describe('invariants over randomised households (D35)', () => {
         expect(to.status).toBe('short')
         expect(t.amountCents).toBeGreaterThan(0)
         expect(t.amountCents).toBeLessThanOrEqual(from.extraCents)
-        expect(t.amountCents).toBeLessThanOrEqual(to.missingTodayCents)
+        // What it is missing with every open ask done (D56): more, by an open move out of it.
+        expect(t.amountCents).toBeLessThanOrEqual(to.missingTodayCents + Math.max(0, -wayOf(to.account.id)))
       }
       if (between.length > 0) {
         const after = position({
@@ -1249,7 +1331,7 @@ describe('invariants over randomised households (D35)', () => {
           expect(after.accounts.find((x) => x.account.id === t.fromAccountId)!.status).toBe('on_track')
           const was = p.accounts.find((x) => x.account.id === t.accountId)!
           const now = after.accounts.find((x) => x.account.id === t.accountId)!
-          expect(now.missingTodayCents).toBeLessThanOrEqual(was.missingTodayCents - t.amountCents)
+          expect(now.missingTodayCents).toBeLessThanOrEqual(Math.max(0, was.missingTodayCents - t.amountCents))
         }
       }
 

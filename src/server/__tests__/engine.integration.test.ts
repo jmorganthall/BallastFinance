@@ -291,11 +291,15 @@ describeDb('engine against a live database', () => {
     expect(changes[0]!.after.quantity).toBe(3)
   })
 
-  it('does not record an event for an edit that moves no money', async () => {
+  it('records an edit that moves no money, with equal money snapshots and the new name beside them', async () => {
     const before = (await engine.listLineItemChanges()).length
     const airfare = (await engine.listLineItems()).find((li) => li.label === 'Airfare')!
     await engine.updateLineItem(airfare.id, { label: 'Airfare (3 travelers)' })
-    expect((await engine.listLineItemChanges()).length).toBe(before)
+    const changes = await engine.listLineItemChanges()
+    // Every edit is in the log (Phase 4); the money in it did not move.
+    expect(changes).toHaveLength(before + 1)
+    const change = changes.find((c) => c.lineItemId === airfare.id && c.after.dueDate === airfare.dueDate)!
+    expect(change.after).toEqual(change.before)
   })
 
   it('funds every item exactly by its due date', async () => {

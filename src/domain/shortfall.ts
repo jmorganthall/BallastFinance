@@ -24,12 +24,10 @@
  * what to cover; the split takes the rest.
  */
 
-import type { CivilDate } from './dates'
 import { formatCents, type Cents } from './money'
 import type { Id } from './types'
 import type { AccountPosition } from './position'
-import { promoCliff, type Debt } from './debt'
-import { debtStatusLine, debtStatuses } from './debt-status'
+import { debtStatusLine, type DebtView } from './debt-status'
 
 export interface Shortfall {
   kind: 'plan' | 'debt'
@@ -51,25 +49,24 @@ export interface TopUp {
 
 export function findShortfalls(args: {
   accounts: readonly Pick<AccountPosition, 'account' | 'oneTimeMove' | 'money'>[]
-  debts: readonly Debt[]
-  today: CivilDate
+  /** The debts' one status (D49 (5)), with the payments still asked for (D56 (2)). */
+  debts: readonly DebtView[]
 }): Shortfall[] {
   const debts: Shortfall[] = []
-  for (const debt of args.debts) {
-    const cliff = promoCliff(debt, args.today)
-    if (!cliff || cliff.shortCents <= 0) continue
-    // The debt's own status line (D49 (5)): the same words as Debts and This week.
-    const view = debtStatuses({ debts: [debt], today: args.today }).debts[0]
+  for (const view of args.debts) {
+    // What is still missing once the payments already asked for are made, so
+    // a second share-out never covers the same deal again (D56 (2)).
+    const miss = view.missAfterAsks
+    if (!miss) continue
     debts.push({
       kind: 'debt',
-      targetId: debt.id,
-      label: debt.name,
-      shortCents: cliff.shortCents,
-      reason: view
-        ? debtStatusLine(view)
-            .map((part) => part.text)
-            .join('')
-        : `Its deal leaves ${formatCents(cliff.shortCents)} at the full rate.`,
+      targetId: view.debt.id,
+      label: view.debt.name,
+      shortCents: miss.owedAtEndCents,
+      // The debt's own status line (D49 (5)): the same words as Debts and This week.
+      reason: debtStatusLine({ ...view, miss })
+        .map((part) => part.text)
+        .join(''),
     })
   }
   debts.sort((a, b) => b.shortCents - a.shortCents)

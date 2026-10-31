@@ -219,4 +219,27 @@ describeDb('rounds (D53)', () => {
     const partial = (await engine.roundHistory(created.packageId)).find((e) => !e.undone)!
     await expect(engine.undoRoundEvent({ eventId: partial.eventId })).rejects.toThrow(/taken out of the plan/)
   })
+
+  it('keeps a spend in the account it came out of when its part moves to another', async () => {
+    const otherId = (await engine.createReserveAccount({ name: 'Fun Money', institutionLabel: 'Cap One' })).id
+    const created = await engine.createPackageFromIntake({
+      contract_version: INTAKE_CONTRACT_VERSION,
+      package: { name: 'Balloons' },
+      line_items: [{ label: 'Balloons', unit_amount: '80', due_date: '2026-11-28', reserve_account: accountId }],
+    })
+    if (!created.ok) throw new Error(JSON.stringify(created.problems))
+    await engine.commitPackage(created.packageId)
+    const balloonsId = (await engine.listLineItems()).find((li) => li.packageId === created.packageId)!.id
+    const holds = async (id: string) =>
+      (await engine.position()).accounts.find((a) => a.account.id === id)!.money.totalCents
+
+    await engine.recordSpend({ lineItemId: balloonsId, amountCents: 3000 })
+    const [giftsAfterSpend, funBefore] = [await holds(accountId), await holds(otherId)]
+
+    // The $30 came out of Gifts & Giving. Moving what is left of the plan to
+    // Fun Money moves no money that already went out.
+    await engine.updateLineItem(balloonsId, { reserveAccountId: otherId })
+    expect(await holds(accountId)).toBe(giftsAfterSpend)
+    expect(await holds(otherId)).toBe(funBefore)
+  })
 })

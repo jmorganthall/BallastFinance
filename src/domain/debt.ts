@@ -558,30 +558,6 @@ export function effectiveAprBasisPoints(
   return total > 0 ? Math.round(weighted / total) : debt.aprBasisPoints
 }
 
-/** Is this debt inside the window where a promo expiry should be shouted about? */
-export function promoExpiryWarning(
-  debt: Debt,
-  today: CivilDate,
-  leadWeeks: number = DEFAULT_PROMO_LEAD_WEEKS,
-): { untilDate: CivilDate; monthlyToClearCents: Cents } | null {
-  const live = debt.promoRules
-    .filter((rule) => compareDates(rule.untilDate, today) > 0)
-    .sort((a, b) => compareDates(a.untilDate, b.untilDate))
-  const next = live[0]
-  if (!next) return null
-
-  const monthsLeft = monthsBetween(today, next.untilDate)
-  if (monthsLeft * WEEKS_PER_MONTH > leadWeeks) return null
-
-  const amountCents =
-    next.appliesTo === 'full' ? debt.balanceCents : Math.min(next.amountCents ?? 0, debt.balanceCents)
-
-  return {
-    untilDate: next.untilDate,
-    monthlyToClearCents: monthsLeft <= 0 ? amountCents : Math.ceil(amountCents / monthsLeft),
-  }
-}
-
 export interface DebtScore {
   debt: Debt
   effectiveAprBasisPoints: number
@@ -601,6 +577,30 @@ export interface DebtScore {
  * order leaves out, so the Debts screen can list them on their own and a
  * person can bring one back by stating a new balance.
  */
+/** The soonest deal still running, the one a debt's page describes; null with none. */
+export function currentDeal(debt: Pick<Debt, 'promoRules'>, today: CivilDate): PromoRule | null {
+  return (
+    debt.promoRules
+      .filter((rule) => compareDates(rule.untilDate, today) > 0)
+      .sort((a, b) => compareDates(a.untilDate, b.untilDate))[0] ?? null
+  )
+}
+
+/**
+ * The deal's end, for the mark on a debt's payoff chart: the soonest deal
+ * still running, when it ends before the debt is paid off. Null with no
+ * deal, or one that outlasts the debt.
+ */
+export function dealEndMark(
+  debt: Pick<Debt, 'promoRules'>,
+  payoffDate: CivilDate | null,
+  today: CivilDate,
+): { on: CivilDate; label: string } | null {
+  const deal = currentDeal(debt, today)
+  if (!deal || (payoffDate !== null && compareDates(deal.untilDate, payoffDate) >= 0)) return null
+  return { on: deal.untilDate, label: deal.rateBasisPoints === 0 ? '0% ends' : 'Deal ends' }
+}
+
 export function isPaidOff(debt: Pick<Debt, 'state' | 'balanceCents'>): boolean {
   return debt.state !== 'open' || debt.balanceCents <= 0
 }

@@ -17,6 +17,9 @@
 
 import { compareDates, type CivilDate } from './dates'
 import type { Cents } from './money'
+import { nextDue, type NextDue } from './next-due'
+import type { PlanPosition } from './position'
+import type { PackageView } from './rollup'
 import type { PackageState } from './types'
 
 export type PlanSort = 'due' | 'week' | 'total' | 'short'
@@ -97,5 +100,51 @@ export function orderPlans<T extends PlanOrderRow>(rows: readonly T[], order: Pl
     const chosen =
       order.sort === 'due' ? sign * byDue(a, b) : fa !== null && fb !== null ? sign * (fa - fb) : byDue(a, b)
     return chosen || byDue(a, b) || a.name.localeCompare(b.name)
+  })
+}
+
+/** A plan as the plans list shows and orders it (D41), every figure worked out here. */
+export interface PlanRow extends PlanOrderRow {
+  view: PackageView
+  /** The position's reading of a live plan; absent for a draft or a done plan. */
+  plan: PlanPosition | undefined
+  next: NextDue | null
+}
+
+/**
+ * The plans list's rows (D41, D56 (6)): each plan with the figures its card
+ * shows and the list is ordered by. A live plan's are the position's, its
+ * next date its rounds' (D53): the round saving now for a date ahead, so a
+ * round still open past its date never holds the plan back. A draft or a
+ * done plan has only what it costs.
+ */
+export function planRows(args: {
+  views: readonly PackageView[]
+  plans: readonly PlanPosition[]
+  today: CivilDate
+}): PlanRow[] {
+  const byId = new Map(args.plans.map((p) => [p.package.id, p]))
+  return args.views.map((view) => {
+    const plan = view.package.state === 'active' ? byId.get(view.package.id) : undefined
+    const live = plan && plan.parts.length > 0 ? plan : undefined
+    const ahead = live ? live.parts.filter((x) => !x.round.past) : []
+    const next =
+      view.package.state === 'retired'
+        ? null
+        : nextDue(
+            live ? (ahead.length > 0 ? ahead : live.parts).map((x) => x.lineItem) : view.items.map((i) => i.lineItem),
+            args.today,
+          )
+    return {
+      view,
+      plan,
+      next,
+      name: view.package.name,
+      state: view.package.state,
+      nextDue: next?.dueDate ?? null,
+      perWeekCents: plan ? plan.steadyPerWeekCents : null,
+      totalCents: live ? live.totalCents : view.totalCents,
+      shortByCents: plan ? plan.shortByCents : null,
+    }
   })
 }

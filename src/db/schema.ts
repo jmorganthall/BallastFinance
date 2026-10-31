@@ -140,6 +140,17 @@ export const eventKindEnum = pgEnum('event_kind', [
   'event_undone',
   /** A nightly price we were quoted, typed or removed (migration 0025, PRD D55): { before, after }. */
   'lodging_quote_changed',
+  // Every money fact written with its event (migration 0027, the layering
+  // plan's Phase 4): the rows that used to be created or renamed with nothing
+  // in the log beside them.
+  /** A reserve account created: its name, label, scope and owner. */
+  'account_added',
+  /** A plan created through the intake contract, as a draft: its name, module and every part as it was. */
+  'package_created',
+  /** A plan's name changed: { package_id, before, after }. */
+  'package_renamed',
+  /** A debt entered: its terms and the balance stated with it. */
+  'debt_added',
 ])
 
 export const tripLineCategoryEnum = pgEnum('trip_line_category', [
@@ -964,8 +975,14 @@ export const settings = pgTable(
     key: text('key').notNull(),
     value: jsonb('value').notNull(),
     effectiveFrom: date('effective_from').notNull(),
+    /**
+     * When this row was written (migration 0027). A change is a new row, never
+     * an edit: two changes on one day are two rows, and the later one is the
+     * setting.
+     */
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex('settings_key_idx').on(t.householdId, t.key, t.effectiveFrom)],
+  (t) => [index('settings_key_idx').on(t.householdId, t.key, t.effectiveFrom)],
 )
 
 // ---------------------------------------------------------------- server upkeep

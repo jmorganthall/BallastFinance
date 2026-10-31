@@ -9,8 +9,22 @@ import { describe, expect, it } from 'vitest'
 import { findShortfalls, takeTopUps, type Shortfall } from '../shortfall'
 import type { AccountPosition } from '../position'
 import type { Debt } from '../debt'
+import { debtStatuses } from '../debt-status'
 
 const TODAY = '2026-09-19'
+
+/** The shortfalls, with the debts read through their one status as the engine does. */
+function shortfalls(args: {
+  accounts: Parameters<typeof findShortfalls>[0]['accounts']
+  debts: Debt[]
+  today: string
+  onItsWay?: Map<string, number>
+}) {
+  return findShortfalls({
+    accounts: args.accounts,
+    debts: debtStatuses({ debts: args.debts, today: args.today, onItsWay: args.onItsWay }).debts,
+  })
+}
 
 function account(over: {
   id: string
@@ -63,7 +77,7 @@ function debt(over: Partial<Debt> & Pick<Debt, 'id' | 'name'>): Debt {
 
 describe('what is short', () => {
   it('names an account that needs a one-time move, and only that', () => {
-    const short = findShortfalls({
+    const short = shortfalls({
       accounts: [
         account({ id: 'a', name: 'Annual Expenses', moneyCents: 80000, move: { amountCents: 40000, byDate: '2026-10-03' } }),
         account({ id: 'b', name: 'Gifts', moneyCents: 30000 }),
@@ -82,7 +96,7 @@ describe('what is short', () => {
   it('names a deal-rate balance the minimums will not clear before the rate ends', () => {
     // $5,000 at 0% until 19 Jan 2027: four months of $150 minimums is $600,
     // leaving $4,400 to hit the full rate.
-    const short = findShortfalls({
+    const short = shortfalls({
       accounts: [],
       debts: [
         debt({
@@ -110,7 +124,7 @@ describe('what is short', () => {
   it('is not short when what the household actually pays clears the deal in time', () => {
     // The same $5,000 at 0% until 19 Jan 2027, but the family pays $1,300 a
     // month at it: four months covers it, so there is no cliff to fill.
-    const short = findShortfalls({
+    const short = shortfalls({
       accounts: [],
       debts: [
         debt({
@@ -125,8 +139,23 @@ describe('what is short', () => {
     expect(short).toEqual([])
   })
 
+  it('takes off what a "Pay $X toward" still open will pay, so no share-out covers it twice (D56 (2))', () => {
+    const deal = debt({
+      id: 'promo',
+      name: 'Balance transfer',
+      promoRules: [{ rateBasisPoints: 0, appliesTo: 'full', untilDate: '2027-01-19' }],
+    })
+    const partly = shortfalls({ accounts: [], debts: [deal], today: TODAY, onItsWay: new Map([['promo', 100000]]) })
+    expect(partly).toEqual([expect.objectContaining({ targetId: 'promo', shortCents: 340000 })])
+    expect(shortfalls({ accounts: [], debts: [deal], today: TODAY, onItsWay: new Map([['promo', 440000]]) })).toEqual([])
+    // Asked, not paid: the debt's status still reads what has been paid.
+    const view = debtStatuses({ debts: [deal], today: TODAY, onItsWay: new Map([['promo', 440000]]) })
+    expect(view.debts[0]!.status).not.toBe('on_track')
+    expect(view.todos.some((t) => t.kind === 'raise_debt_payment')).toBe(false)
+  })
+
   it("puts a debt's deadline before a plan's move, and the bigger hole first within each", () => {
-    const short = findShortfalls({
+    const short = shortfalls({
       accounts: [
         account({ id: 'small', name: 'Small', move: { amountCents: 1000, byDate: '2026-10-03' } }),
         account({ id: 'big', name: 'Big', move: { amountCents: 50000, byDate: '2026-10-03' } }),
