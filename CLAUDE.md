@@ -82,6 +82,19 @@ principles, and they are non-negotiable.
 - **Events are append-only**, enforced by a revoked privilege *and* a trigger
   that fires regardless of role. Never add an UPDATE or DELETE against `events`;
   record a correcting event instead.
+- **Every write to a money fact records its event in the same transaction**
+  (the layering plan's Phase 4, migration 0027). Creating an account, a plan
+  or a debt is `account_added`, `package_created` (the draft as made) or
+  `debt_added` (its terms and the balance stated with it, which opens its
+  history); a new plan name is `package_renamed`; every edit to a part is a
+  `line_item_changed`, a new label or recurrence beside equal money
+  snapshots; a part moved on by its rounds is one with `reason: 'rounds'`;
+  the zero a clearing payment writes is a `debt_balance_updated` with
+  `cleared_by_payment` (the history lists the payment, not a second
+  balance). Use `recordEvent(tx, kind, payload)`. `layers.test.ts` fails on
+  an engine method that writes `reserve_accounts`, `packages`,
+  `line_items` or `debts` without it. Settings append: a change is a new
+  row, two on one day are two, and the latest written is the setting.
 - **The app connects as a restricted role** (`ballast_app`); migrations run as
   the owner. Giving the app the owner's credentials silently undoes the
   append-only guarantee. The bootstrap sets that role's password from
@@ -713,7 +726,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 967 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 971 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

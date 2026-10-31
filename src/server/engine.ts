@@ -20,6 +20,7 @@ import {
   packages as packagesTable,
   reserveAccounts as reserveAccountsTable,
   settings as settingsTable,
+  eventKindEnum,
   crowdLevels as crowdLevelsTable,
   lodgingQuotes as lodgingQuotesTable,
   lodgingRates as lodgingRatesTable,
@@ -437,7 +438,10 @@ const LEDGER_EVENT_KINDS = [
   'payment_confirmed',
   'debt_balance_updated',
   'debt_updated',
+  'debt_added',
 ] as const
+
+type EventKind = (typeof eventKindEnum.enumValues)[number]
 
 /**
  * A crowd calendar pull, held for the person to look at before it is kept
@@ -611,17 +615,27 @@ export class Engine {
       throw new EngineError('An individual account needs a signed-in owner')
     }
 
-    const [row] = await this.db
-      .insert(reserveAccountsTable)
-      .values({
-        householdId: this.householdId,
-        name: input.name.trim(),
-        institutionLabel: input.institutionLabel.trim(),
-        scope,
-        ownerUserId: scope === 'individual' ? this.actorUserId : null,
+    const row = await this.db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(reserveAccountsTable)
+        .values({
+          householdId: this.householdId,
+          name: input.name.trim(),
+          institutionLabel: input.institutionLabel.trim(),
+          scope,
+          ownerUserId: scope === 'individual' ? this.actorUserId : null,
+        })
+        .returning()
+      if (!created) throw new EngineError('Could not create the reserve account')
+      await this.recordEvent(tx, 'account_added', {
+        reserve_account_id: created.id,
+        name: created.name,
+        institution_label: created.institutionLabel,
+        scope: created.scope,
+        owner_user_id: created.ownerUserId,
       })
-      .returning()
-    if (!row) throw new EngineError('Could not create the reserve account')
+      return created
+    })
     return toReserveAccount(row)
   }
 
@@ -705,6 +719,23 @@ export class Engine {
           })),
         )
         .returning({ id: lineItemsTable.id })
+
+      // The draft as it was made, so the log explains every later change.
+      await this.recordEvent(tx, 'package_created', {
+        package_id: pkg.id,
+        name: result.value.name,
+        module: result.value.module,
+        line_items: result.value.lineItems.map((item, i) => ({
+          line_item_id: items[i]!.id,
+          label: item.label,
+          unit_amount_cents: item.unitAmountCents,
+          quantity: item.quantity,
+          due_date: item.dueDate,
+          reserve_account_id: item.reserveAccountId,
+          recurrence: item.recurrence ?? null,
+          timeline_start: timelineStartRecord(item.timelineStart, item.timelineStartDate),
+        })),
+      })
 
       return { packageId: pkg.id, lineItemIds: items.map((i) => i.id) }
     })
@@ -798,6 +829,23 @@ export class Engine {
             .update(lineItemsTable)
             .set({ timelineStart: item.timelineStart, timelineStartDate: item.timelineStartDate })
             .where(eq(lineItemsTable.id, item.id))
+          // Recorded as an edit to the part records it: equal money
+          // snapshots, the change of "Saving since" beside them.
+          const snapshot: LineItemSnapshot = {
+            unitAmountCents: was.unitAmountCents,
+            quantity: was.quantity,
+            dueDate: was.dueDate as CivilDate,
+            reserveAccountId: was.reserveAccountId,
+          }
+          await this.recordEvent(tx, 'line_item_changed', {
+            line_item_id: item.id,
+            before: snapshot,
+            after: snapshot,
+            timeline_start: {
+              before: timelineStartRecord(was.timelineStart, was.timelineStartDate as CivilDate | null),
+              after: timelineStartRecord(item.timelineStart, item.timelineStartDate as CivilDate | null),
+            },
+          })
         }
       }
 
@@ -927,10 +975,14 @@ export class Engine {
       (p) => p.id !== packageId && p.state !== 'retired' && p.name.toLowerCase() === trimmed.toLowerCase(),
     )
     if (clash) throw new EngineError(`There is already a plan called "${trimmed}".`)
-    await this.db
-      .update(packagesTable)
-      .set({ name: trimmed })
-      .where(and(eq(packagesTable.id, packageId), eq(packagesTable.householdId, this.householdId)))
+    if (trimmed === target.name) return
+    await this.db.transaction(async (tx) => {
+      await tx
+        .update(packagesTable)
+        .set({ name: trimmed })
+        .where(and(eq(packagesTable.id, packageId), eq(packagesTable.householdId, this.householdId)))
+      await this.recordEvent(tx, 'package_renamed', { package_id: packageId, before: target.name, after: trimmed })
+    })
   }
 
   /**
@@ -1118,13 +1170,21 @@ export class Engine {
         before.reserveAccountId !== after.reserveAccountId
       const movesTimeline =
         timelineStartAfter !== row.timelineStart || timelineDateAfter !== row.timelineStartDate
+      const relabels = patch.label !== undefined && patch.label !== row.label
+      const recurrenceBefore = recurrenceOf(row.recurEvery, row.recurUnit)
+      const recurs =
+        'recurrence' in patch &&
+        ((recurrenceAfter?.every ?? null) !== (recurrenceBefore?.every ?? null) ||
+          (recurrenceAfter?.unit ?? null) !== (recurrenceBefore?.unit ?? null))
 
       // A label-only edit is not a plan change and must not create a component.
       // A timeline change moves the weekly number without moving money: the
       // snapshots stay equal (a zero delta, so no component -- the math reads
       // the part's current setting over the whole cycle), and the change is
       // written beside them so the log still explains it.
-      if (movesMoney || movesTimeline) {
+      // Every edit is recorded (Phase 4): a new name or a new way of coming
+      // round is written beside the snapshots too.
+      if (movesMoney || movesTimeline || relabels || recurs) {
         await tx.insert(events).values({
           householdId: this.householdId,
           kind: 'line_item_changed',
@@ -1134,6 +1194,8 @@ export class Engine {
             line_item_id: lineItemId,
             before,
             after,
+            ...(relabels ? { label: { before: row.label, after: patch.label } } : {}),
+            ...(recurs ? { recurrence: { before: recurrenceBefore, after: recurrenceAfter } } : {}),
             ...(movesTimeline
               ? {
                   timeline_start: {
@@ -1652,11 +1714,15 @@ export class Engine {
   }
 
   private async settingIn<T>(db: Conn, key: string, fallback: T): Promise<T> {
-    const rows = await db
+    // The latest by the day it took effect, then by when it was written: a
+    // second change on one day is a second row (migration 0027). Ordered in
+    // the database, where the timestamps keep their full precision.
+    const [latest] = await db
       .select()
       .from(settingsTable)
       .where(and(eq(settingsTable.householdId, this.householdId), eq(settingsTable.key, key)))
-    const latest = rows.sort((a, b) => (a.effectiveFrom < b.effectiveFrom ? 1 : -1))[0]
+      .orderBy(desc(settingsTable.effectiveFrom), desc(settingsTable.recordedAt))
+      .limit(1)
     return latest ? (latest.value as T) : fallback
   }
 
@@ -1847,14 +1913,37 @@ export class Engine {
   private async settleRounds(tx: Tx, item: LineItem, from: CivilDate): Promise<void> {
     const { events: recorded } = await this.roundEvents(tx)
     const oldest = oldestOpenRound({ lineItem: item, from, events: recorded, today: this.today() })
+    // Each move is recorded beside the round event that caused it (Phase 4),
+    // so the log alone says where the part's date went.
+    const snapshot: LineItemSnapshot = {
+      unitAmountCents: item.unitAmountCents,
+      quantity: item.quantity,
+      dueDate: item.dueDate,
+      reserveAccountId: item.reserveAccountId,
+    }
     if (item.recurrence) {
       if (oldest && oldest !== item.dueDate) {
         await tx.update(lineItemsTable).set({ dueDate: oldest, state: 'accruing' }).where(eq(lineItemsTable.id, item.id))
+        await this.recordEvent(tx, 'line_item_changed', {
+          line_item_id: item.id,
+          before: snapshot,
+          after: { ...snapshot, dueDate: oldest },
+          reason: 'rounds',
+        })
       }
       return
     }
     const state = oldest ? 'accruing' : 'retired'
-    if (state !== item.state) await tx.update(lineItemsTable).set({ state }).where(eq(lineItemsTable.id, item.id))
+    if (state !== item.state) {
+      await tx.update(lineItemsTable).set({ state }).where(eq(lineItemsTable.id, item.id))
+      await this.recordEvent(tx, 'line_item_changed', {
+        line_item_id: item.id,
+        before: snapshot,
+        after: snapshot,
+        state: { before: item.state, after: state },
+        reason: 'rounds',
+      })
+    }
   }
 
   /**
@@ -2512,6 +2601,14 @@ export class Engine {
         .update(debtsTable)
         .set({ balanceCents: 0, balanceAsOf: this.today(), balanceRecordedAt: sql`now()`, state: 'paid_off' })
         .where(eq(debtsTable.id, debtId))
+      // The zero is recorded as the balance from here (Phase 4); the history
+      // already shows the payment that made it, so it lists this once.
+      await this.recordEvent(tx, 'debt_balance_updated', {
+        debt_id: debtId,
+        balance_cents: 0,
+        as_of: this.today(),
+        cleared_by_payment: true,
+      })
     }
     return debt.balanceCents
   }
@@ -2543,25 +2640,43 @@ export class Engine {
       promoRules: input.promoRules ?? [],
     })
 
-    const [row] = await this.db
-      .insert(debtsTable)
-      .values({
-        householdId: this.householdId,
-        name: input.name.trim(),
-        category: input.category,
-        balanceCents: input.balanceCents,
-        balanceAsOf: input.balanceAsOf ?? this.today(),
-        aprBasisPoints: input.aprBasisPoints,
-        promoRules: input.promoRules ?? [],
-        minPaymentRule: input.minPaymentRule,
-        creditLimitCents: input.creditLimitCents ?? null,
-        plannedPaymentCents: input.plannedPaymentCents ?? null,
-        paymentDay: input.paymentDay ?? null,
-        enteredOn: this.today(),
-        state: 'open',
+    const row = await this.db.transaction(async (tx) => {
+      const [created] = await tx
+        .insert(debtsTable)
+        .values({
+          householdId: this.householdId,
+          name: input.name.trim(),
+          category: input.category,
+          balanceCents: input.balanceCents,
+          balanceAsOf: input.balanceAsOf ?? this.today(),
+          aprBasisPoints: input.aprBasisPoints,
+          promoRules: input.promoRules ?? [],
+          minPaymentRule: input.minPaymentRule,
+          creditLimitCents: input.creditLimitCents ?? null,
+          plannedPaymentCents: input.plannedPaymentCents ?? null,
+          paymentDay: input.paymentDay ?? null,
+          enteredOn: this.today(),
+          state: 'open',
+        })
+        .returning()
+      if (!created) throw new EngineError('Could not create the debt')
+      await this.recordEvent(tx, 'debt_added', {
+        debt_id: created.id,
+        balance_cents: created.balanceCents,
+        as_of: created.balanceAsOf,
+        terms: {
+          name: created.name,
+          category: created.category,
+          apr_basis_points: created.aprBasisPoints,
+          min_payment_rule: created.minPaymentRule,
+          promo_rules: created.promoRules,
+          credit_limit_cents: created.creditLimitCents ?? null,
+          payment_day: created.paymentDay ?? null,
+          planned_payment_cents: created.plannedPaymentCents ?? null,
+        },
       })
-      .returning()
-    if (!row) throw new EngineError('Could not create the debt')
+      return created
+    })
     return toDebt(row)
   }
 
@@ -5589,11 +5704,12 @@ export class Engine {
     })
   }
 
-  private async recordEvent(
-    tx: Tx,
-    kind: 'expense_changed' | 'income_changed' | 'income_received',
-    payload: Record<string, unknown>,
-  ): Promise<void> {
+  /**
+   * Record the event a write goes with, in the same transaction: a fact's row
+   * is never created, changed or moved on with nothing in the log beside it
+   * (the layering plan's Phase 4).
+   */
+  private async recordEvent(tx: Conn, kind: EventKind, payload: Record<string, unknown>): Promise<void> {
     await tx.insert(events).values({
       householdId: this.householdId,
       kind,
@@ -5614,10 +5730,7 @@ export class Engine {
         value,
         effectiveFrom: this.today(),
       })
-      .onConflictDoUpdate({
-        target: [settingsTable.householdId, settingsTable.key, settingsTable.effectiveFrom],
-        set: { value },
-      })
+
   }
 
   // ---------------------------------------------------------------- server upkeep ("Update now")

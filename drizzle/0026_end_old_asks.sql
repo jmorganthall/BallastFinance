@@ -8,22 +8,47 @@
 --
 -- Nothing issues these open any more: a transfer change or a catch-up move
 -- marked done on This week is issued and confirmed in one transaction.
--- The kinds are compared as text, as in 0016 and 0020.
-INSERT INTO "events" ("household_id", "kind", "occurred_at", "source", "payload")
-SELECT i."household_id",
-       'instruction_ended',
-       current_date,
-       'manual',
-       jsonb_build_object('instruction_id', i."payload"->>'instruction_id', 'reason', 'retired_by_d56')
-FROM "events" i
-WHERE i."kind"::text = 'instruction_issued'
-  AND (
-    i."payload"->>'type' IN ('set_weekly_transfer', 'rate_bump', 'rate_cut')
-    OR (i."payload"->>'type' = 'one_time_move' AND COALESCE(i."payload"->>'purpose', 'catch_up') = 'catch_up')
-  )
-  AND NOT EXISTS (
-    SELECT 1 FROM "events" d
-    WHERE d."household_id" = i."household_id"
-      AND d."kind"::text IN ('instruction_confirmed', 'instruction_ended')
-      AND d."payload"->>'instruction_id' = i."payload"->>'instruction_id'
-  );
+-- The kinds are compared as text, as in 0016 and 0020. The insert runs only
+-- when there is an ask to end: the migrator applies every pending file in one
+-- transaction, and on a new database instruction_ended (added by 0010) is a
+-- value of that same transaction, which an INSERT cannot use until it commits.
+-- A new database has no asks, so it never reaches the insert.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM "events" i
+    WHERE i."kind"::text = 'instruction_issued'
+      AND (
+        i."payload"->>'type' IN ('set_weekly_transfer', 'rate_bump', 'rate_cut')
+        OR (i."payload"->>'type' = 'one_time_move' AND COALESCE(i."payload"->>'purpose', 'catch_up') = 'catch_up')
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM "events" d
+        WHERE d."household_id" = i."household_id"
+          AND d."kind"::text IN ('instruction_confirmed', 'instruction_ended')
+          AND d."payload"->>'instruction_id' = i."payload"->>'instruction_id'
+      )
+  ) THEN
+    EXECUTE $insert$
+      INSERT INTO "events" ("household_id", "kind", "occurred_at", "source", "payload")
+      SELECT i."household_id",
+             'instruction_ended',
+             current_date,
+             'manual',
+             jsonb_build_object('instruction_id', i."payload"->>'instruction_id', 'reason', 'retired_by_d56')
+      FROM "events" i
+      WHERE i."kind"::text = 'instruction_issued'
+        AND (
+          i."payload"->>'type' IN ('set_weekly_transfer', 'rate_bump', 'rate_cut')
+          OR (i."payload"->>'type' = 'one_time_move' AND COALESCE(i."payload"->>'purpose', 'catch_up') = 'catch_up')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM "events" d
+          WHERE d."household_id" = i."household_id"
+            AND d."kind"::text IN ('instruction_confirmed', 'instruction_ended')
+            AND d."payload"->>'instruction_id' = i."payload"->>'instruction_id'
+        )
+    $insert$;
+  END IF;
+END
+$$;

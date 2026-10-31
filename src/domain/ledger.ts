@@ -343,7 +343,16 @@ function debtPayments(
 
   for (const row of log) {
     const p = row.payload
-    if (row.kind === 'debt_balance_updated') {
+    // The balance stated when the debt was entered, and each one stated since.
+    // The zero a clearing payment records is the payment's, already listed.
+    if (row.kind === 'debt_added') {
+      // Dated by the day the balance was true, which may be before it was typed.
+      push(own, p.debt_id as Id, {
+        on: (p.as_of as CivilDate | undefined) ?? row.on,
+        kind: 'stated',
+        amountCents: p.balance_cents as Cents,
+      })
+    } else if (row.kind === 'debt_balance_updated' && !p.cleared_by_payment) {
       push(own, p.debt_id as Id, { on: row.on, kind: 'stated', amountCents: p.balance_cents as Cents })
     } else if (row.kind === 'payment_confirmed') {
       const debtId = p.debt_id as Id

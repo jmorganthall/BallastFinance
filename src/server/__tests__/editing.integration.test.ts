@@ -73,6 +73,8 @@ describeDb('editing plans and debts', () => {
             before: Snapshot
             after: Snapshot
             timeline_start?: unknown
+            label?: unknown
+            recurrence?: unknown
           },
       )
       .filter((p) => p.line_item_id === lineItemId)
@@ -351,11 +353,15 @@ describeDb('editing plans and debts', () => {
       ])
     })
 
-    it('edits the label and the recurrence: a label alone records nothing, and starting to repeat moves Saving since, not the weekly amount', async () => {
+    it('edits the label and the recurrence: each is recorded, and starting to repeat moves Saving since, not the weekly amount', async () => {
       const changesBefore = (await changesTo(tyresId)).length
       await engine.updateLineItem(tyresId, { label: 'Winter tyres' })
       expect((await engine.listLineItems()).find((i) => i.id === tyresId)!.label).toBe('Winter tyres')
-      expect(await changesTo(tyresId)).toHaveLength(changesBefore)
+      // A new name moves no money, but every edit is in the log (Phase 4).
+      const renamed = await changesTo(tyresId)
+      expect(renamed).toHaveLength(changesBefore + 1)
+      expect(renamed.at(-1)!.before).toEqual(renamed.at(-1)!.after)
+      expect(renamed.at(-1)!.label).toEqual({ before: 'Tyres', after: 'Winter tyres' })
 
       await engine.updateLineItem(tyresId, { recurrence: { every: 1, unit: 'year' } })
       const after = (await engine.listLineItems()).find((i) => i.id === tyresId)!
@@ -364,9 +370,10 @@ describeDb('editing plans and debts', () => {
       // (D30): recorded, with equal money snapshots and the switch beside them.
       expect(after.timelineStart).toBe('last_occurrence')
       const changes = await changesTo(tyresId)
-      expect(changes).toHaveLength(changesBefore + 1)
+      expect(changes).toHaveLength(changesBefore + 2)
       expect(changes.at(-1)!.before).toEqual(changes.at(-1)!.after)
       expect(changes.at(-1)!.timeline_start).toEqual({ before: 'commit', after: 'last_occurrence' })
+      expect(changes.at(-1)!.recurrence).toEqual({ before: null, after: { every: 1, unit: 'year' } })
 
       const { a } = await standing(engine, carAccountId)
       const tyres = part(a, tyresId)

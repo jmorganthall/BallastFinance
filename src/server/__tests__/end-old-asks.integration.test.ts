@@ -2,8 +2,10 @@
  * Migration 0026 (PRD D56 (4)): every ask from before D35 still open is
  * ended once, by a recorded instruction_ended, and nothing else is touched:
  * a confirmed bump keeps running, a share-out's cover stays open, and an
- * ask already ended is not ended twice. The file's own SQL runs here,
- * narrowed to this test's household so other tests' asks are left alone.
+ * ask already ended is not ended twice. The file's own insert runs here,
+ * narrowed to this test's household so other tests' asks are left alone;
+ * that the whole file applies to a new database is checked by running the
+ * bootstrap against an empty one.
  */
 
 import { readFileSync } from 'node:fs'
@@ -55,8 +57,10 @@ describeDb('ending the asks from before D35 (D56 (4))', () => {
   })
 
   it('ends each one still open once, and leaves the rest as they were', async () => {
-    const sql = readFileSync('drizzle/0026_end_old_asks.sql', 'utf8').trim().replace(/;$/, '')
-    const mine = `${sql}\n  AND i."household_id" = '${householdId}'`
+    // The insert the file runs once it finds an ask to end, narrowed to this household.
+    const file = readFileSync('drizzle/0026_end_old_asks.sql', 'utf8')
+    const insert = file.split('$insert$')[1]!.trim()
+    const mine = `${insert}\n  AND i."household_id" = '${householdId}'`
     await client.unsafe(mine)
     // Run twice: an ask already ended is never ended again.
     await client.unsafe(mine)

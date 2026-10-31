@@ -95,9 +95,10 @@ goes away when it no longer does, whatever changed the figures (`accountPosition
 
 ## Where the layers still bend
 
-Found in the audit of 2026-10-31. The ledger (Phase 2) and the household view (Phase 3,
-D56) have since closed the ones about reading the same facts two ways, the stored asks
-beside the derived to-dos, and most figures screens worked out themselves. Each item
+Found in the audit of 2026-10-31. The ledger (Phase 2), the household view (Phase 3,
+D56) and the event beside every money write (Phase 4) have since closed the ones about
+reading the same facts two ways, the stored asks beside the derived to-dos, most figures
+screens worked out themselves, and rows changed with nothing in the log. Each item
 left is a place where a figure depends on more than the three layers above, so it is
 worth knowing when a number looks odd.
 
@@ -106,9 +107,12 @@ worth knowing when a number looks odd.
   the open asks, the debt statuses). A write landing between two of them can show one
   figure from before it and one from after, until the next page drawn.
 
-**Facts rewritten by code, with no event of their own.**
-- `line_items.due_date` is moved to the oldest open round by `settleRounds`.
-- A debt's balance is set to zero, and its state to paid off, by `settleDebtIfCleared`.
+**Rows kept beside their events.**
+- A part's stored due date is its oldest open round (D53 (9)), moved on by `settleRounds`,
+  and a debt's balance goes to zero when a payment clears it (`settleDebtIfCleared`).
+  Both are stored rather than derived, but since Phase 4 each move is recorded as an
+  event in the same transaction (`line_item_changed` with `reason: 'rounds'`;
+  `debt_balance_updated` with `cleared_by_payment`), so the log alone explains the row.
 
 **Old spends read through today's rows.**
 - A spend recorded before spends carried their account (before the ledger) is put in
@@ -118,8 +122,14 @@ worth knowing when a number looks odd.
 - A plan's page heads its card "Total cost of this plan" (every live part at full price)
   while its bar and the plans list use the total still needed this time round.
 
-## The target
+## How it stays this way
 
-- The facts: every change to a money fact recorded as an event in the same transaction,
-  and the two rewrites above made derived (Phase 4).
+- `src/__tests__/layers.test.ts` fails if a screen, a component or the digest imports a
+  calculation behind a money figure, and if an engine method writes an account, a plan,
+  a part or a debt without recording an event (`recordEvent`) as it does.
+- Settings append (migration 0027): a change is a new row, never an edit, and the latest
+  written is the setting.
+
+## Still to do
+
 - One snapshot per page, by reading the household view once.
