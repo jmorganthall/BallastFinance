@@ -38,6 +38,7 @@ import {
   roundKey,
   roundSuffix,
   snoozeDays,
+  planCost,
   shortReasons,
   steadySinceWords,
   type ShortReason,
@@ -94,6 +95,7 @@ export default async function PackageDetailPage({
   const position = isDraft || isDone ? null : await engine.position()
   const plan = position?.plans.find((p) => p.package.id === id) ?? null
   const partOf = new Map((plan?.parts ?? []).map((p) => [p.lineItem.id, p]))
+  const cost = planCost(view, plan)
   const reasons = position ? shortReasons(position) : new Map<string, ShortReason>()
   // The day a plan started saving is the earliest day any of its parts'
   // steady lines runs from (D33, D35). A part whose own day differs says so.
@@ -159,9 +161,17 @@ export default async function PackageDetailPage({
       ) : null}
 
       <Card className="mb-4">
-        <p className="text-sm text-[var(--color-ink-soft)]">Total cost of this plan</p>
+        {/* What it costs in all and, once spends have lowered it, what is
+            still to have ready: the bar's figure (D57 (2)). */}
+        <p className="text-sm text-[var(--color-ink-soft)]">Costs in all</p>
         <p className="mt-1 text-2xl font-semibold">
-          <Money cents={view.totalCents} />
+          <Money cents={cost.allCents} />
+          {cost.stillCents !== null ? (
+            <span className="text-base font-normal text-[var(--color-ink-soft)]">
+              {' '}
+              · <Money cents={cost.stillCents} /> still to have ready
+            </span>
+          ) : null}
         </p>
 
         {isDraft ? (

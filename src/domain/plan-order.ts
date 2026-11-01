@@ -148,3 +148,19 @@ export function planRows(args: {
     }
   })
 }
+
+/**
+ * What a plan's page says it costs (PRD D57 (2)): every live part at full
+ * price, and -- on a live plan whose spends have lowered what this round
+ * still needs -- that too, the figure its bar and the plans list use.
+ * "Costs $1,000 in all · $700 still to have ready". `stillCents` is null
+ * when there is nothing to add: a draft, a finished plan, or one where the
+ * two are the same.
+ */
+export function planCost(view: PackageView, plan: PlanPosition | null | undefined): {
+  allCents: Cents
+  stillCents: Cents | null
+} {
+  const still = plan && plan.parts.length > 0 ? plan.totalCents : null
+  return { allCents: view.totalCents, stillCents: still !== null && still !== view.totalCents ? still : null }
+}

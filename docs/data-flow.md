@@ -80,7 +80,7 @@ On the next page drawn after a fact changes. Nothing waits for a job, and no num
 | --- | --- | --- |
 | Mark "Set the transfer to $Y" done | `set_weekly_transfer` issued and confirmed together | the run-forward, from the transfer after the day it is marked done; the status; the to-dos |
 | Mark a one-time move or a move between accounts done | the move (both sides together, for a move between) | money today, until the next count |
-| Record what an account holds | `balance_confirmed` | money today starts from the count; earlier moves and spends are inside it |
+| Record what an account holds (typed, or "It's $X") | `balance_confirmed` | money today starts from the count; earlier moves and spends are inside it |
 | Record a spend, finish a round, save back up, undo | `spend_recorded` · `round_finished` · `round_saved_back_up` · `event_undone` | money today, the round open now, the weekly amount |
 | Add or edit a plan or a part | rows, plus a `line_item_*` event | the requirements, so the weekly amount and every to-do |
 | Change the transfer day or the rounding step | a setting | every weekly figure |
@@ -117,10 +117,6 @@ worth knowing when a number looks odd.
 **Old spends read through today's rows.**
 - A spend recorded before spends carried their account (before the ledger) is put in
   the account its part is in now. Spends recorded since keep their own account.
-
-**A figure shaped on a screen.**
-- A plan's page heads its card "Total cost of this plan" (every live part at full price)
-  while its bar and the plans list use the total still needed this time round.
 
 ## How it stays this way
 

@@ -368,19 +368,21 @@ export async function createReserveAccountAction(formData: FormData): Promise<vo
 export async function confirmBalancesAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const accounts = await engine.listReserveAccounts()
-
-  for (const account of accounts) {
-    const raw = String(formData.get(`balance_${account.id}`) ?? '').trim()
-    if (raw === '') continue
+  const { countsFromForm } = await import('@/domain')
+  // What was typed, or the figure "It's $X" showed (D57 (1)); a box that is
+  // not an amount is skipped and the others still record.
+  const counts = countsFromForm({
+    accountIds: accounts.map((a) => a.id),
+    field: (name) => {
+      const value = formData.get(name)
+      return typeof value === 'string' ? value : null
+    },
+  })
+  for (const count of counts) {
     try {
-      const { parseAmountToCents } = await import('@/domain')
-      await engine.confirmBalance({
-        reserveAccountId: account.id,
-        amountCents: parseAmountToCents(raw),
-      })
+      await engine.confirmBalance({ reserveAccountId: count.accountId, amountCents: count.amountCents })
     } catch {
-      // A field the user left as junk is skipped rather than failing the whole
-      // check-in; the others still record.
+      // An account the viewer may not write is skipped, as before; the others still record.
     }
   }
 
