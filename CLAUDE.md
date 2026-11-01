@@ -166,7 +166,8 @@ principles, and they are non-negotiable.
   done records the instruction and its confirmation together
   (`confirmTransfer`, `confirmMoveIn`, and `confirmMoveBetween`, which
   records the move out and the move in in one transaction and needs write
-  access to both accounts). The invariants in
+  access to both accounts; "Done" on a share-out's move into or out of an
+  `individual` account is its owner's alone, like any funding). The invariants in
   `src/domain/__tests__/position.test.ts` pin the rest: the ticks add up to
   the least the account must hold; a part is Short exactly when it is below
   its tick on a Short account; a Short account always has a Short part and a
@@ -350,7 +351,10 @@ principles, and they are non-negotiable.
   do, through the ordinary `confirmBalancesAction` (with `back=home`). A
   count is a figure someone checked (PRD D57 (1), rev 111): on This week and
   the check-in alike each box is empty with the likely balance as a grey
-  hint, and `CountField`'s "It's $X" records exactly the figure it showed;
+  hint, and `CountField`'s "It's $X" records exactly the figure it showed (each
+  button submits its own small form, `ItsForms`, so Enter in a box records
+  what was typed, never a button's figure); a count below zero is refused
+  by `Engine.confirmBalance`;
   what a form records is `countsFromForm` in `src/domain/check-in.ts`
   (typed, or the button's figure for its account, an empty box nothing).
   A plan's page says "Costs in all $X" and, once spends have lowered this
@@ -747,7 +751,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 994 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 996 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
