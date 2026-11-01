@@ -459,7 +459,8 @@ describeDb('one-time moves (D34, D35)', () => {
     expect(await engine.outstandingInstructions()).toEqual([])
     const move = (await engine.listIssuedInstructions()).find((i) => i.type === 'one_time_move')!
     expect(move).toMatchObject({ amountCents: 15000, targetId: accountId, purpose: 'catch_up' })
-    expect((await account()).money).toMatchObject({ movesInCents: 15000, movesOutCents: 0, countOwed: true })
+    // Money coming in is known, so it asks for no count (D58); it is still carried.
+    expect((await account()).money).toMatchObject({ movesInCents: 15000, movesOutCents: 0, countOwed: false })
 
     const p = await engine.position()
     const a = p.accounts.find((x) => x.account.id === accountId)!

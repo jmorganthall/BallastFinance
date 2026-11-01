@@ -118,10 +118,19 @@ export function optimiseLumpSum(args: {
   today: CivilDate
   weight?: number
   promoLeadWeeks?: number
+  /**
+   * What an earlier step of the same share-out already puts toward each debt
+   * ("cover what is short"): the debts are seen as they will be after it
+   * (PRD §6, order of operations), never below zero.
+   */
+  lessPaid?: Readonly<Record<string, Cents>>
 }): OptimizerResult {
   const weight = args.weight ?? DEFAULT_PRIORITY_WEIGHT
   const leadWeeks = args.promoLeadWeeks ?? DEFAULT_PROMO_LEAD_WEEKS
-  const open = args.debts.filter((d) => d.state === 'open' && d.balanceCents > 0)
+  const lessPaid = args.lessPaid ?? {}
+  const open = args.debts
+    .map((d) => ({ ...d, balanceCents: Math.max(0, d.balanceCents - (lessPaid[d.id] ?? 0)) }))
+    .filter((d) => d.state === 'open' && d.balanceCents > 0)
 
   const empty: OptimizerResult = {
     amountCents: args.amountCents,

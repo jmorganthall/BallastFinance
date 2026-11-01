@@ -335,8 +335,9 @@ principles, and they are non-negotiable.
   `moneySinceParts` / `moneySinceSentence` through `MoneySince`
   (`src/components/money-since.tsx`) on check-in and This week and in the
   account card's tooltip, so a spend can never change the number without
-  changing the words. `money.countOwed` (a move or a spend marked done
-  since the count; a transfer alone never) is the one answer to "ask what
+  changing the words. `money.countOwed` (money went out since the
+  count: a move out or a spend marked done; money coming in, a move in or a
+  transfer, never asks, PRD D58, rev 112) is the one answer to "ask what
   this account holds": This week asks "Update what these accounts hold" and
   the digest says the same once nothing else that moves money is left to
   do, through the ordinary `confirmBalancesAction` (with `back=home`). A
@@ -739,7 +740,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 980 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 989 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does
