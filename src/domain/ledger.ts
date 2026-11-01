@@ -71,7 +71,15 @@ export interface LedgerFacts {
   /** In any order: the ledger puts them in the order recorded. */
   events: readonly RecordedEvent[]
   lineItems: readonly { id: Id; reserveAccountId: Id }[]
-  debts: readonly { id: Id; balanceRecordedAtMicros: string }[]
+  debts: readonly {
+    id: Id
+    balanceRecordedAtMicros: string
+    /** The stated balance on the row, and the day it was true; for a debt's opening (see `debtPayments`). */
+    statedBalanceCents?: Cents
+    balanceAsOf?: CivilDate
+    /** The day it was entered in Ballast. */
+    enteredOn?: CivilDate
+  }[]
 }
 
 /** A round event with whether it was taken back, for the plan's "What went out". */
@@ -379,6 +387,10 @@ function debtPayments(
   firstConfirmation: ReadonlyMap<Id, Id>,
 ): { sinceStated: Map<Id, DebtPaymentMade[]>; history: Map<Id, DebtHistoryEntry[]> } {
   const statedAt = new Map(debts.map((d) => [d.id, BigInt(d.balanceRecordedAtMicros)]))
+  // Debts whose entry is in the log, and those whose stated balance anything
+  // has changed since they were entered (a statement, a payment of either kind).
+  const added = new Set<Id>()
+  const touched = new Set<Id>()
   const sinceStated = new Map<Id, DebtPaymentMade[]>()
   const own = new Map<Id, DebtHistoryEntry[]>()
   const todo = new Map<Id, DebtHistoryEntry[]>()
@@ -392,6 +404,12 @@ function debtPayments(
     const p = row.payload
     // The balance stated when the debt was entered, and each one stated since.
     // The zero a clearing payment records is the payment's, already listed.
+    if (row.kind === 'debt_added') added.add(p.debt_id as Id)
+    if (row.kind === 'debt_balance_updated' || row.kind === 'payment_confirmed') touched.add(p.debt_id as Id)
+    if (row.kind === 'instruction_confirmed') {
+      const instruction = issuedById.get(p.instruction_id as Id)
+      if (instruction?.type === 'debt_payment') touched.add(instruction.targetId)
+    }
     if (row.kind === 'debt_added') {
       // Dated by the day the balance was true, which may be before it was typed.
       push(own, p.debt_id as Id, {
@@ -426,11 +444,27 @@ function debtPayments(
     }
   }
 
+  // A debt entered before its creation was recorded opens with what can still
+  // be known of it: untouched since, its row holds exactly the balance it was
+  // entered with; changed since (restated, paid, or rewritten by migration
+  // 0018 or a pre-Phase-4 payoff), that balance is gone, and it opens with
+  // the day it was entered, never a guessed figure.
+  const opening = new Map<Id, DebtHistoryEntry>()
+  for (const d of debts) {
+    if (added.has(d.id)) continue
+    if (!touched.has(d.id) && d.statedBalanceCents !== undefined && d.balanceAsOf) {
+      opening.set(d.id, { on: d.balanceAsOf, kind: 'stated', amountCents: d.statedBalanceCents })
+    } else if (d.enteredOn) {
+      opening.set(d.id, { on: d.enteredOn, kind: 'entered' })
+    }
+  }
+
   // A debt's own events, then its to-do payments, merged by day; within a
   // day, each list in the order recorded.
   const history = new Map<Id, DebtHistoryEntry[]>()
-  for (const id of new Set([...own.keys(), ...todo.keys()])) {
-    const entries = [...(own.get(id) ?? []), ...(todo.get(id) ?? [])]
+  for (const id of new Set([...opening.keys(), ...own.keys(), ...todo.keys()])) {
+    const first = opening.get(id)
+    const entries = [...(first ? [first] : []), ...(own.get(id) ?? []), ...(todo.get(id) ?? [])]
     history.set(
       id,
       entries.sort((a, b) => compareDates(a.on, b.on)),

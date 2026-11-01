@@ -52,6 +52,8 @@ function historyWords(entry: DebtHistoryEntry): string {
       return `Paid ${formatCents(entry.amountCents)} (a share-out to-do)`
     case 'terms':
       return `Changed its ${entry.changed.join(', ')}`
+    case 'entered':
+      return 'Entered in Ballast (the balance then was not recorded)'
   }
 }
 

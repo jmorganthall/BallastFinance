@@ -964,6 +964,12 @@ export function debtWhatIf(args: {
 /** One thing that happened to a debt, for its page's history (D49 (11)). */
 export type DebtHistoryEntry =
   | { on: CivilDate; kind: 'stated'; amountCents: Cents }
+  /**
+   * The day it was entered in Ballast, when the balance it was entered with
+   * can no longer be known: a debt entered before its creation was recorded
+   * (the layering plan's Phase 4) whose balance has changed since.
+   */
+  | { on: CivilDate; kind: 'entered' }
   | { on: CivilDate; kind: 'paid' | 'paid_todo'; amountCents: Cents }
   | { on: CivilDate; kind: 'terms'; changed: string[] }
 

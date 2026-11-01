@@ -86,7 +86,9 @@ principles, and they are non-negotiable.
   (the layering plan's Phase 4, migration 0027). Creating an account, a plan
   or a debt is `account_added`, `package_created` (the draft as made) or
   `debt_added` (its terms and the balance stated with it, which opens its
-  history); a new plan name is `package_renamed`; every edit to a part is a
+  history; a debt entered before it opens with its row's balance while
+  nothing has changed it since, else with an `entered` line and no figure,
+  because migration 0018 and older payments rewrote those balances); a new plan name is `package_renamed`; every edit to a part is a
   `line_item_changed`, a new label or recurrence beside equal money
   snapshots; a part moved on by its rounds is one with `reason: 'rounds'`;
   the zero a clearing payment writes is a `debt_balance_updated` with
@@ -742,7 +744,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 991 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 993 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

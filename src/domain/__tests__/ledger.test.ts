@@ -146,6 +146,35 @@ describe('the ledger', () => {
     expect(ledger.movesSinceCount).toEqual([])
   })
 
+  it("opens an old debt's history with what can still be known of its entry", () => {
+    const row = (id: string) => ({
+      id,
+      balanceRecordedAtMicros: '1790000000000000',
+      statedBalanceCents: 250000,
+      balanceAsOf: '2026-08-01',
+      enteredOn: '2026-08-03',
+    })
+    const ledger = ledgerOf({
+      events: log([
+        // Entered after creation was recorded: its own event opens it, once.
+        { id: 'a', kind: 'debt_added', payload: { debt_id: 'new', balance_cents: 9000, as_of: '2026-10-01' } },
+        // Paid since it was entered: the balance it was entered with is gone.
+        { id: 'p', kind: 'payment_confirmed', payload: { debt_id: 'paid', amount_cents: 5000 } },
+        // Only its terms changed: its balance is still the one it was entered with.
+        { id: 't', kind: 'debt_updated', payload: { debt_id: 'quiet', before: { name: 'Card' }, after: { name: 'Store card' } } },
+      ]),
+      lineItems: [],
+      debts: [row('new'), row('paid'), row('quiet')],
+    })
+    expect(ledger.debtHistory.get('new')).toEqual([{ on: '2026-10-01', kind: 'stated', amountCents: 9000 }])
+    expect(ledger.debtHistory.get('paid')!.map((e) => e.kind)).toEqual(['entered', 'paid'])
+    expect(ledger.debtHistory.get('paid')![0]).toEqual({ on: '2026-08-03', kind: 'entered' })
+    expect(ledger.debtHistory.get('quiet')).toEqual([
+      { on: '2026-08-01', kind: 'stated', amountCents: 250000 },
+      { on: '2026-10-24', kind: 'terms', changed: expect.any(Array) },
+    ])
+  })
+
   it('numbers cycle starts in the order recorded', () => {
     const ledger = ledgerOf({
       events: log([
