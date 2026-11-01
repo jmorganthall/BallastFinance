@@ -325,8 +325,10 @@ principles, and they are non-negotiable.
   the ledger (`ledgerOf` in `src/domain/ledger.ts`, read in one snapshot by
   `Engine.positionInput`): an instruction's first confirmation is the one
   that counts, and a spend is in the account recorded on it
-  (`reserve_account_id`, falling back to its part's account for one recorded
-  before spends carried it); `doneMoveOf` decides whether a confirmation is a
+  (`reserve_account_id`; one recorded before spends carried it is in the
+  account its part was in when it was recorded, read from the part's own
+  `line_item_changed` moves, `package_deleted` or `package_created` by
+  `partAccountHistory`); `doneMoveOf` decides whether a confirmation is a
   move on the ledger (any move into a reserve account or out of it since
   D35; never a "left over" ask, a transfer change or a bump). There is no
   second since-count ledger: the words come from the position's own
@@ -740,7 +742,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 989 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 991 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

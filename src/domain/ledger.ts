@@ -23,8 +23,9 @@
  *   back up that was undone is in no figure, only in the round log.
  * - **A spend belongs to the account it came out of**: the account recorded
  *   on the spend, never the one its part happens to be in now. A spend
- *   recorded before spends carried their account falls back to the part's
- *   account today, which is the best the log can say about it.
+ *   recorded before spends carried their account is in the account its
+ *   part was in when it was recorded, read from the part's own moves
+ *   (`partAccountHistory`).
  * - **A debt payment** counts toward the balance only when it was recorded
  *   after the balance was last stated, compared to the microsecond (the
  *   engine passes both as exact microsecond counts, so nothing is rounded).
@@ -165,8 +166,12 @@ export function ledgerOf(facts: LedgerFacts): Ledger {
   const addSpend = (accountId: Id | undefined, cents: Cents) => {
     if (accountId) spends.set(accountId, (spends.get(accountId) ?? 0) + cents)
   }
-  const spendAccount = (p: Record<string, unknown>) =>
-    (p.reserve_account_id as Id | undefined) ?? accountOfItem.get(p.line_item_id as Id)
+  const accountAt = partAccountHistory(log, accountOfItem)
+  // The account the spend came out of: recorded on it, or -- for one recorded
+  // before spends carried it -- the account its part was in when it was
+  // recorded, read from the part's own moves.
+  const spendAccount = (p: Record<string, unknown>, row: RecordedEvent) =>
+    (p.reserve_account_id as Id | undefined) ?? accountAt(p.line_item_id as Id, row)
 
   for (const row of log) {
     const p = row.payload
@@ -212,7 +217,7 @@ export function ledgerOf(facts: LedgerFacts): Ledger {
       }
       // A spend from before D53, rolling a repeating part on.
       case 'spend_confirmed':
-        addSpend(spendAccount(p), p.actual_amount_cents as Cents)
+        addSpend(spendAccount(p, row), p.actual_amount_cents as Cents)
         if (p.rolled_to) {
           cycleStarts.push({
             lineItemId: p.line_item_id as Id,
@@ -239,7 +244,7 @@ export function ledgerOf(facts: LedgerFacts): Ledger {
         if (entry.undone) break
         const { undone: _undone, ...event } = entry
         roundEvents.push(event)
-        if (row.kind === 'spend_recorded') addSpend(spendAccount(p), entry.amountCents)
+        if (row.kind === 'spend_recorded') addSpend(spendAccount(p, row), entry.amountCents)
         break
       }
       case 'close_out_snoozed':
@@ -290,6 +295,48 @@ export function ledgerOf(facts: LedgerFacts): Ledger {
     spendsSinceCount: [...spends].map(([accountId, amountCents]) => ({ accountId, amountCents })),
     debtPaymentsSinceStated: sinceStated,
     debtHistory: history,
+  }
+}
+
+/**
+ * Which account a part was in at the moment an event was recorded. Every
+ * move of a part between accounts is a `line_item_changed` with the account
+ * before and after (since migration 0004), so: the account after its last
+ * move recorded before the event; else the account before its first move
+ * after it; else, never moved, the account it is in now -- or, for a part
+ * since deleted with its plan, the one `package_deleted` recorded, or the
+ * one `package_created` recorded.
+ */
+function partAccountHistory(
+  log: readonly RecordedEvent[],
+  accountOfItem: ReadonlyMap<Id, Id>,
+): (lineItemId: Id, at: RecordedEvent) => Id | undefined {
+  const moves = new Map<Id, { row: RecordedEvent; before: Id; after: Id }[]>()
+  const lastKnown = new Map<Id, Id>()
+  for (const row of log) {
+    const p = row.payload
+    if (row.kind === 'line_item_changed') {
+      const before = (p.before as { reserveAccountId?: Id } | undefined)?.reserveAccountId
+      const after = (p.after as { reserveAccountId?: Id } | undefined)?.reserveAccountId
+      if (before && after) {
+        const id = p.line_item_id as Id
+        moves.set(id, [...(moves.get(id) ?? []), { row, before, after }])
+      }
+    } else if (row.kind === 'package_created' || row.kind === 'package_deleted') {
+      for (const item of (p.line_items as { line_item_id: Id; reserve_account_id?: Id }[] | undefined) ?? []) {
+        // A deletion says where it ended; a creation only where it began.
+        if (item.reserve_account_id && (row.kind === 'package_deleted' || !lastKnown.has(item.line_item_id))) {
+          lastKnown.set(item.line_item_id, item.reserve_account_id)
+        }
+      }
+    }
+  }
+  return (lineItemId, at) => {
+    const mine = moves.get(lineItemId) ?? []
+    const before = mine.filter((m) => byRecorded(m.row, at) < 0)
+    if (before.length > 0) return before[before.length - 1]!.after
+    if (mine.length > 0) return mine[0]!.before
+    return accountOfItem.get(lineItemId) ?? lastKnown.get(lineItemId)
   }
 }
 

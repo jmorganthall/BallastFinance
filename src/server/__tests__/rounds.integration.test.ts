@@ -242,4 +242,34 @@ describeDb('rounds (D53)', () => {
     expect(await holds(accountId)).toBe(giftsAfterSpend)
     expect(await holds(otherId)).toBe(funBefore)
   })
+
+  it('keeps a spend recorded before spends carried their account where it came out of', async () => {
+    const otherId = (await engine.createReserveAccount({ name: 'Rainy Day', institutionLabel: 'Cap One' })).id
+    const created = await engine.createPackageFromIntake({
+      contract_version: INTAKE_CONTRACT_VERSION,
+      package: { name: 'Streamers' },
+      line_items: [{ label: 'Streamers', unit_amount: '60', due_date: '2026-11-28', reserve_account: accountId }],
+    })
+    if (!created.ok) throw new Error(JSON.stringify(created.problems))
+    await engine.commitPackage(created.packageId)
+    const streamersId = created.lineItemIds[0]!
+    const holds = async (id: string) =>
+      (await engine.position()).accounts.find((a) => a.account.id === id)!.money.totalCents
+    const [giftsBefore, rainyBefore] = [await holds(accountId), await holds(otherId)]
+
+    // A spend as the app wrote one before spends carried their account.
+    await db.insert(schema.events).values({
+      householdId,
+      kind: 'spend_recorded',
+      occurredAt: '2026-10-24',
+      source: 'manual',
+      payload: { line_item_id: streamersId, round_due: '2026-11-28', amount_cents: 1500 },
+    })
+    expect(await holds(accountId)).toBe(giftsBefore - 1500)
+
+    // The part moves; the $15 that already went out stays out of Gifts & Giving.
+    await engine.updateLineItem(streamersId, { reserveAccountId: otherId })
+    expect(await holds(accountId)).toBe(giftsBefore - 1500)
+    expect(await holds(otherId)).toBe(rainyBefore)
+  })
 })

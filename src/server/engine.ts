@@ -440,6 +440,10 @@ const LEDGER_EVENT_KINDS = [
   'debt_balance_updated',
   'debt_updated',
   'debt_added',
+  // Where each part was when, for spends recorded before they carried their account.
+  'line_item_changed',
+  'package_created',
+  'package_deleted',
 ] as const
 
 type EventKind = (typeof eventKindEnum.enumValues)[number]
