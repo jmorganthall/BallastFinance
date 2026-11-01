@@ -332,8 +332,14 @@ principles, and they are non-negotiable.
   since the count; a transfer alone never) is the one answer to "ask what
   this account holds": This week asks "Update what these accounts hold" and
   the digest says the same once nothing else that moves money is left to
-  do, with the position's likely balance in the box, through the ordinary
-  `confirmBalancesAction` (with `back=home`). The last count is
+  do, through the ordinary `confirmBalancesAction` (with `back=home`). A
+  count is a figure someone checked (PRD D57 (1), rev 111): on This week and
+  the check-in alike each box is empty with the likely balance as a grey
+  hint, and `CountField`'s "It's $X" records exactly the figure it showed;
+  what a form records is `countsFromForm` in `src/domain/check-in.ts`
+  (typed, or the button's figure for its account, an empty box nothing).
+  A plan's page says "Costs in all $X" and, once spends have lowered this
+  round, "· $Y still to have ready", the bar's figure (`planCost`, D57 (2)). The last count is
   `money.from === 'count'` and `money.on`; the check-in nudge reads it
   there. An ask still open is money on its way (D56 (2)), never money
   there: see the D56 entry below. "Record spend" left blank records what the round
@@ -726,7 +732,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 971 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 976 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

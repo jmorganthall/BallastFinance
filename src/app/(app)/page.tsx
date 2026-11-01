@@ -16,6 +16,7 @@ import { AccountPositionCard } from '@/components/account-position'
 import { CloseOutCard } from '@/components/close-out-card'
 import { SmartSavingCard } from '@/components/smart-saving'
 import { MoneySince } from '@/components/money-since'
+import { CountField } from '@/components/count-field'
 import {
   awakeCloseOuts,
   roundKey,
@@ -480,15 +481,7 @@ export default async function ThisWeekPage({
               <Card key={a.account.id}>
                 <p className="font-medium">{a.account.name}</p>
                 <MoneySince money={a.money} today={today} />
-                <label className="mt-3 block text-sm font-medium">
-                  What it actually holds
-                  <input
-                    name={`balance_${a.account.id}`}
-                    inputMode="decimal"
-                    defaultValue={plain(a.money.totalCents)}
-                    className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
-                  />
-                </label>
+                <CountField accountId={a.account.id} likelyCents={a.money.totalCents} />
               </Card>
             ))}
             <button
@@ -498,7 +491,7 @@ export default async function ThisWeekPage({
               Record these balances
             </button>
             <p className="text-center text-xs text-[var(--color-ink-soft)]">
-              Open Capital One and check the figure first; clear a box to skip that account.
+              Check each figure in Capital One first. Type what it holds, or tap It&apos;s $X when the figure is right; an empty box records nothing.
             </p>
           </form>
         </section>

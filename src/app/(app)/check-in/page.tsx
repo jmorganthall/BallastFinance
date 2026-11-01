@@ -14,13 +14,11 @@ import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, PageHeader } from '@/components/ui'
 import { MoneySince } from '@/components/money-since'
+import { CountField } from '@/components/count-field'
 import { AccountPositionCard } from '@/components/account-position'
 import { confirmBalancesAction } from '@/server/actions'
-import { formatCents } from '@/domain'
 
 export const dynamic = 'force-dynamic'
-
-const plain = (cents: number) => formatCents(cents).replace('$', '').replace(/,/g, '')
 
 export default async function CheckInPage({
   searchParams,
@@ -63,15 +61,7 @@ export default async function CheckInPage({
                   {/* The position's own breakdown (D34, D35): the count, then
                       every transfer, move and spend since. */}
                   <MoneySince money={a.money} today={today} />
-                  <label className="mt-3 block text-sm font-medium">
-                    What it actually holds
-                    <input
-                      name={`balance_${a.account.id}`}
-                      inputMode="decimal"
-                      placeholder={plain(a.money.totalCents)}
-                      className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
-                    />
-                  </label>
+                  <CountField accountId={a.account.id} likelyCents={a.money.totalCents} />
                 </Card>
               )
             })}
@@ -83,7 +73,7 @@ export default async function CheckInPage({
               Record these balances
             </button>
             <p className="text-center text-xs text-[var(--color-ink-soft)]">
-              Leave any box empty to skip that account.
+              Type what each account holds, or tap It&apos;s $X when the figure is right. Leave a box empty to skip that account.
             </p>
           </form>
 
