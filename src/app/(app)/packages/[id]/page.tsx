@@ -11,6 +11,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { requireEngine } from '@/server/session'
+import type { Engine } from '@/server/engine'
 import { Card, humanDate, Money, Pill, When } from '@/components/ui'
 import { CloseOutCard } from '@/components/close-out-card'
 import { EditableTitle } from '@/components/editable-title'
@@ -55,7 +56,16 @@ const field =
 /** "600.00": what a person types back into an amount box. */
 const plain = (cents: number) => formatCents(cents).replace('$', '').replace(/,/g, '')
 
-export default async function PackageDetailPage({
+/**
+ * Every figure on the page is read in one snapshot (docs/data-flow.md): a
+ * write landing while the page is read never shows half before it, half after.
+ */
+export default async function PackageDetailPage(props: Parameters<typeof PackageDetailPageRead>[0]) {
+  const { engine } = await requireEngine()
+  return engine.reading((e) => PackageDetailPageRead(props, e))
+}
+
+async function PackageDetailPageRead({
   params,
   searchParams,
 }: {
@@ -67,10 +77,9 @@ export default async function PackageDetailPage({
     snooze_error?: string
     item?: string
   }>
-}) {
+}, engine: Engine) {
   const { id } = await params
   const { error, saved, confirm, snooze_error: snoozeError, item: errorItem } = await searchParams
-  const { engine } = await requireEngine()
 
   const view = (await engine.packageViews()).find((v) => v.package.id === id)
   if (!view) notFound()

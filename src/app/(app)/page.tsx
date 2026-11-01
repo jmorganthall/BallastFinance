@@ -281,13 +281,15 @@ export default async function ThisWeekPage({
   const { balances, snoozed, until, snooze_error: snoozeError, item: errorItem, error } = await searchParams
   const { engine, viewer } = await requireEngine()
   const [{ position, debts: debtState, household }, allCloseOuts, commitments, tripToDos, transferWeekday] =
-    await Promise.all([
-      engine.view(),
-      engine.closeOutPrompts(),
-      engine.openCommitmentsByAccount(),
-      engine.comingUpTripTasks(3),
-      engine.transferWeekday(),
-    ])
+    await engine.reading((e) =>
+      Promise.all([
+        e.view(),
+        e.closeOutPrompts(),
+        e.openCommitmentsByAccount(),
+        e.comingUpTripTasks(3),
+        e.transferWeekday(),
+      ]),
+    )
   const today = engine.today()
   // A snoozed "did this get spent?" is off this screen until it wakes (D38);
   // the one just snoozed stays as a line with an undo, so a slip is cheap.

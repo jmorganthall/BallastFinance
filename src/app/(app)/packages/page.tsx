@@ -38,12 +38,14 @@ export default async function PackagesPage({
 }) {
   const order = readPlanOrder(await searchParams)
   const { engine } = await requireEngine()
-  const [views, position, today, closeOuts] = await Promise.all([
-    engine.packageViews(),
-    engine.position(),
-    Promise.resolve(engine.today()),
-    engine.closeOutPrompts(),
-  ])
+  const [views, position, today, closeOuts] = await engine.reading((e) =>
+    Promise.all([
+      e.packageViews(),
+      e.position(),
+      Promise.resolve(e.today()),
+      e.closeOutPrompts(),
+    ]),
+  )
   // Every figure on a live plan's card is the one position's (D35): the same
   // numbers the plan's own page, This week and the check-in read.
   const reasons = shortReasons(position)

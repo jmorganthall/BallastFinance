@@ -95,6 +95,13 @@ principles, and they are non-negotiable.
   an engine method that writes `reserve_accounts`, `packages`,
   `line_items` or `debts` without it. Settings append: a change is a new
   row, two on one day are two, and the latest written is the setting.
+- **A page reads one moment** (docs/data-flow.md). A page that reads more
+  than one figure does it inside `engine.reading((e) => ...)`, an engine
+  bound to one read-only, repeatable-read transaction (a write inside it
+  fails); This week, Plans, a plan's page, Debts, a debt's page, Share out
+  and the digest do. Nothing under `src/app` or `src/components` imports
+  `@/db/client` or `@/db/schema` (`layers.test.ts`); the export is
+  `Engine.exportAll`, every table the household owns and the whole log.
 - **The app connects as a restricted role** (`ballast_app`); migrations run as
   the owner. Giving the app the owner's credentials silently undoes the
   append-only guarantee. The bootstrap sets that role's password from
@@ -732,7 +739,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 976 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 980 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

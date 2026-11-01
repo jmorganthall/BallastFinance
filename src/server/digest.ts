@@ -79,11 +79,10 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
   const today = engine.today()
 
   // A snoozed "did this get spent?" stays out of the digest until it wakes (D38).
-  const [{ position, debts: debtState, household }, closeOuts, transferWeekday] = await Promise.all([
-    engine.view(),
-    engine.closeOutPrompts().then(awakeCloseOuts),
-    engine.transferWeekday(),
-  ])
+  // One snapshot, so the summary and the body read the same moment.
+  const [{ position, debts: debtState, household }, closeOuts, transferWeekday] = await engine.reading((e) =>
+    Promise.all([e.view(), e.closeOutPrompts().then(awakeCloseOuts), e.transferWeekday()]),
+  )
   // The headline and the list are the household view's (D56), as on This week.
   const caughtUp = household.caughtUp
   const debtsNeeding = debtState.debts.filter((d) => d.status !== 'on_track')

@@ -44,12 +44,14 @@ export default async function DebtsPage({
   const weight = w !== undefined && Number.isFinite(Number(w)) ? Number(w) : standingWeight
   const isPreview = Math.abs(weight - standingWeight) > 0.001
 
-  const [ladder, debtState, debts, today] = await Promise.all([
-    engine.debtLadder(weight),
-    engine.debtStatuses(),
-    engine.listDebts(),
-    Promise.resolve(engine.today()),
-  ])
+  const [ladder, debtState, debts, today] = await engine.reading((e) =>
+    Promise.all([
+      e.debtLadder(weight),
+      e.debtStatuses(),
+      e.listDebts(),
+      Promise.resolve(e.today()),
+    ]),
+  )
   // The debts the payoff order leaves out, so one can be brought back.
   const paidOff = debts.filter(isPaidOff).sort((a, b) => a.name.localeCompare(b.name))
   // Every debt's status, words and staleness come from the one place (D49 (4)-(5)).

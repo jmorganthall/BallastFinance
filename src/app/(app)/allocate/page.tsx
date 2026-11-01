@@ -10,6 +10,7 @@
  */
 
 import { requireEngine } from '@/server/session'
+import type { Engine } from '@/server/engine'
 import { debtTopUps } from '@/server/engine'
 import { Card, Money, PageHeader } from '@/components/ui'
 import { DebtShare } from '@/components/debt-share'
@@ -18,13 +19,21 @@ import { formatCents, parseAmountToCents } from '@/domain'
 
 export const dynamic = 'force-dynamic'
 
-export default async function AllocatePage({
+/**
+ * Every figure on the page is read in one snapshot (docs/data-flow.md): a
+ * write landing while the page is read never shows half before it, half after.
+ */
+export default async function AllocatePage(props: Parameters<typeof AllocatePageRead>[0]) {
+  const { engine } = await requireEngine()
+  return engine.reading((e) => AllocatePageRead(props, e))
+}
+
+async function AllocatePageRead({
   searchParams,
 }: {
   searchParams: Promise<{ floor?: string; error?: string; from?: string; fill?: string | string[] }>
-}) {
+}, engine: Engine) {
   const { floor, error, from, fill } = await searchParams
-  const { engine } = await requireEngine()
   const bufferCents = await engine.bufferCents()
 
   // The optional first step: what is short right now. Before a split has

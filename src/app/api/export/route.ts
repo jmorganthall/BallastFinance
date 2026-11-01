@@ -1,42 +1,35 @@
 /**
  * Household data export (PRD §11: the data-freedom guarantee).
  *
- * Objects plus the full event log, as one JSON file. The event log is the point:
- * without it an export is a snapshot, and every balance in it is unfalsifiable.
- * With it, the whole history can be recomputed from scratch elsewhere.
+ * Every table that belongs to the household, plus the full event log, as one
+ * JSON file, read through the engine in one snapshot so the parts agree
+ * (`Engine.exportAll`). The rows are the household's facts as they stand;
+ * the event log is how they came to be. Every write to an account, a plan,
+ * a part or a debt records its event (the layering plan's Phase 4), and
+ * every money figure Ballast shows is worked out from these rows and events
+ * by `src/domain`, so nothing derived needs exporting. Reference data that
+ * belongs to no household (park and crowd data, public lodging rates) is
+ * left out. Events from before Phase 4 are older than that rule: a few
+ * early rows (an account, a plan, a debt made then) have no creation event,
+ * so the rows here, not the log alone, are the starting point.
  */
 
-import { eq } from 'drizzle-orm'
-import { db } from '@/db/client'
-import { debts, events, lineItems, packages, reserveAccounts, settings } from '@/db/schema'
-import { requireViewer } from '@/server/session'
+import { requireEngine } from '@/server/session'
 
 export const dynamic = 'force-dynamic'
 
 export async function GET(): Promise<Response> {
-  const viewer = await requireViewer()
-  const where = viewer.householdId
-
-  const [accountRows, packageRows, lineItemRows, debtRows, eventRows, settingRows] =
-    await Promise.all([
-      db.select().from(reserveAccounts).where(eq(reserveAccounts.householdId, where)),
-      db.select().from(packages).where(eq(packages.householdId, where)),
-      db.select().from(lineItems).where(eq(lineItems.householdId, where)),
-      db.select().from(debts).where(eq(debts.householdId, where)),
-      db.select().from(events).where(eq(events.householdId, where)),
-      db.select().from(settings).where(eq(settings.householdId, where)),
-    ])
+  const { engine, viewer } = await requireEngine()
+  const tables = await engine.exportAll()
 
   const payload = {
+    format: 2,
     exported_at: new Date().toISOString(),
-    household_id: where,
-    note: 'Amounts are integer cents. Dates are calendar dates in America/Chicago.',
-    reserve_accounts: accountRows,
-    packages: packageRows,
-    line_items: lineItemRows,
-    debts: debtRows,
-    settings: settingRows,
-    events: eventRows,
+    household_id: viewer.householdId,
+    note:
+      'Amounts are integer cents; rates are basis points. Dates are calendar dates in the household\'s timezone. ' +
+      'Every figure Ballast shows is worked out from these rows and events; none is stored.',
+    ...tables,
   }
 
   return new Response(JSON.stringify(payload, null, 2), {
