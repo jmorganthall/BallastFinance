@@ -1854,6 +1854,10 @@ export class Engine {
    * which is v1's only implementation of that interface.
    */
   async confirmBalance(input: { reserveAccountId: Id; amountCents: Cents }): Promise<void> {
+    // A count is a figure someone read off the bank: whole cents, never below zero.
+    if (!Number.isInteger(input.amountCents) || input.amountCents < 0) {
+      throw new EngineError('What the account holds must be zero or more, in whole cents')
+    }
     await this.assertCanWriteAccount(input.reserveAccountId)
 
     await this.db.insert(events).values({
@@ -2240,6 +2244,16 @@ export class Engine {
     instructionId: Id
     actualAmountCents?: Cents
   }): Promise<void> {
+    // A move into or out of an account is funding it: an individual account's
+    // is its owner's to mark done (canWriteAccount), as on every other path.
+    const asked = (await this.listIssuedInstructions()).find((i) => i.instructionId === input.instructionId)
+    if (
+      asked &&
+      (asked.type === 'one_time_move' || asked.type === 'one_time_move_out') &&
+      (await this.listReserveAccounts()).some((a) => a.id === asked.targetId)
+    ) {
+      await this.assertCanWriteAccount(asked.targetId)
+    }
     await this.db.transaction(async (tx) => {
       // "Done" is said once: a double tap or a second press later records
       // nothing more, so the same move can never be counted twice. The lock

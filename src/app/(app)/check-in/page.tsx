@@ -14,7 +14,7 @@ import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, PageHeader } from '@/components/ui'
 import { MoneySince } from '@/components/money-since'
-import { CountField } from '@/components/count-field'
+import { CountField, ItsForms } from '@/components/count-field'
 import { AccountPositionCard } from '@/components/account-position'
 import { confirmBalancesAction } from '@/server/actions'
 
@@ -76,6 +76,7 @@ export default async function CheckInPage({
               Type what each account holds, or tap It&apos;s $X when the figure is right. Leave a box empty to skip that account.
             </p>
           </form>
+          <ItsForms accountIds={live.map((a) => a.account.id)} action={confirmBalancesAction} />
 
           <section className="mt-8">
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">

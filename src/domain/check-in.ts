@@ -3,8 +3,8 @@
  * checked. Each account's box is empty, with the likely balance as a hint,
  * and beside it "It's $X", which records exactly the figure that was shown.
  *
- * - A box typed into records what was typed; one that is not an amount is
- *   skipped, so the other accounts still record.
+ * - A box typed into records what was typed; one that is not an amount, or
+ *   is below zero, is skipped, so the other accounts still record.
  * - "It's $X" records the likely balance it showed, for its own account; it
  *   wins over anything typed in that account's box, because pressing it is
  *   the explicit act.
@@ -38,14 +38,16 @@ export function countsFromForm(args: {
   const pressed = (() => {
     if (!its) return null
     const at = its.lastIndexOf(':')
-    const cents = Number(its.slice(at + 1))
-    return at > 0 && Number.isInteger(cents) ? { accountId: its.slice(0, at), cents } : null
+    const figure = its.slice(at + 1)
+    // Whole cents, nothing else: an empty or odd figure is no figure.
+    return at > 0 && /^\d+$/.test(figure) ? { accountId: its.slice(0, at), cents: Number(figure) } : null
   })()
   return args.accountIds.flatMap((accountId) => {
     if (pressed?.accountId === accountId) return [{ accountId, amountCents: pressed.cents }]
     const raw = (args.field(balanceField(accountId)) ?? '').trim()
     if (raw === '') return []
     const cents = parseAmountOrNull(raw)
-    return cents === null ? [] : [{ accountId, amountCents: cents }]
+    // A balance below zero is not something a person read off the bank.
+    return cents === null || cents < 0 ? [] : [{ accountId, amountCents: cents }]
   })
 }

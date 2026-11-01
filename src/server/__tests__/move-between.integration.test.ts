@@ -157,4 +157,13 @@ describeDb('spare money between accounts (D40)', () => {
       josh.confirmMoveBetween({ fromAccountId: soonId, toAccountId: soonId, amountCents: 100 }),
     ).rejects.toThrow(/two different accounts/)
   })
+
+  it("leaves a move into an individual account's ask to its owner, and refuses a count below zero", async () => {
+    const ask = await josh.issueInstruction({ type: 'one_time_move', amountCents: 1000, targetId: laterId, targetLabel: 'Later', purpose: 'share_out' })
+    await expect(shelby.confirmInstruction({ instructionId: ask })).rejects.toThrow(/belongs to someone else/)
+    await josh.confirmInstruction({ instructionId: ask })
+    expect((await josh.outstandingInstructions()).map((i) => i.instructionId)).not.toContain(ask)
+
+    await expect(josh.confirmBalance({ reserveAccountId: soonId, amountCents: -5000 })).rejects.toThrow(/zero or more/)
+  })
 })

@@ -37,4 +37,13 @@ describe('what a balance form records (D57 (1))', () => {
       }),
     ).toEqual([])
   })
+
+  it('skips a figure below zero, and a button with no figure, rather than record either', () => {
+    expect(
+      countsFromForm({
+        accountIds: ['gifts', 'annual'],
+        field: form({ [ITS_FIELD]: 'gifts:', [balanceField('annual')]: '-50' }),
+      }),
+    ).toEqual([])
+  })
 })

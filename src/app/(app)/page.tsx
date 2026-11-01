@@ -16,7 +16,7 @@ import { AccountPositionCard } from '@/components/account-position'
 import { CloseOutCard } from '@/components/close-out-card'
 import { SmartSavingCard } from '@/components/smart-saving'
 import { MoneySince } from '@/components/money-since'
-import { CountField } from '@/components/count-field'
+import { CountField, ItsForms } from '@/components/count-field'
 import {
   awakeCloseOuts,
   roundKey,
@@ -496,6 +496,7 @@ export default async function ThisWeekPage({
               Check each figure in Capital One first. Type what it holds, or tap It&apos;s $X when the figure is right; an empty box records nothing.
             </p>
           </form>
+          <ItsForms accountIds={toCount.map((a) => a.account.id)} action={confirmBalancesAction} back="home" />
         </section>
       ) : null}
 
