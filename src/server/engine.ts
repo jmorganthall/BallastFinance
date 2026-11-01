@@ -571,6 +571,11 @@ export interface EngineContext {
 }
 
 export class Engine {
+  /**
+   * Bound to one read-only transaction by `reading`: every read sees the same
+   * moment, and a read that would open a snapshot of its own uses this one.
+   */
+  private snapshot: boolean
   private readonly db: Db
   private readonly householdId: Id
   private readonly actorUserId: Id | null
@@ -583,6 +588,124 @@ export class Engine {
     this.actorUserId = context.actorUserId
     this.timezone = context.timezone ?? 'America/Chicago'
     this.pinnedToday = context.today
+    this.snapshot = false
+  }
+
+  /**
+   * Run a page's reads against one moment of the database (docs/data-flow.md,
+   * "One snapshot per page"): the engine handed to `run` is bound to a single
+   * read-only, repeatable-read transaction, so a write landing while the page
+   * is read can never show one figure from before it and one from after.
+   * Only reads: a write inside fails, as a read-only transaction should.
+   */
+  async reading<T>(run: (engine: Engine) => Promise<T>): Promise<T> {
+    if (this.snapshot) return run(this)
+    return this.db.transaction(
+      (tx) => {
+        const bound = new Engine({
+          householdId: this.householdId,
+          actorUserId: this.actorUserId,
+          timezone: this.timezone,
+          db: tx as unknown as Db,
+          // Today is read once, so the whole page shares it too.
+          today: this.today(),
+        })
+        bound.snapshot = true
+        return run(bound)
+      },
+      { isolationLevel: 'repeatable read', accessMode: 'read only' },
+    )
+  }
+
+  /**
+   * Everything this household has, as it stands, for the export (PRD §11,
+   * the data-freedom guarantee): every table that belongs to it -- the
+   * money facts, debts, assets, trips with their variants, lines, days,
+   * reservations and to-dos, the school calendar, lodging quotes, income,
+   * the recurring list and the settings -- and the whole event log, all read
+   * in one snapshot so they agree with each other. Reference data that
+   * belongs to no household (crowd levels, park weather and hours, waits,
+   * lodging rates, broker listings) is the public sources', not the
+   * household's, and is left out.
+   */
+  async exportAll(): Promise<Record<string, unknown[]>> {
+    return this.reading(async (engine) => engine.readEverything())
+  }
+
+  private async readEverything(): Promise<Record<string, unknown[]>> {
+    const mine = this.householdId
+    const [
+      members,
+      accounts,
+      plans,
+      parts,
+      debts,
+      assets,
+      trips,
+      schoolDaysOff,
+      lodgingQuotes,
+      recurringExpenses,
+      incomeSources,
+      incomePayments,
+      settings,
+      log,
+    ] = await Promise.all([
+      this.db
+        .select({ userId: householdMembersTable.userId, email: usersTable.email, name: usersTable.displayName })
+        .from(householdMembersTable)
+        .innerJoin(usersTable, eq(usersTable.id, householdMembersTable.userId))
+        .where(eq(householdMembersTable.householdId, mine)),
+      this.db.select().from(reserveAccountsTable).where(eq(reserveAccountsTable.householdId, mine)),
+      this.db.select().from(packagesTable).where(eq(packagesTable.householdId, mine)),
+      this.db.select().from(lineItemsTable).where(eq(lineItemsTable.householdId, mine)),
+      this.db.select().from(debtsTable).where(eq(debtsTable.householdId, mine)),
+      this.db.select().from(assetsTable).where(eq(assetsTable.householdId, mine)),
+      this.db.select().from(tripsTable).where(eq(tripsTable.householdId, mine)),
+      this.db.select().from(schoolDaysOffTable).where(eq(schoolDaysOffTable.householdId, mine)),
+      this.db.select().from(lodgingQuotesTable).where(eq(lodgingQuotesTable.householdId, mine)),
+      this.db.select().from(recurringExpensesTable).where(eq(recurringExpensesTable.householdId, mine)),
+      this.db.select().from(incomeSourcesTable).where(eq(incomeSourcesTable.householdId, mine)),
+      this.db.select().from(incomePaymentsTable).where(eq(incomePaymentsTable.householdId, mine)),
+      this.db.select().from(settingsTable).where(eq(settingsTable.householdId, mine)),
+      this.db.select().from(events).where(eq(events.householdId, mine)).orderBy(events.recordedAt, events.id),
+    ])
+    // A trip's own facts hang off the trip, and its lines off its ways of doing it.
+    const tripIds = trips.map((t) => t.id)
+    const [variants, days, reservations, tasks] =
+      tripIds.length === 0
+        ? [[], [], [], []]
+        : await Promise.all([
+            this.db.select().from(tripVariantsTable).where(inArray(tripVariantsTable.tripId, tripIds)),
+            this.db.select().from(tripDaysTable).where(inArray(tripDaysTable.tripId, tripIds)),
+            this.db.select().from(tripReservationsTable).where(inArray(tripReservationsTable.tripId, tripIds)),
+            this.db.select().from(tripTasksTable).where(inArray(tripTasksTable.tripId, tripIds)),
+          ])
+    const variantIds = variants.map((v) => v.id)
+    const lines =
+      variantIds.length === 0
+        ? []
+        : await this.db.select().from(tripLinesTable).where(inArray(tripLinesTable.variantId, variantIds))
+    return {
+      members,
+      reserve_accounts: accounts,
+      packages: plans,
+      line_items: parts,
+      debts,
+      assets,
+      trips,
+      trip_variants: variants,
+      trip_lines: lines,
+      trip_days: days,
+      trip_reservations: reservations,
+      trip_tasks: tasks,
+      school_days_off: schoolDaysOff,
+      lodging_quotes: lodgingQuotes,
+      recurring_expenses: recurringExpenses,
+      income_sources: incomeSources,
+      income_payments: incomePayments,
+      settings,
+      events: log,
+    }
   }
 
   /** Today in the household's timezone. The single source of "now". */
@@ -1530,6 +1653,8 @@ export class Engine {
 
   /** A read-only transaction that sees one moment of the database. */
   private inSnapshot<T>(run: (tx: Tx) => Promise<T>): Promise<T> {
+    // Already inside a page's snapshot (`reading`): that one is this one.
+    if (this.snapshot) return run(this.db as unknown as Tx)
     return this.db.transaction(run, { isolationLevel: 'repeatable read', accessMode: 'read only' })
   }
 

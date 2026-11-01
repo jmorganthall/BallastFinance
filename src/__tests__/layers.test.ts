@@ -66,6 +66,13 @@ describe('the layers (D56 (6))', () => {
     )
     expect(found).toEqual([])
   })
+
+  it('no screen, component or route reads the database except through the engine', () => {
+    const found = [...files('src/app'), ...files('src/components')].filter((path) =>
+      /from '@\/db\/(client|schema)'/.test(readFileSync(path, 'utf8')),
+    )
+    expect(found).toEqual([])
+  })
 })
 
 /** The rows money figures are built from: a write to one goes with its event. */

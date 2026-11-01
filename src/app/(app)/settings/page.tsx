@@ -338,8 +338,9 @@ export default async function SettingsPage({
       </h2>
       <Card>
         <p className="text-sm">
-          Everything Ballast knows — plans, accounts, debts, and the full history of every
-          confirmation — downloads as one file.
+          Everything Ballast knows about your household — accounts, plans, debts, trips, income,
+          the recurring list, your settings, and the full history of every change — downloads as
+          one file.
         </p>
         <a
           href="/api/export"

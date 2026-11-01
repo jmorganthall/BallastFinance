@@ -102,11 +102,6 @@ screens worked out themselves, and rows changed with nothing in the log. Each it
 left is a place where a figure depends on more than the three layers above, so it is
 worth knowing when a number looks odd.
 
-**One snapshot per read, not per page.**
-- Each engine read is consistent within itself, but a screen makes several (the position,
-  the open asks, the debt statuses). A write landing between two of them can show one
-  figure from before it and one from after, until the next page drawn.
-
 **Rows kept beside their events.**
 - A part's stored due date is its oldest open round (D53 (9)), moved on by `settleRounds`,
   and a debt's balance goes to zero when a payment clears it (`settleDebtIfCleared`).
@@ -125,7 +120,16 @@ worth knowing when a number looks odd.
   a part or a debt without recording an event (`recordEvent`) as it does.
 - Settings append (migration 0027): a change is a new row, never an edit, and the latest
   written is the setting.
+- One snapshot per page: This week, the plans list, a plan's page, Debts, a debt's page,
+  Share out and the digest read through `Engine.reading`, an engine bound to one
+  read-only, repeatable-read transaction, so a write landing while a page is read is seen
+  by none of its figures until the next page drawn. The same layers test fails if a
+  screen, a component or a route reads the database other than through the engine.
+- The export (`/api/export`, `Engine.exportAll`) is every table the household owns plus
+  the whole event log, read in one snapshot. Rows made before Phase 4 may have no
+  creation event, so the rows, not the log alone, are its starting point.
 
 ## Still to do
 
-- One snapshot per page, by reading the household view once.
+- Move the last sums in `engine.ts` (sharing an opening across parts at commit,
+  `debtTopUps`, `lessPaid`) into the domain.

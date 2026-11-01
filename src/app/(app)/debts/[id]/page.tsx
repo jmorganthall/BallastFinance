@@ -64,13 +64,15 @@ export default async function DebtPage({
 }) {
   const [{ id }, { extra, once, saved, error }] = await Promise.all([params, searchParams])
   const { engine } = await requireEngine()
-  const [debts, debtState, ladder, history, targets] = await Promise.all([
-    engine.listDebts(),
-    engine.debtStatuses(),
-    engine.debtLadder(),
-    engine.debtHistory(id),
-    engine.simplifiTargets(),
-  ])
+  const [debts, debtState, ladder, history, targets] = await engine.reading((e) =>
+    Promise.all([
+      e.listDebts(),
+      e.debtStatuses(),
+      e.debtLadder(),
+      e.debtHistory(id),
+      e.simplifiTargets(),
+    ]),
+  )
   const simplifiNames = targets.find((t) => t.kind === 'debt' && t.id === id)?.simplifiNames ?? []
   const debt = debts.find((d) => d.id === id)
   if (!debt) notFound()
