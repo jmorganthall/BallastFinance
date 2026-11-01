@@ -668,6 +668,32 @@ export const schoolDaysOff = pgTable(
 )
 
 /**
+ * A school year's first or last day of school (D59): the household's own
+ * fact, typed or found in a school calendar's feed, one row for each end of
+ * each year. A feed never replaces a typed day. Which days are school is
+ * derived from these and the days off; nothing derived is stored.
+ */
+export const schoolYearDays = pgTable(
+  'school_year_days',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    householdId: uuid('household_id')
+      .notNull()
+      .references(() => households.id, { onDelete: 'cascade' }),
+    schoolYear: text('school_year').notNull(),
+    which: text('which').notNull(),
+    date: date('date').notNull(),
+    source: text('source').notNull(),
+    sourceUrl: text('source_url'),
+    recordedOn: date('recorded_on').notNull(),
+  },
+  (t) => [
+    uniqueIndex('school_year_days_key_idx').on(t.householdId, t.schoolYear, t.which),
+    check('school_year_days_which', sql`${t.which} in ('first', 'last')`),
+  ],
+)
+
+/**
  * A DVC room a broker had on a date (D26): resort, room, check-in, nights,
  * points and price, as their public page listed it, with the source and the
  * day it was read. Reference data shared across households like crowd

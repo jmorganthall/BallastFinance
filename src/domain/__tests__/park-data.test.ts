@@ -379,6 +379,10 @@ describe('the calendar', () => {
       hours,
       busyness: { crowdLevels: [crowd('2026-10-12', 'other', 7, 'ropedrop', '2026-09-20'), crowd('2026-10-25', 'magic_kingdom', 3, 'typed', '2026-09-10')] },
       daysOff: [{ date: '2026-10-12', label: 'Fall break' }],
+      schoolYearDays: [
+        { schoolYear: '2026-27', which: 'first', date: '2026-08-12' },
+        { schoolYear: '2026-27', which: 'last', date: '2027-05-28' },
+      ],
       holidays: [{ date: '2026-10-12', name: 'Columbus Day' }],
       blackouts: [{ from: '2026-10-05', to: '2026-10-09', label: 'Work trip' }],
       today: '2026-10-03',

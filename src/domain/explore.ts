@@ -43,6 +43,7 @@ import {
   type DayOffInput,
   type WeekWeights,
 } from './trip-when'
+import { schoolYearSpans, type SchoolYearDay } from './school-year'
 
 export interface ExploreInput {
   today: CivilDate
@@ -54,6 +55,8 @@ export interface ExploreInput {
   driveMinutes: number | null
   busyness: BusynessSources
   daysOff: readonly (DayOffInput & { schoolYear?: string })[]
+  /** The stated first and last days of school (D59). */
+  schoolYearDays?: readonly Pick<SchoolYearDay, 'schoolYear' | 'which' | 'date'>[]
   blackoutDates: readonly BlackoutRange[]
   weights?: WeekWeights
   limit?: number
@@ -107,14 +110,16 @@ export function explore(input: ExploreInput): Explore {
   // One look per date, not per window: a year of windows reads the same days many times.
   const level = new Map<CivilDate, number | null>()
   const school = new Map<CivilDate, boolean>()
+  const yearDays = input.schoolYearDays ?? []
+  const spans = schoolYearSpans(input.daysOff, yearDays)
   const offName = new Map<CivilDate, string>()
   for (const h of holidays) offName.set(h.date, h.name)
   for (const d of input.daysOff) if (!offName.has(d.date)) offName.set(d.date, d.label)
   for (let d = addDays(horizonFrom, -2); compareDates(d, lastDay) <= 0; d = addDays(d, 1)) {
     level.set(d, busynessFor({ ...input.busyness, date: d, park: 'other' })?.level ?? null)
-    school.set(d, isSchoolDay(d, input.daysOff, holidays))
+    school.set(d, isSchoolDay(d, input.daysOff, holidays, yearDays, spans))
   }
-  const isSchool = (d: CivilDate) => school.get(d) ?? isSchoolDay(d, input.daysOff, holidays)
+  const isSchool = (d: CivilDate) => school.get(d) ?? isSchoolDay(d, input.daysOff, holidays, yearDays, spans)
   const blackoutsOn = (d: CivilDate) => input.blackoutDates.filter((b) => compareDates(b.from, d) <= 0 && compareDates(d, b.to) <= 0)
   const isCantGo = (d: CivilDate) => blackoutsOn(d).length > 0
 
@@ -181,7 +186,7 @@ export function explore(input: ExploreInput): Explore {
     top: pickTop(scored, input.limit ?? BEST_WEEKS_SHOWN),
     considered: measured.length,
     excludedByBlackout: measured.length - eligible.length,
-    daysOffKnown: input.daysOff.length > 0,
+    daysOffKnown: input.daysOff.length > 0 || yearDays.length > 0,
     driveKnown: input.driveMinutes !== null,
     horizonFrom,
     horizonTo,

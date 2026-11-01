@@ -17,6 +17,7 @@ import {
   keepSchoolCalendarAction,
   readSchoolCalendarSourceAction,
   removeSchoolDayOffAction,
+  saveSchoolYearDaysAction,
   saveBlackoutDatesAction,
   saveHomeAddressAction,
   saveParkDataSourcesAction,
@@ -89,6 +90,16 @@ function dayOffSourceName(source: string): string {
   return source
 }
 
+/** Under a first or last day of school: where it came from, or, while nobody has said, what it is counted from (D59). */
+function schoolYearEndWords(stated: { date: string; source: string } | null, guess: string | null, which: 'first' | 'last'): string {
+  if (stated) {
+    const words = dayOffSourceName(stated.source)
+    return words.charAt(0).toUpperCase() + words.slice(1)
+  }
+  if (guess) return `Not set: counted from the ${which} day off, ${weekdayName(guess).slice(0, 3)} ${shortDate(guess)}`
+  return 'Not set'
+}
+
 function bySchoolYear(days: readonly SchoolDayOff[]): { schoolYear: string; days: SchoolDayOff[] }[] {
   const groups = new Map<string, SchoolDayOff[]>()
   for (const d of days) groups.set(d.schoolYear, [...(groups.get(d.schoolYear) ?? []), d])
@@ -138,7 +149,7 @@ export default async function TripsPage({
     drive: driveParam,
   } = await searchParams
   const { engine } = await requireEngine()
-  const [trips, prices, home, blackouts, today, daysOff, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames, pendingCrowds] =
+  const [trips, prices, home, blackouts, today, daysOff, schoolYears, calendarSources, pendingCalendar, horizonMonths, weekWeights, outlookUrl, waitParkNames, pendingCrowds] =
     await Promise.all([
       engine.listTrips(),
       engine.referencePrices(),
@@ -146,6 +157,7 @@ export default async function TripsPage({
       engine.blackoutDates(),
       Promise.resolve(engine.today()),
       engine.schoolDaysOff(),
+      engine.schoolYearsAhead(),
       engine.schoolCalendarSources(),
       engine.pendingSchoolCalendar(),
       engine.horizonMonths(),
@@ -465,6 +477,16 @@ export default async function TripsPage({
                 them.
                 {pendingCalendar.source.startsWith('read:') ? ' The reader can misread a table, so check the dates against the document.' : ''}
               </p>
+              {(pendingCalendar.yearDays ?? []).length > 0 ? (
+                <ul className="mt-2 text-sm">
+                  {(pendingCalendar.yearDays ?? []).map((d) => (
+                    <li key={`${d.schoolYear}|${d.which}`}>
+                      {d.which === 'first' ? 'First' : 'Last'} day of school for {d.schoolYear}: {weekdayName(d.date).slice(0, 3)} {shortDate(d.date)},{' '}
+                      {d.date.slice(0, 4)} <span className="text-xs text-[var(--color-ink-soft)]">· {d.label}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               <ul className="mt-2 max-h-64 overflow-y-auto text-xs text-[var(--color-ink-soft)]">
                 {pendingCalendar.items.map((d) => (
                   <li key={`${d.date}|${d.label}`}>
@@ -492,6 +514,37 @@ export default async function TripsPage({
             </Card>
           ) : null}
           <Card>
+            <h3 className="text-sm font-semibold">When school starts and ends</h3>
+            <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+              Every day before the first day of school and after the last is summer: no school missed, and the calendar
+              shades it. A district&apos;s calendar feed fills these in when it names them; what you type here stays.
+            </p>
+            <ul className="mb-4 divide-y divide-[var(--color-line)]">
+              {schoolYears.map((y) => (
+                <li key={y.schoolYear} className="py-2">
+                  <form action={saveSchoolYearDaysAction} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+                    <input type="hidden" name="school_year" value={y.schoolYear} />
+                    <input type="hidden" name="first_day_was" value={y.first?.date ?? ''} />
+                    <input type="hidden" name="last_day_was" value={y.last?.date ?? ''} />
+                    <p className="col-span-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">{y.schoolYear}</p>
+                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                      First day of school
+                      <input name="first_day" type="date" defaultValue={y.first?.date ?? ''} className={input} />
+                      <span className="mt-0.5 block">{schoolYearEndWords(y.first, y.guessFirst, 'first')}</span>
+                    </label>
+                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                      Last day of school
+                      <input name="last_day" type="date" defaultValue={y.last?.date ?? ''} className={input} />
+                      <span className="mt-0.5 block">{schoolYearEndWords(y.last, y.guessLast, 'last')}</span>
+                    </label>
+                    <button type="submit" className={`${smallButton} self-start mt-4`}>
+                      Save
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+            <h3 className="text-sm font-semibold">Days off school</h3>
             <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
               Days off school make long weekends, and a trip on a school day is a day missed. The best-weeks list on each trip
               uses both. Type the days, or point at the district&apos;s calendar below and read it in.

@@ -13,6 +13,7 @@ import {
   assertCivilDate,
   describeRecurrence,
   recurrenceOf,
+  type CivilDate,
   type Recurrence,
   type ThemePark,
   type TimelineStart,
@@ -1768,6 +1769,26 @@ export async function addSchoolDayOffAction(formData: FormData): Promise<void> {
     const date = String(formData.get('date') ?? '')
     assertCivilDate(date)
     await engine.addSchoolDayOff({ date, label: String(formData.get('label') ?? ''), schoolYear: String(formData.get('school_year') ?? '') || null })
+  })
+  backToTrips(done.message, 'saved=1', '#school')
+}
+
+/**
+ * A school year's first and last day of school (D59 (1)). Only an end the
+ * person changed is sent: an unchanged box keeps whatever is there, typed or
+ * from a feed; an emptied one takes the day back.
+ */
+export async function saveSchoolYearDaysAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const done = await tripRefusalOf(async () => {
+    const end = (field: 'first_day' | 'last_day'): CivilDate | null | undefined => {
+      const value = String(formData.get(field) ?? '').trim()
+      if (value === String(formData.get(`${field}_was`) ?? '').trim()) return undefined
+      if (value === '') return null
+      assertCivilDate(value)
+      return value
+    }
+    await engine.setSchoolYearDays({ schoolYear: String(formData.get('school_year') ?? ''), first: end('first_day'), last: end('last_day') })
   })
   backToTrips(done.message, 'saved=1', '#school')
 }

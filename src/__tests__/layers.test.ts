@@ -97,6 +97,7 @@ const HOUSEHOLD_FACT_TABLES = [
   'tripReservationsTable',
   'tripTasksTable',
   'schoolDaysOffTable',
+  'schoolYearDaysTable',
   'lodgingQuotesTable',
   'recurringExpensesTable',
   'incomeSourcesTable',
@@ -112,6 +113,7 @@ const RECORDS = /\.insert\(events\)|this\.(recordEvent|recordTripChange|recordSc
  */
 const WRITES_FOR_A_CALLER: Record<string, string> = {
   replaceLines: "a trip's lines laid out again; every caller (addVariant, updateVariant, refreshFetchedLines, and updateTrip / shiftTrip through rebuildVariants) records the trip change that causes it",
+  takeFeedSchoolYearDays: "a feed's first and last days of school, written inside importSchoolCalendar's transaction, which records them in its one school_calendar_changed event",
 }
 
 describe('the facts (Phase 4)', () => {

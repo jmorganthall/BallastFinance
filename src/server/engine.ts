@@ -37,6 +37,7 @@ import {
   databaseBackups as databaseBackupsTable,
   backupNoticeDismissals as backupNoticeDismissalsTable,
   schoolDaysOff as schoolDaysOffTable,
+  schoolYearDays as schoolYearDaysTable,
   tripDays as tripDaysTable,
   tripLines as tripLinesTable,
   tripReservations as tripReservationsTable,
@@ -255,6 +256,15 @@ import {
   listingWindow,
   listingsForTrip,
   schoolYearOf,
+  schoolYearOfBound,
+  splitSchoolYearDays,
+  schoolYearDaysNote,
+  schoolYearRows,
+  type SchoolYearRow,
+  validateSchoolYearDay,
+  validateSchoolYearSpan,
+  type SchoolYearBound,
+  type SchoolYearDay,
   validateDayOff,
   validateDvcListing,
   validateHorizonMonths,
@@ -476,9 +486,14 @@ export interface SchoolCalendarPending {
   /** The year as the document names it; a feed does not say, so each day's is worked out from its date. */
   schoolYear: string | null
   items: DayOffInput[]
+  /** The first and last days of school the feed named (D59 (4)), kept apart from the days off. Absent on a hold from before D59. */
+  yearDays?: FeedSchoolYearDay[]
   readOn: CivilDate
   notes: string[]
 }
+
+/** A first or last day of school as a feed named it (D59 (4)). */
+export type FeedSchoolYearDay = Pick<SchoolYearDay, 'schoolYear' | 'which' | 'date'> & { label: string }
 
 /** DVC rooms a broker had, held for the person to look at before they are kept (D26). */
 export interface DvcPull {
@@ -648,6 +663,7 @@ export class Engine {
       assets,
       trips,
       schoolDaysOff,
+      schoolYearDays,
       lodgingQuotes,
       recurringExpenses,
       incomeSources,
@@ -667,6 +683,7 @@ export class Engine {
       this.db.select().from(assetsTable).where(eq(assetsTable.householdId, mine)),
       this.db.select().from(tripsTable).where(eq(tripsTable.householdId, mine)),
       this.db.select().from(schoolDaysOffTable).where(eq(schoolDaysOffTable.householdId, mine)),
+      this.db.select().from(schoolYearDaysTable).where(eq(schoolYearDaysTable.householdId, mine)),
       this.db.select().from(lodgingQuotesTable).where(eq(lodgingQuotesTable.householdId, mine)),
       this.db.select().from(recurringExpensesTable).where(eq(recurringExpensesTable.householdId, mine)),
       this.db.select().from(incomeSourcesTable).where(eq(incomeSourcesTable.householdId, mine)),
@@ -704,6 +721,7 @@ export class Engine {
       trip_reservations: reservations,
       trip_tasks: tasks,
       school_days_off: schoolDaysOff,
+      school_year_days: schoolYearDays,
       lodging_quotes: lodgingQuotes,
       recurring_expenses: recurringExpenses,
       income_sources: incomeSources,
@@ -3785,7 +3803,7 @@ export class Engine {
     ])
     const variant = planningVariant(trip, variants)
     const today = this.today()
-    const [horizonMonths, weekWeights, daysOff, pendingDvcPull] = await Promise.all([this.horizonMonths(), this.weekWeights(), this.schoolDaysOff(), this.pendingDvcPull()])
+    const [horizonMonths, weekWeights, daysOff, schoolYearDays, pendingDvcPull] = await Promise.all([this.horizonMonths(), this.weekWeights(), this.schoolDaysOff(), this.schoolYearDays(), this.pendingDvcPull()])
     // One read of the crowd levels covers the ±3 weeks and the whole horizon the best-weeks list looks across.
     const from = addDays(trip.startDate, -7 * 3)
     const to = addDays(trip.endDate, 7 * 3)
@@ -3808,7 +3826,7 @@ export class Engine {
       crowdLevels,
       blackoutDates,
       pendingPull,
-      bestWeeks: bestWeeks({ ...pricing, days, crowdLevels, busyness, daysOff, blackoutDates, horizonMonths, weights: weekWeights }),
+      bestWeeks: bestWeeks({ ...pricing, days, crowdLevels, busyness, daysOff, schoolYearDays, blackoutDates, horizonMonths, weights: weekWeights }),
       horizonMonths,
       weekWeights,
       dvcListings,
@@ -4227,6 +4245,108 @@ export class Engine {
     })
   }
 
+  /** The school years that touch today to a year from today, each with its first and last day of school (D59 (1)). */
+  async schoolYearsAhead(): Promise<SchoolYearRow[]> {
+    const [daysOff, yearDays] = await Promise.all([this.schoolDaysOff(), this.schoolYearDays()])
+    return schoolYearRows(this.today(), daysOff, yearDays)
+  }
+
+  /** The first and last days of school stated so far (D59), by school year, first before last. */
+  async schoolYearDays(): Promise<SchoolYearDay[]> {
+    const rows = await this.db
+      .select()
+      .from(schoolYearDaysTable)
+      .where(eq(schoolYearDaysTable.householdId, this.householdId))
+      .orderBy(schoolYearDaysTable.schoolYear, schoolYearDaysTable.which)
+    return rows.map(toSchoolYearDay)
+  }
+
+  /**
+   * A school year's first and last day of school as a person typed them (D59
+   * (1)). Each end is a date, null to take it back (the year is counted from
+   * its days off again), or left out to stay as it is; both ends are checked
+   * together, so moving both at once never trips over the old pair. A day has
+   * to belong to the year it is typed for. What did not change records
+   * nothing.
+   */
+  async setSchoolYearDays(input: { schoolYear: string; first?: CivilDate | null; last?: CivilDate | null }): Promise<void> {
+    const schoolYear = input.schoolYear.trim()
+    if (!/^\d{4}-\d{2}$/.test(schoolYear)) throw new EngineError('Say which school year this is, like 2026-27.')
+    const asked = (['first', 'last'] as const).flatMap((which) => (input[which] === undefined ? [] : [{ which, date: input[which] as CivilDate | null }]))
+    for (const a of asked) {
+      if (a.date === null) continue
+      validateSchoolYearDay({ which: a.which, date: a.date })
+      const belongs = schoolYearOfBound(a.which, a.date)
+      if (belongs !== schoolYear) throw new EngineError(`${a.which === 'first' ? 'A first day' : 'A last day'} on that date belongs to the ${belongs} school year, not ${schoolYear}.`)
+    }
+    await this.db.transaction(async (tx) => {
+      const rows = (await tx.select().from(schoolYearDaysTable).where(and(eq(schoolYearDaysTable.householdId, this.householdId), eq(schoolYearDaysTable.schoolYear, schoolYear)))).map(toSchoolYearDay)
+      const now = (which: SchoolYearBound) => rows.find((r) => r.which === which) ?? null
+      const after = (which: SchoolYearBound) => {
+        const a = asked.find((x) => x.which === which)
+        return a ? a.date : (now(which)?.date ?? null)
+      }
+      validateSchoolYearSpan(after('first'), after('last'))
+      const changed = asked.filter((a) => a.date !== (now(a.which)?.date ?? null) || (a.date !== null && now(a.which)?.source !== 'typed'))
+      if (changed.length === 0) return
+      for (const a of changed) {
+        const where = and(eq(schoolYearDaysTable.householdId, this.householdId), eq(schoolYearDaysTable.schoolYear, schoolYear), eq(schoolYearDaysTable.which, a.which))
+        if (a.date === null) await tx.delete(schoolYearDaysTable).where(where)
+        else {
+          await tx
+            .insert(schoolYearDaysTable)
+            .values({ householdId: this.householdId, schoolYear, which: a.which, date: a.date, source: 'typed', sourceUrl: null, recordedOn: this.today() })
+            .onConflictDoUpdate({
+              target: [schoolYearDaysTable.householdId, schoolYearDaysTable.schoolYear, schoolYearDaysTable.which],
+              set: { date: a.date, source: 'typed', sourceUrl: null, recordedOn: this.today() },
+            })
+        }
+      }
+      await this.recordSchoolCalendarChange(tx, {
+        added: [],
+        removed: [],
+        source: 'typed',
+        source_url: null,
+        year_days: changed.map((a) => ({ school_year: schoolYear, which: a.which, before: now(a.which)?.date ?? null, after: a.date })),
+      })
+    })
+  }
+
+  /**
+   * A feed's first and last days of school, inside the import's own
+   * transaction (D59 (4)): a typed day is never replaced, an end no feed has
+   * named yet is added, one a feed named before moves to the new date. What
+   * changed is returned for the import's one event.
+   */
+  private async takeFeedSchoolYearDays(
+    tx: Conn,
+    days: readonly FeedSchoolYearDay[],
+    source: string,
+    sourceUrl: string | null,
+  ): Promise<{ school_year: string; which: SchoolYearBound; before: CivilDate | null; after: CivilDate | null }[]> {
+    if (days.length === 0) return []
+    const existing = (await tx.select().from(schoolYearDaysTable).where(eq(schoolYearDaysTable.householdId, this.householdId))).map(toSchoolYearDay)
+    const changed: { school_year: string; which: SchoolYearBound; before: CivilDate | null; after: CivilDate | null }[] = []
+    for (const d of days) {
+      validateSchoolYearDay(d)
+      const have = existing.find((e) => e.schoolYear === d.schoolYear && e.which === d.which)
+      if (have?.source === 'typed' || have?.date === d.date) continue
+      const other = existing.find((e) => e.schoolYear === d.schoolYear && e.which !== d.which)
+      const first = d.which === 'first' ? d.date : other?.date ?? null
+      const last = d.which === 'last' ? d.date : other?.date ?? null
+      if (first && last && compareDates(first, last) >= 0) continue
+      await tx
+        .insert(schoolYearDaysTable)
+        .values({ householdId: this.householdId, schoolYear: d.schoolYear, which: d.which, date: d.date, source, sourceUrl, recordedOn: this.today() })
+        .onConflictDoUpdate({
+          target: [schoolYearDaysTable.householdId, schoolYearDaysTable.schoolYear, schoolYearDaysTable.which],
+          set: { date: d.date, source, sourceUrl, recordedOn: this.today() },
+        })
+      changed.push({ school_year: d.schoolYear, which: d.which, before: have?.date ?? null, after: d.date })
+    }
+    return changed
+  }
+
   /**
    * A calendar brought in whole (D25, D27): what it lists and is not here
    * yet is added; what this same source and link gave before and the
@@ -4234,7 +4354,14 @@ export class Engine {
    * another source are never touched. The same calendar again changes
    * nothing and records nothing, so an import is safe to repeat.
    */
-  async importSchoolCalendar(input: { items: readonly DayOffInput[]; source: string; sourceUrl: string | null; schoolYear?: string | null }): Promise<{ added: number; removed: number }> {
+  async importSchoolCalendar(input: {
+    items: readonly DayOffInput[]
+    source: string
+    sourceUrl: string | null
+    schoolYear?: string | null
+    /** The first and last days of school the calendar named (D59 (4)). */
+    yearDays?: readonly FeedSchoolYearDay[]
+  }): Promise<{ added: number; removed: number; yearDays: number }> {
     const source = input.source.trim()
     if (!source) throw new EngineError('An import needs to say where it came from.')
     const items = input.items.map((i) => ({ date: i.date, label: i.label.trim() }))
@@ -4244,7 +4371,8 @@ export class Engine {
       const diff = diffDaysOff(existing, items)
       const mine = new Set(existing.filter((e) => e.source === source && (e.sourceUrl ?? null) === (input.sourceUrl ?? null)).map((e) => `${e.date}|${e.label.toLowerCase()}`))
       const remove = diff.remove.filter((r) => mine.has(`${r.date}|${r.label.toLowerCase()}`))
-      if (diff.add.length === 0 && remove.length === 0) return { added: 0, removed: 0 }
+      const yearDays = await this.takeFeedSchoolYearDays(tx, input.yearDays ?? [], source, input.sourceUrl)
+      if (diff.add.length === 0 && remove.length === 0 && yearDays.length === 0) return { added: 0, removed: 0, yearDays: 0 }
       for (const d of diff.add) {
         await tx
           .insert(schoolDaysOffTable)
@@ -4269,8 +4397,9 @@ export class Engine {
         removed: remove.map((r) => ({ date: r.date, label: r.label })),
         source,
         source_url: input.sourceUrl,
+        ...(yearDays.length > 0 ? { year_days: yearDays } : {}),
       })
-      return { added: diff.add.length, removed: remove.length }
+      return { added: diff.add.length, removed: remove.length, yearDays: yearDays.length }
     })
   }
 
@@ -4324,11 +4453,12 @@ export class Engine {
     destination: TripDestination = 'wdw',
   ): Promise<Explore & { shape: TripShape; stay: string }> {
     const today = this.today()
-    const [shape, horizonMonths, weights, daysOff, blackoutDates, home, prices] = await Promise.all([
+    const [shape, horizonMonths, weights, daysOff, schoolYearDays, blackoutDates, home, prices] = await Promise.all([
       this.tripShape(),
       this.horizonMonths(),
       this.weekWeights(),
       this.schoolDaysOff(),
+      this.schoolYearDays(),
       this.blackoutDates(),
       this.homeLocation(),
       this.referencePrices(),
@@ -4352,6 +4482,7 @@ export class Engine {
       driveMinutes: drive?.minutes ?? null,
       busyness,
       daysOff,
+      schoolYearDays,
       blackoutDates,
       weights,
       priceOf: (w) => windowPrice(w, { stay, rates, quotes, today, roadNightCents }),
@@ -4535,7 +4666,18 @@ export class Engine {
       try {
         const items = await fetchSchoolCalendarIcal(source.url, fetchImpl)
         if (items.length > 0) {
-          await this.stashSchoolCalendar({ label: source.label, source: 'ical', sourceUrl: source.url, schoolYear: null, items, readOn: this.today(), notes: [`${source.label}: ${items.length} days read from the feed.`] })
+          // The first and last days of school are not days off: they set where each year runs (D59 (4)).
+          const split = splitSchoolYearDays(items)
+          await this.stashSchoolCalendar({
+            label: source.label,
+            source: 'ical',
+            sourceUrl: source.url,
+            schoolYear: null,
+            items: split.daysOff,
+            yearDays: split.yearDays,
+            readOn: this.today(),
+            notes: [`${source.label}: ${split.daysOff.length} ${split.daysOff.length === 1 ? 'day' : 'days'} off read from the feed${schoolYearDaysNote(split.yearDays)}.`],
+          })
           return { ok: true, count: items.length }
         }
         notes.push(`${source.label}: nothing in the feed read as a day off.`)
@@ -4558,8 +4700,10 @@ export class Engine {
       await this.stashSchoolCalendar(null)
       return { ok: false, notes: [...notes, result.reason] }
     }
-    const calendar = result.value as { schoolYear: string; daysOff: DayOffInput[] }
-    if (calendar.daysOff.length === 0) {
+    const answered = result.value as { schoolYear: string; daysOff: DayOffInput[] }
+    const split = splitSchoolYearDays(answered.daysOff)
+    const calendar = { schoolYear: answered.schoolYear, daysOff: split.daysOff }
+    if (calendar.daysOff.length === 0 && split.yearDays.length === 0) {
       await this.stashSchoolCalendar(null)
       return { ok: false, notes: [...notes, `The reader found no days off in ${source.label}.`] }
     }
@@ -4569,8 +4713,9 @@ export class Engine {
       sourceUrl: source.url,
       schoolYear: calendar.schoolYear,
       items: calendar.daysOff,
+      yearDays: split.yearDays,
       readOn: this.today(),
-      notes: [...notes, `The reader read ${calendar.daysOff.length} days off from ${source.label}.`],
+      notes: [...notes, `The reader read ${calendar.daysOff.length} ${calendar.daysOff.length === 1 ? 'day' : 'days'} off from ${source.label}${schoolYearDaysNote(split.yearDays)}.`],
     })
     return { ok: true, count: calendar.daysOff.length }
   }
@@ -4586,10 +4731,12 @@ export class Engine {
   }
 
   /** "Keep these": the held calendar becomes days off with its source and link, and the hold is cleared. */
-  async keepSchoolCalendar(): Promise<{ added: number; removed: number }> {
+  async keepSchoolCalendar(): Promise<{ added: number; removed: number; yearDays: number }> {
     const pending = await this.pendingSchoolCalendar()
     if (!pending) throw new EngineError('There is nothing waiting to be kept.')
-    const done = await this.importSchoolCalendar({ items: pending.items, source: pending.source, sourceUrl: pending.sourceUrl, schoolYear: pending.schoolYear })
+    // A hold from before D59 has its first and last days of school among the days off: split them now.
+    const split = pending.yearDays ? { daysOff: pending.items, yearDays: pending.yearDays } : splitSchoolYearDays(pending.items)
+    const done = await this.importSchoolCalendar({ items: split.daysOff, source: pending.source, sourceUrl: pending.sourceUrl, schoolYear: pending.schoolYear, yearDays: split.yearDays })
     await this.stashSchoolCalendar(null)
     return done
   }
@@ -5065,10 +5212,12 @@ export class Engine {
   async calendarMonth(month: string, destination: TripDestination = 'wdw'): Promise<CalendarMonth> {
     validateMonth(month)
     const range = monthBounds(month)
-    const [weather, hours, daysOff, blackouts, busyness, trips] = await Promise.all([
+    const [weather, hours, daysOff, schoolYearDays, blackouts, busyness, trips] = await Promise.all([
       this.parkWeather(range, destination),
       this.parkHours(range, destination),
-      this.schoolDaysOff(range),
+      // Every day off, not only this month's: where a school year runs can rest on a day months away (D59).
+      this.schoolDaysOff(),
+      this.schoolYearDays(),
       this.blackoutDates(),
       this.busynessSources(range, destination),
       this.calendarTrips(destination),
@@ -5079,6 +5228,7 @@ export class Engine {
       hours,
       busyness,
       daysOff,
+      schoolYearDays,
       holidays: federalHolidaysBetween(range.from, range.to),
       blackouts,
       today: this.today(),
@@ -5110,7 +5260,14 @@ export class Engine {
 
   private async recordSchoolCalendarChange(
     tx: Conn,
-    payload: { added: DayOffInput[]; removed: { date: CivilDate; label: string }[]; source: string; source_url: string | null },
+    payload: {
+      added: DayOffInput[]
+      removed: { date: CivilDate; label: string }[]
+      source: string
+      source_url: string | null
+      /** First and last days of school that changed (D59), each end of a year with its date before and after. */
+      year_days?: { school_year: string; which: SchoolYearBound; before: CivilDate | null; after: CivilDate | null }[]
+    },
   ): Promise<void> {
     await tx.insert(events).values({
       householdId: this.householdId,
@@ -6245,6 +6402,10 @@ function toSchoolDayOff(r: typeof schoolDaysOffTable.$inferSelect): SchoolDayOff
     sourceUrl: r.sourceUrl,
     recordedOn: r.recordedOn as CivilDate,
   }
+}
+
+function toSchoolYearDay(r: typeof schoolYearDaysTable.$inferSelect): SchoolYearDay {
+  return { schoolYear: r.schoolYear, which: r.which as SchoolYearBound, date: r.date as CivilDate, source: r.source, sourceUrl: r.sourceUrl }
 }
 
 function toDvcListing(r: typeof dvcListingsTable.$inferSelect): DvcListing {

@@ -197,6 +197,13 @@
       "when": 1793564610853,
       "tag": "0027_every_fact_logged",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1793573484380,
+      "tag": "0028_school_year_days",
+      "breakpoints": true
     }
   ]
 }
