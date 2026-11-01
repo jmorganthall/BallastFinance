@@ -1620,6 +1620,9 @@ export class Engine {
         .select({
           id: debtsTable.id,
           balanceRecordedAtMicros: sql<string>`(extract(epoch from ${debtsTable.balanceRecordedAt}) * 1000000)::bigint::text`,
+          statedBalanceCents: debtsTable.balanceCents,
+          balanceAsOf: debtsTable.balanceAsOf,
+          enteredOn: debtsTable.enteredOn,
         })
         .from(debtsTable)
         .where(eq(debtsTable.householdId, this.householdId)),
@@ -1635,7 +1638,11 @@ export class Engine {
         }),
       ),
       lineItems,
-      debts,
+      debts: debts.map((d) => ({
+        ...d,
+        balanceAsOf: d.balanceAsOf as CivilDate,
+        enteredOn: d.enteredOn as CivilDate,
+      })),
     })
   }
 

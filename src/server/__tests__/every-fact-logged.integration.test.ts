@@ -139,4 +139,29 @@ describeDb('every money fact is written with its event (Phase 4)', () => {
       .where(and(eq(schema.settings.householdId, householdId), eq(schema.settings.key, 'transfer_weekday')))
     expect(rows.map((r) => r.value).sort()).toEqual([3, 5])
   })
+
+  it("opens an older debt's history with its balance while untouched, and with the day it was entered once paid", async () => {
+    // A debt as it was entered before Phase 4: a row, no debt_added.
+    const [row] = await db
+      .insert(schema.debts)
+      .values({
+        householdId,
+        name: 'Old card',
+        category: 'consumer',
+        balanceCents: 120000,
+        balanceAsOf: '2026-08-01',
+        aprBasisPoints: 2499,
+        promoRules: [],
+        minPaymentRule: { type: 'fixed', amountCents: 4000 },
+        state: 'open',
+        enteredOn: '2026-08-03',
+      })
+      .returning()
+    expect(await engine.debtHistory(row!.id)).toEqual([{ on: '2026-08-01', kind: 'stated', amountCents: 120000 }])
+
+    await engine.confirmDebtPayment({ debtId: row!.id, amountCents: 4000 })
+    const history = await engine.debtHistory(row!.id)
+    expect(history[0]).toEqual({ on: '2026-08-03', kind: 'entered' })
+    expect(history.map((e) => e.kind)).toEqual(['entered', 'paid'])
+  })
 })
