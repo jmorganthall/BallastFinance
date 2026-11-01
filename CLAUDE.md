@@ -93,9 +93,12 @@ principles, and they are non-negotiable.
   snapshots; a part moved on by its rounds is one with `reason: 'rounds'`;
   the zero a clearing payment writes is a `debt_balance_updated` with
   `cleared_by_payment` (the history lists the payment, not a second
-  balance). Use `recordEvent(tx, kind, payload)`. `layers.test.ts` fails on
-  an engine method that writes `reserve_accounts`, `packages`,
-  `line_items` or `debts` without it. Settings append: a change is a new
+  balance). Use `recordEvent(tx, kind, payload)` (or the module's own
+  `recordTripChange`, `recordSchoolCalendarChange`,
+  `recordLodgingQuoteChange`). `layers.test.ts` fails on an engine method
+  that writes any household table without one; a helper that writes for a
+  caller is excused only by name in `WRITES_FOR_A_CALLER`, with a reason,
+  and every caller up its chain must record. Settings append: a change is a new
   row, two on one day are two, and the latest written is the setting.
 - **A page reads one moment** (docs/data-flow.md). A page that reads more
   than one figure does it inside `engine.reading((e) => ...)`, an engine
@@ -744,7 +747,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 993 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 994 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

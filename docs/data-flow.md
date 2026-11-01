@@ -109,11 +109,26 @@ worth knowing when a number looks odd.
   event in the same transaction (`line_item_changed` with `reason: 'rounds'`;
   `debt_balance_updated` with `cleared_by_payment`), so the log alone explains the row.
 
+**Stored values in the planner modules (trips, parks, Explore), reviewed 2026-11-01.**
+None feeds a money figure, and none is copied and kept in sync by hand:
+- A trip's lines, days and to-dos are rows because a person edits them (a typed cost, a
+  park picked for a day, a to-do ticked); the default lines and the booking timeline are
+  laid out again from the trip and never overwrite what a person typed or ticked (D20,
+  D22). Each change is recorded as a `trip_changed`.
+- `trips.home` is the trip's own starting point; saving the household's address only
+  fills it in on trips that have none located yet, recording each.
+- Weather normals, the gas price, a drive's time and the mortgage rate are caches of
+  public data, each with its source and the day fetched, rebuilt by fetching again (D9
+  allows a cache that can be rebuilt).
+
 ## How it stays this way
 
 - `src/__tests__/layers.test.ts` fails if a screen, a component or the digest imports a
-  calculation behind a money figure, and if an engine method writes an account, a plan,
-  a part or a debt without recording an event (`recordEvent`) as it does.
+  calculation behind a money figure, and if an engine method writes any table the
+  household owns -- accounts, plans, parts, debts, assets, trips and their parts, the
+  school calendar, lodging quotes, income, the recurring list -- without recording an
+  event as it does. A helper that writes for a caller is excused only by name, with a
+  reason, and the test checks every caller up the chain records.
 - Settings append (migration 0027): a change is a new row, never an edit, and the latest
   written is the setting.
 - One snapshot per page: This week, the plans list, a plan's page, Debts, a debt's page,
