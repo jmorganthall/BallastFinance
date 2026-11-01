@@ -109,10 +109,6 @@ worth knowing when a number looks odd.
   event in the same transaction (`line_item_changed` with `reason: 'rounds'`;
   `debt_balance_updated` with `cleared_by_payment`), so the log alone explains the row.
 
-**Old spends read through today's rows.**
-- A spend recorded before spends carried their account (before the ledger) is put in
-  the account its part is in now. Spends recorded since keep their own account.
-
 ## How it stays this way
 
 - `src/__tests__/layers.test.ts` fails if a screen, a component or the digest imports a

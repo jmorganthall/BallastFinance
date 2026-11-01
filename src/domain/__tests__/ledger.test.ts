@@ -88,6 +88,42 @@ describe('the ledger', () => {
     ])
   })
 
+  it('puts an old spend in the account its part was in when it was recorded', () => {
+    const move = (id: string, from: string, to: string) => ({
+      id,
+      kind: 'line_item_changed',
+      payload: {
+        line_item_id: 'part',
+        before: { unitAmountCents: 100, quantity: 1, dueDate: '2026-12-01', reserveAccountId: from },
+        after: { unitAmountCents: 100, quantity: 1, dueDate: '2026-12-01', reserveAccountId: to },
+      },
+    })
+    const spend = (id: string, cents: number, line = 'part') => ({
+      id,
+      kind: 'spend_recorded',
+      payload: { line_item_id: line, round_due: '2026-12-01', amount_cents: cents },
+    })
+    const ledger = ledgerOf({
+      events: log([
+        spend('s1', 100), // before any move: in the account it was moved out of
+        move('m1', 'annual', 'gifts'),
+        spend('s2', 20), // between the moves: where the first move put it
+        move('m2', 'gifts', 'fun'),
+        spend('s3', 3), // after the last move: where it is now
+        // A part deleted with its plan, never moved: where the deletion says it was.
+        { id: 'd', kind: 'package_deleted', payload: { package_id: 'p', line_items: [{ line_item_id: 'gone', reserve_account_id: 'gifts' }] } },
+        spend('s4', 4000, 'gone'),
+      ]),
+      lineItems: [{ id: 'part', reserveAccountId: 'fun' }],
+      debts: [],
+    })
+    expect(ledger.spendsSinceCount).toEqual([
+      { accountId: 'annual', amountCents: 100 },
+      { accountId: 'gifts', amountCents: 4020 },
+      { accountId: 'fun', amountCents: 3 },
+    ])
+  })
+
   it('takes a debt payment off only when recorded after the balance was stated, to the microsecond', () => {
     const stated = 1_790_000_000_000_000
     const ledger = ledgerOf({
