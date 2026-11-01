@@ -295,9 +295,11 @@ export interface AccountMoneyToday {
   /** The likely balance: start + transfers + moves − spends. */
   totalCents: Cents
   /**
-   * A move or a spend a person marked done since the last count: money no
-   * count has seen, so This week and the digest ask what the account holds.
-   * A transfer alone never does, or it would ask every week.
+   * Money went out of the account since the last count -- a move out or a
+   * spend marked done -- so This week and the digest ask what it holds
+   * (D34, D58). Money coming in never asks: a transfer runs as set up and a
+   * move in is the amount the person moved, so what the account holds is
+   * known; what went out is where the estimate can be wrong.
    */
   countOwed: boolean
 }
@@ -1094,7 +1096,7 @@ export function moneyToday(args: {
     openingsSinceCents: laterOpeningsCents,
     spendsSinceCents,
     totalCents: startCents + transfersSinceCents + movesSinceCents - spendsSinceCents,
-    countOwed: mine.some((m) => m.amountCents !== 0) || spends.length > 0,
+    countOwed: mine.some((m) => m.amountCents < 0) || spends.some((x) => x.amountCents > 0),
   }
 }
 

@@ -168,3 +168,48 @@ export function planAllocation(args: {
         : [],
   }
 }
+
+/**
+ * What each part of a plan already holds as it is committed (PRD §5, D30,
+ * D33): either what was said per part, each capped at the part's cost and
+ * never below zero, or one figure shared by cost -- largest remainder, so
+ * the parts add up to exactly what was said -- across the parts whose
+ * timeline starts at the commit, and across all of them only when none
+ * does. `openingCents` is the total the commit event records.
+ */
+export function commitOpenings(args: {
+  items: readonly { id: string; unitAmountCents: Cents; quantity: number; timelineStart: string }[]
+  openingCents?: Cents
+  perItem?: Readonly<Record<string, Cents>>
+}): { openingCents: Cents; shares: Cents[] } {
+  const cost = (i: (typeof args.items)[number]) => i.unitAmountCents * i.quantity
+  if (args.perItem) {
+    const perItem = args.perItem
+    return {
+      openingCents: Object.values(perItem).reduce((sum, cents) => sum + Math.max(0, cents), 0),
+      shares: args.items.map((item) => Math.max(0, Math.min(perItem[item.id] ?? 0, cost(item)))),
+    }
+  }
+  const openingCents = Math.max(0, args.openingCents ?? 0)
+  const fromCommit = args.items.filter((i) => i.timelineStart === 'commit')
+  const sharedAmong = fromCommit.length > 0 ? fromCommit : args.items
+  const shared =
+    openingCents > 0 && sharedAmong.length > 0 ? apportion(openingCents, sharedAmong.map(cost)) : null
+  return {
+    openingCents,
+    shares: args.items.map((item) => {
+      const at = sharedAmong.indexOf(item)
+      return shared && at >= 0 ? (shared[at] ?? 0) : 0
+    }),
+  }
+}
+
+/** What a share-out puts toward each debt off the top ("cover what is short"), by debt. */
+export function debtTopUps(plan: Pick<AllocationPlan, 'topUps'>): Record<string, Cents> {
+  const paid: Record<string, Cents> = {}
+  for (const t of plan.topUps) {
+    if (t.kind !== 'debt') continue
+    paid[t.targetId] = (paid[t.targetId] ?? 0) + t.amountCents
+  }
+  return paid
+}

@@ -272,20 +272,16 @@ function stopAdjustment(
 }
 
 /**
- * Everything still on the way into (or out of) one account that a check-in
- * must not offer again (D18): bumps and cuts running or waiting, and one-time
- * catch-up moves and move-outs still on the to-do list. What has been marked
- * done since the last count is the position's (`AccountMoneyToday`), never
- * a second ledger here.
+ * The bumps and cuts from before D35 still changing what one account's
+ * transfer moves (D18), shortened if stopped: what This week lists under the
+ * account so each can be stopped. Asks still open are the household view's
+ * (D56), and what was marked done since the last count is the position's
+ * (`AccountMoneyToday`); neither is a second ledger here.
  */
 export interface OpenCommitments {
   reserveAccountId: Id
   /** Confirmed bumps and cuts, shortened if stopped. */
   running: DriftAdjustment[]
-  /** Offered bumps and cuts nobody has acted on yet. */
-  pending: DriftAdjustment[]
-  /** One-time catch-up moves (positive) and move-outs (negative) still open, at their full amount. */
-  pendingMoves: { instructionId: Id; amountCents: Cents }[]
 }
 
 /** A one-time move a person marked done, signed: into the account positive, out of it negative. */
@@ -298,24 +294,10 @@ export interface DoneMove {
 export function openCommitmentsFor(args: {
   reserveAccountId: Id
   accepted: readonly DriftAdjustment[]
-  pending: readonly DriftAdjustment[]
-  outstanding: readonly OutstandingInstruction[]
 }): OpenCommitments {
-  const mine = (a: DriftAdjustment) => a.reserveAccountId === args.reserveAccountId
-  const pendingMoves: OpenCommitments['pendingMoves'] = []
-  for (const i of args.outstanding) {
-    if (i.targetId !== args.reserveAccountId) continue
-    if (i.type === 'one_time_move' && (i.purpose ?? 'catch_up') === 'catch_up') {
-      pendingMoves.push({ instructionId: i.instructionId, amountCents: i.amountCents })
-    } else if (i.type === 'one_time_move_out') {
-      pendingMoves.push({ instructionId: i.instructionId, amountCents: -i.amountCents })
-    }
-  }
   return {
     reserveAccountId: args.reserveAccountId,
-    running: args.accepted.filter(mine),
-    pending: args.pending.filter(mine),
-    pendingMoves,
+    running: args.accepted.filter((a) => a.reserveAccountId === args.reserveAccountId),
   }
 }
 

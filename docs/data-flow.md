@@ -80,7 +80,7 @@ On the next page drawn after a fact changes. Nothing waits for a job, and no num
 | --- | --- | --- |
 | Mark "Set the transfer to $Y" done | `set_weekly_transfer` issued and confirmed together | the run-forward, from the transfer after the day it is marked done; the status; the to-dos |
 | Mark a one-time move or a move between accounts done | the move (both sides together, for a move between) | money today, until the next count |
-| Record what an account holds (typed, or "It's $X") | `balance_confirmed` | money today starts from the count; earlier moves and spends are inside it |
+| Record what an account holds (typed, or "It's $X"; asked for only after money went out, D58) | `balance_confirmed` | money today starts from the count; earlier moves and spends are inside it |
 | Record a spend, finish a round, save back up, undo | `spend_recorded` · `round_finished` · `round_saved_back_up` · `event_undone` | money today, the round open now, the weekly amount |
 | Add or edit a plan or a part | rows, plus a `line_item_*` event | the requirements, so the weekly amount and every to-do |
 | Change the transfer day or the rounding step | a setting | every weekly figure |
@@ -131,5 +131,6 @@ worth knowing when a number looks odd.
 
 ## Still to do
 
-- Move the last sums in `engine.ts` (sharing an opening across parts at commit,
-  `debtTopUps`, `lessPaid`) into the domain.
+Nothing from the audit of 2026-10-31. The sums that were left in `engine.ts` moved into
+the domain (`commitOpenings` and `debtTopUps` in `allocation.ts`, the optimizer's own
+`lessPaid`).

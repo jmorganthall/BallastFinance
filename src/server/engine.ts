@@ -69,7 +69,6 @@ import {
   validateTripShape,
   type Explore,
   type TripShape,
-  apportion,
   debtStatuses,
   type DebtHistoryEntry,
   type DebtStatuses,
@@ -87,6 +86,8 @@ import {
   DEFAULT_TRANSFER_WEEKDAY,
   isWeekday,
   ledgerOf,
+  commitOpenings,
+  debtTopUps,
   householdView,
   type HouseholdView,
   onItsWayOf,
@@ -906,11 +907,6 @@ export class Engine {
     } = {},
   ): Promise<void> {
     const today = this.today()
-    const perItem = options.openingByLineItem
-    const openingCents = perItem
-      ? Object.values(perItem).reduce((sum, cents) => sum + Math.max(0, cents), 0)
-      : Math.max(0, options.openingCents ?? 0)
-
     await this.db.transaction(async (tx) => {
       const [pkg] = await tx
         .select()
@@ -982,25 +978,13 @@ export class Engine {
         .set({ state: 'accruing' })
         .where(and(eq(lineItemsTable.packageId, packageId), eq(lineItemsTable.state, 'planned')))
 
-      // A single figure is shared across the parts that start at the commit;
-      // across all of them only when there is no such part.
-      const fromCommit = items.filter((i) => i.timelineStart === 'commit')
-      const sharedAmong = fromCommit.length > 0 ? fromCommit : items
-      const shared =
-        !perItem && openingCents > 0 && sharedAmong.length > 0
-          ? apportion(
-              openingCents,
-              sharedAmong.map((i) => i.unitAmountCents * i.quantity),
-            )
-          : null
-      const shares = perItem
-        ? items.map((item) =>
-            Math.max(0, Math.min(perItem[item.id] ?? 0, item.unitAmountCents * item.quantity)),
-          )
-        : items.map((item) => {
-            const at = sharedAmong.indexOf(item)
-            return shared && at >= 0 ? (shared[at] ?? 0) : 0
-          })
+      // What each part already holds: what was said per part, or one figure
+      // shared by cost across the parts that start at the commit (domain).
+      const { openingCents, shares } = commitOpenings({
+        items,
+        openingCents: options.openingCents,
+        perItem: options.openingByLineItem,
+      })
 
       await tx.insert(events).values({
         householdId: this.householdId,
@@ -1892,26 +1876,15 @@ export class Engine {
   }
 
   /**
-   * Per account, everything still on the way that a check-in must size its
-   * offer net of (D18): bumps and cuts running or waiting, and one-time
-   * catch-up moves or move-outs still on the to-do list. The screen hands
-   * this to the domain; it works nothing out for itself.
+   * Per account, the bumps and cuts from before D35 still running (D18), so
+   * This week can list each under its account with "Stop this".
    */
   async openCommitmentsByAccount(): Promise<Map<Id, OpenCommitments>> {
-    const [accounts, adjustments, outstanding] = await Promise.all([
-      this.listReserveAccounts(),
-      this.driftAdjustments(),
-      this.outstandingInstructions(),
-    ])
+    const [accounts, adjustments] = await Promise.all([this.listReserveAccounts(), this.driftAdjustments()])
     return new Map(
       accounts.map((account) => [
         account.id,
-        openCommitmentsFor({
-          reserveAccountId: account.id,
-          accepted: adjustments.accepted,
-          pending: adjustments.pending,
-          outstanding,
-        }),
+        openCommitmentsFor({ reserveAccountId: account.id, accepted: adjustments.accepted }),
       ]),
     )
   }
@@ -3063,10 +3036,8 @@ export class Engine {
     ])
     const lessPaid = options.lessPaid ?? {}
     return optimiseLumpSum({
-      debts: debts.map((d) => ({
-        ...d,
-        balanceCents: Math.max(0, d.balanceCents - (lessPaid[d.id] ?? 0)),
-      })),
+      debts,
+      lessPaid,
       amountCents,
       today: this.today(),
       weight,
@@ -6359,14 +6330,6 @@ function assetEventShape(a: Asset) {
 }
 
 /** The share-out's first step, as the debt step must see it: what is already going at each debt. */
-export function debtTopUps(plan: AllocationPlan): Record<Id, Cents> {
-  const paid: Record<Id, Cents> = {}
-  for (const t of plan.topUps) {
-    if (t.kind !== 'debt') continue
-    paid[t.targetId] = (paid[t.targetId] ?? 0) + t.amountCents
-  }
-  return paid
-}
 
 function toLineItem(r: typeof lineItemsTable.$inferSelect): LineItem {
   return {

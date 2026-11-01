@@ -213,9 +213,8 @@ describe('outstanding instructions', () => {
       expect(late.accepted[0]).toMatchObject({ amountCents: 16000, endDate: '2026-12-26' })
     })
 
-    it('gathers what is still on the way into one account, and what it will deliver after a day', () => {
+    it('lists the bumps and cuts still running in one account, and nothing still asked', () => {
       const bump: DriftAdjustment = { id: 'bump', reserveAccountId: 'acct-annual', amountCents: 16000, startDate: '2026-11-01', endDate: '2026-12-26' }
-      const cut: DriftAdjustment = { id: 'cut', reserveAccountId: 'acct-annual', amountCents: -8000, startDate: '2026-11-01', endDate: '2026-12-26' }
       const elsewhere: DriftAdjustment = { ...bump, id: 'other', reserveAccountId: 'acct-lt' }
       const outstanding = outstandingInstructions({
         issued: [
@@ -227,18 +226,12 @@ describe('outstanding instructions', () => {
         confirmed: [],
         today: TODAY,
       })
-      const commitments = openCommitmentsFor({
-        reserveAccountId: 'acct-annual',
-        accepted: [bump, elsewhere],
-        pending: [cut],
-        outstanding,
-      })
+      // Only what is running is listed; open asks are the household view's (D56).
+      const commitments = openCommitmentsFor({ reserveAccountId: 'acct-annual', accepted: [bump, elsewhere] })
       expect(commitments.running.map((a) => a.id)).toEqual(['bump'])
-      expect(commitments.pending.map((a) => a.id)).toEqual(['cut'])
-      expect(commitments.pendingMoves).toEqual([
-        { instructionId: 'move', amountCents: 5000 },
-        { instructionId: 'out', amountCents: -1200 },
-      ])
+      expect(commitments).not.toHaveProperty('pending')
+      expect(commitments).not.toHaveProperty('pendingMoves')
+      expect(outstanding.map((i) => i.instructionId)).toContain('move')
     })
 
     it('carries a move marked done since the last count as money the account holds (D34)', () => {
@@ -257,7 +250,7 @@ describe('outstanding instructions', () => {
       expect(doneMoveOf(issued({ instructionId: 't' }), { instructionId: 't', confirmedOn: '2026-11-05' })).toBeNull()
 
       // What was marked done since the last count is the position's to add up, not a second ledger here.
-      expect(openCommitmentsFor({ reserveAccountId: 'acct-annual', accepted: [bump], pending: [], outstanding: [] })).not.toHaveProperty('doneMoves')
+      expect(openCommitmentsFor({ reserveAccountId: 'acct-annual', accepted: [bump] })).not.toHaveProperty('doneMoves')
     })
 
 

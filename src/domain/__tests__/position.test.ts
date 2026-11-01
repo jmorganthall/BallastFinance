@@ -1148,7 +1148,7 @@ describe('invariants over randomised households (D35)', () => {
         // 0. What the account likely holds is said in the same pieces it is
         // added up from (D34, D35): the sentence on check-in and This week
         // can never disagree with the number, and a recount is owed exactly
-        // when a move or a spend was marked done since the count.
+        // when money went out since the count, a move out or a spend (D58).
         const mine = facts.movesSinceCount!.filter((m) => m.accountId === a.account.id)
         const spent = facts.spendsSinceCount!.filter((m) => m.accountId === a.account.id)
         expect(a.money.movesInCents).toBe(mine.filter((m) => m.amountCents > 0).reduce((t, m) => t + m.amountCents, 0))
@@ -1157,7 +1157,7 @@ describe('invariants over randomised households (D35)', () => {
         expect(a.money.totalCents).toBe(
           a.money.startCents + a.money.transfersSinceCents + a.money.movesSinceCents - a.money.spendsSinceCents,
         )
-        expect(a.money.countOwed).toBe(mine.length > 0 || spent.length > 0)
+        expect(a.money.countOwed).toBe(mine.some((m) => m.amountCents < 0) || spent.some((m) => m.amountCents > 0))
         expect(moneySinceSentence(a.money)).toContain(`Likely holds ${formatCents(a.money.totalCents)}.`)
 
         // 1. At W with M made, every date passes -- and W is the smallest that does.

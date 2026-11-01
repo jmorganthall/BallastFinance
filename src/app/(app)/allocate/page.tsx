@@ -11,11 +11,10 @@
 
 import { requireEngine } from '@/server/session'
 import type { Engine } from '@/server/engine'
-import { debtTopUps } from '@/server/engine'
 import { Card, Money, PageHeader } from '@/components/ui'
 import { DebtShare } from '@/components/debt-share'
 import { runAllocationAction, updateDebtBalanceAction } from '@/server/actions'
-import { formatCents, parseAmountToCents } from '@/domain'
+import { debtTopUps, formatCents, parseAmountToCents } from '@/domain'
 
 export const dynamic = 'force-dynamic'
 
