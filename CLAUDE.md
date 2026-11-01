@@ -42,7 +42,7 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `ledger.ts` is the middle layer: `ledgerOf` puts the household's events in order once (counts, transfers, moves, spends, rounds, snoozes, instructions, debt payments and history) and every reader of those reads it, through `Engine.ledger()`. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `trip-shape.ts` is the family's trip shape (D55): park days, the easy stretch, the split-drive rules and the "Plan this" layout. `explore.ts` ranks the best times to go in that shape, with no trip, and shades the year strip. `night-cost.ts` is what a night costs (D55 (5)): the trust ladder, a window's price, and the resortings.com parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `ledger.ts` is the middle layer: `ledgerOf` puts the household's events in order once (counts, transfers, moves, spends, rounds, snoozes, instructions, debt payments and history) and every reader of those reads it, through `Engine.ledger()`. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `school-year.ts` is where each school year runs (D59): its first and last day of school, which days are school (`isSchoolDay` in trip-when reads it) and which the calendar shades (`outOfSchool`), and the first and last days a feed names. `trip-shape.ts` is the family's trip shape (D55): park days, the easy stretch, the split-drive rules and the "Plan this" layout. `explore.ts` ranks the best times to go in that shape, with no trip, and shades the year strip. `night-cost.ts` is what a night costs (D55 (5)): the trust ladder, a window's price, and the resortings.com parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `self-update.ts` is the one call to the household's own Watchtower on the LAN ("Update now"), off unless `WATCHTOWER_URL` is set; `db-backup.ts` runs `pg_dump` for the bootstrap. `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -486,7 +486,24 @@ principles, and they are non-negotiable.
   iCal feed, or read by the reader — and every change to it is a
   `school_calendar_changed` event; a school year is taken to run from its
   first listed day off to its last, and with no calendar at all every
-  weekday counts as school. `dvc_listings` is household-independent
+  weekday counts as school. **Each school year has a first and a last day**
+  (PRD D59, rev 113): `school_year_days` (migration 0028, one row an end of a
+  year, typed or `ical` / `read:<model>`), and `schoolYearSpans` in
+  `src/domain/school-year.ts` runs a year from its stated first day to its
+  last, an end nobody stated still the first or last listed day off. A first
+  day belongs to the year it starts (`schoolYearOfBound`: a July 28 start is
+  that year's), a last day to the year it ends; a first day is July to
+  October, a last April to July. The calendar shades every day out of school
+  (`outOfSchool`: weekends, days off, every day outside a known year, so
+  summer; a federal holiday alone stays unshaded), and ranking, Explore and
+  school days missed read the same spans. A feed event titled as the first or
+  last day of school for students (`schoolYearBoundOf`; never a teachers'
+  day) is split out of the days off (`splitSchoolYearDays`), held with them
+  and kept by the same import; a feed never replaces a typed day.
+  `Engine.setSchoolYearDays` takes either end or both (null takes one back)
+  and checks the pair together; the /trips form sends only what changed
+  (`first_day_was`). Every change is a `school_calendar_changed` with
+  `year_days`. `dvc_listings` is household-independent
   reference data like `crowd_levels`: what a broker had on a date, shown
   beside the lodging line and never the line itself, never in money math.
   Both pulls are held in a setting and shown before they are kept.
@@ -751,7 +768,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 997 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 1012 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

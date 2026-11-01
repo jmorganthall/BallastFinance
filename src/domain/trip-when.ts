@@ -46,6 +46,9 @@ import type { Id } from './types'
 import type { Trip } from './trip'
 import { busynessSources, crowdWord, priceWindowCents, TripPlanError, type BlackoutRange, type CrowdLevel, type TripDay, type WindowPricingInput } from './trip-plan'
 import { busynessFor, type BusynessSources } from './park-data'
+import { fitsSchoolYearBound, outOfSchool, schoolYearOf, schoolYearSpans, type SchoolYearBound, type SchoolYearDay } from './school-year'
+// Days off are placed in their year by schoolYearOf; it lives with the rest of the school year now.
+export { schoolYearOf } from './school-year'
 
 // ---------------------------------------------------------------- facts
 
@@ -67,6 +70,7 @@ export interface DayOffInput {
   date: CivilDate
   label: string
 }
+
 
 export type SchoolCalendarSourceKind = 'ical' | 'pdf' | 'page'
 
@@ -178,11 +182,20 @@ export function validateHorizonMonths(months: number): void {
   if (!Number.isInteger(months) || months < 1 || months > 24) throw new TripPlanError('The horizon is a whole number of months, 1 to 24.')
 }
 
-/** "2026-27" for a date in the school year that starts in August 2026. */
-export function schoolYearOf(date: CivilDate): string {
-  const [y, m] = date.split('-').map(Number) as [number, number]
-  const start = m >= 8 ? y : y - 1
-  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`
+
+/** A first day falls July to October, a last day April to July, and the first comes before the last. */
+export function validateSchoolYearDay(input: { which: SchoolYearBound; date: CivilDate }): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date) || Number.isNaN(Date.parse(`${input.date}T00:00:00Z`))) {
+    throw new TripPlanError('A first or last day of school is a date, like 2026-08-12.')
+  }
+  if (!fitsSchoolYearBound(input.which, input.date)) {
+    throw new TripPlanError(input.which === 'first' ? 'The first day of school is in July, August, September or October.' : 'The last day of school is in April, May, June or July.')
+  }
+}
+
+/** Both days of one year, when both are said, in order. */
+export function validateSchoolYearSpan(first: CivilDate | null, last: CivilDate | null): void {
+  if (first && last && compareDates(first, last) >= 0) throw new TripPlanError('The first day of school has to come before the last.')
 }
 
 // ---------------------------------------------------------------- federal holidays
@@ -389,34 +402,31 @@ function rangesOverlap(aFrom: CivilDate, aTo: CivilDate, bFrom: CivilDate, bTo: 
 
 /**
  * Whether a date is a school day: a weekday, not a day off, not a federal
- * holiday, and inside a school year the calendar knows. A school year runs
- * from its first listed day off to its last, so a summer with nothing listed
- * is not school. With no calendar at all, every weekday counts, and the
- * screen says the calendar is missing.
+ * holiday, and inside a school year the calendar knows, from its first day
+ * of school to its last (D59; an end nobody stated is the year's first or
+ * last listed day off), so a summer is not school. With no calendar at all,
+ * every weekday counts, and the screen says the calendar is missing.
  */
-export function isSchoolDay(date: CivilDate, daysOff: readonly (DayOffInput & { schoolYear?: string })[], holidays: readonly Holiday[]): boolean {
-  const wd = weekday(date)
-  if (wd === 0 || wd === 6) return false
+export function isSchoolDay(
+  date: CivilDate,
+  daysOff: readonly (DayOffInput & { schoolYear?: string })[],
+  holidays: readonly Holiday[],
+  yearDays: readonly Pick<SchoolYearDay, 'schoolYear' | 'which' | 'date'>[] = [],
+  spans?: Map<string, { from: CivilDate; to: CivilDate }>,
+): boolean {
   if (holidays.some((h) => h.date === date)) return false
-  if (daysOff.some((d) => d.date === date)) return false
-  if (daysOff.length === 0) return true
-  const spans = new Map<string, { from: CivilDate; to: CivilDate }>()
-  for (const d of daysOff) {
-    const year = d.schoolYear ?? schoolYearOf(d.date)
-    const have = spans.get(year)
-    spans.set(year, have ? { from: minDate(have.from, d.date), to: maxDate(have.to, d.date) } : { from: d.date, to: d.date })
-  }
-  for (const s of spans.values()) if (compareDates(date, s.from) >= 0 && compareDates(date, s.to) <= 0) return true
-  return false
+  return !outOfSchool(date, daysOff, yearDays, spans)
 }
 
 export function schoolDaysMissed(
   window: { startDate: CivilDate; endDate: CivilDate },
   daysOff: readonly (DayOffInput & { schoolYear?: string })[],
   holidays: readonly Holiday[],
+  yearDays: readonly Pick<SchoolYearDay, 'schoolYear' | 'which' | 'date'>[] = [],
+  spans: Map<string, { from: CivilDate; to: CivilDate }> = schoolYearSpans(daysOff, yearDays),
 ): number {
   let missed = 0
-  for (let d = window.startDate; compareDates(d, window.endDate) <= 0; d = addDays(d, 1)) if (isSchoolDay(d, daysOff, holidays)) missed += 1
+  for (let d = window.startDate; compareDates(d, window.endDate) <= 0; d = addDays(d, 1)) if (isSchoolDay(d, daysOff, holidays, yearDays, spans)) missed += 1
   return missed
 }
 
@@ -434,9 +444,13 @@ export function measureCandidates(input: {
   busyness?: BusynessSources
   priceOf: (window: { startDate: CivilDate; endDate: CivilDate }) => Cents
   daysOff: readonly (DayOffInput & { schoolYear?: string })[]
+  /** The stated first and last days of school (D59). */
+  schoolYearDays?: readonly Pick<SchoolYearDay, 'schoolYear' | 'which' | 'date'>[]
   holidays: readonly Holiday[]
   blackoutDates: readonly BlackoutRange[]
 }): MeasuredCandidate[] {
+  const yearDays = input.schoolYearDays ?? []
+  const spans = schoolYearSpans(input.daysOff, yearDays)
   const tripNights = Math.max(0, compareDates(input.trip.endDate, input.trip.startDate))
   const planned = (input.days ?? []).filter((d) => d.park !== 'rest' && d.park !== 'travel')
   const parkOffsets = planned.length > 0 ? planned.map((d) => compareDates(d.date, input.trip.startDate)) : null
@@ -451,7 +465,7 @@ export function measureCandidates(input: {
       daysWithData: levels.length,
       daysCounted: offsets.length,
       priceCents: input.priceOf(c),
-      schoolDaysMissed: schoolDaysMissed(c, input.daysOff, input.holidays),
+      schoolDaysMissed: schoolDaysMissed(c, input.daysOff, input.holidays, yearDays, spans),
       blackouts: input.blackoutDates.filter((b) => rangesOverlap(c.startDate, c.endDate, b.from, b.to)).map((b) => b.label),
     }
   })
@@ -555,6 +569,8 @@ export interface BestWeeksInput extends WindowPricingInput {
   /** Every source of "how busy" (D28); with none given, the crowd levels alone. */
   busyness?: BusynessSources
   daysOff: readonly (DayOffInput & { schoolYear?: string })[]
+  /** The stated first and last days of school (D59). */
+  schoolYearDays?: readonly Pick<SchoolYearDay, 'schoolYear' | 'which' | 'date'>[]
   blackoutDates: readonly BlackoutRange[]
   horizonMonths?: number
   weights?: WeekWeights
@@ -591,6 +607,7 @@ export function bestWeeks(input: BestWeeksInput): BestWeeks {
     busyness: input.busyness,
     priceOf: (w) => priceWindowCents(input, w),
     daysOff: input.daysOff,
+    schoolYearDays: input.schoolYearDays,
     holidays,
     blackoutDates: input.blackoutDates,
   })
@@ -598,7 +615,7 @@ export function bestWeeks(input: BestWeeksInput): BestWeeks {
     top: scoreCandidates({ candidates: measured, weights: input.weights, limit: input.limit }),
     considered: measured.length,
     excludedByBlackout: measured.filter((c) => c.blackouts.length > 0).length,
-    daysOffKnown: input.daysOff.length > 0,
+    daysOffKnown: input.daysOff.length > 0 || (input.schoolYearDays ?? []).length > 0,
     horizonFrom,
     horizonTo,
   }

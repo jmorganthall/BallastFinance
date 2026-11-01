@@ -88,12 +88,12 @@ describeDb('when to go', () => {
       { date: '2027-03-15', label: 'Spring break' },
       { date: '2027-03-16', label: 'Spring break' },
     ]
-    expect(await engine.importSchoolCalendar({ items, source: 'ical', sourceUrl: feed, schoolYear: '2026-27' })).toEqual({ added: 2, removed: 0 })
+    expect(await engine.importSchoolCalendar({ items, source: 'ical', sourceUrl: feed, schoolYear: '2026-27' })).toEqual({ added: 2, removed: 0, yearDays: 0 })
     const before = (await events('school_calendar_changed')).length
-    expect(await engine.importSchoolCalendar({ items, source: 'ical', sourceUrl: feed, schoolYear: '2026-27' })).toEqual({ added: 0, removed: 0 })
+    expect(await engine.importSchoolCalendar({ items, source: 'ical', sourceUrl: feed, schoolYear: '2026-27' })).toEqual({ added: 0, removed: 0, yearDays: 0 })
     expect((await events('school_calendar_changed')).length).toBe(before)
     // The feed drops one day: that row goes; the typed MLK Day stays even though the feed no longer lists it.
-    expect(await engine.importSchoolCalendar({ items: items.slice(1, 2), source: 'ical', sourceUrl: feed, schoolYear: '2026-27' })).toEqual({ added: 0, removed: 1 })
+    expect(await engine.importSchoolCalendar({ items: items.slice(1, 2), source: 'ical', sourceUrl: feed, schoolYear: '2026-27' })).toEqual({ added: 0, removed: 1, yearDays: 0 })
     const rows = await engine.schoolDaysOff()
     expect(rows.map((d) => `${d.date} ${d.label} ${d.source}`)).toEqual(['2027-01-18 MLK Day typed', '2027-03-15 Spring break ical'])
     expect(rows[1]).toMatchObject({ sourceUrl: feed, schoolYear: '2026-27' })
@@ -120,7 +120,7 @@ describeDb('when to go', () => {
     expect(pending).toMatchObject({ label: 'District', source: 'ical', sourceUrl: 'https://district.example/calendar.ics', schoolYear: null, items: [{ date: '2027-04-05', label: 'Teacher Institute' }], readOn: TODAY })
     expect((await engine.schoolDaysOff()).some((d) => d.date === '2027-04-05')).toBe(false)
     // Kept: the feed's day is added, and the feed's earlier day it no longer lists goes; the typed day stays.
-    expect(await engine.keepSchoolCalendar()).toEqual({ added: 1, removed: 1 })
+    expect(await engine.keepSchoolCalendar()).toEqual({ added: 1, removed: 1, yearDays: 0 })
     expect(await engine.pendingSchoolCalendar()).toBeNull()
     expect((await engine.schoolDaysOff()).map((d) => `${d.date} ${d.source}`)).toEqual(['2027-01-18 typed', '2027-04-05 ical'])
     expect((await engine.schoolDaysOff()).find((d) => d.date === '2027-04-05')).toMatchObject({ label: 'Teacher Institute', source: 'ical', schoolYear: '2026-27' })
@@ -145,7 +145,7 @@ describeDb('when to go', () => {
     expect(await engine.readSchoolCalendarSource(0, { fallbackToReader: true, fetchImpl: login, read, env: readerEnv })).toEqual({ ok: true, count: 1 })
     expect(readerCalls).toBe(1)
     expect(await engine.pendingSchoolCalendar()).toMatchObject({ source: 'read:test/model', items: [{ date: '2027-05-28', label: 'Last day' }] })
-    expect(await engine.keepSchoolCalendar()).toEqual({ added: 1, removed: 0 })
+    expect(await engine.keepSchoolCalendar()).toEqual({ added: 1, removed: 0, yearDays: 0 })
     expect((await engine.schoolDaysOff()).find((d) => d.date === '2027-05-28')).toMatchObject({ source: 'read:test/model', sourceUrl: 'https://district.example/calendar.ics' })
   })
 

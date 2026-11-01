@@ -94,6 +94,7 @@ describeDb('one snapshot per page, and the whole household in the export', () =>
         'recurring_expenses',
         'reserve_accounts',
         'school_days_off',
+        'school_year_days',
         'settings',
         'trip_days',
         'trip_lines',

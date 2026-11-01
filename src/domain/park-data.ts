@@ -46,6 +46,7 @@ import { addDays, compareDates, todayIn, type CivilDate } from './dates'
 import type { TripDestination, TripStage } from './trip'
 import { crowdLevelsFromJson, pickLevel, THEME_PARKS, TripPlanError, parkFromText, type BlackoutRange, type CrowdLevel, type TripPark } from './trip-plan'
 import type { DayOffInput, Holiday } from './trip-when'
+import { outOfSchool, schoolYearSpans, type SchoolYearDay } from './school-year'
 
 // ---------------------------------------------------------------- facts
 
@@ -441,8 +442,9 @@ export interface CalendarCell {
   holidays: string[]
   blackouts: string[]
   /**
-   * No school that day (D48): a weekend or one of the household's days off
-   * school. A federal holiday counts only when the school calendar says so,
+   * No school that day (D48, D59): a weekend, one of the household's days
+   * off school, or a day outside every school year the calendar knows (a
+   * summer). A federal holiday counts only when the school calendar says so,
    * because a school can stay open on one.
    */
   noSchool: boolean
@@ -544,7 +546,10 @@ export function calendarMonth(input: {
   weather: readonly ParkWeather[]
   hours: readonly ParkHours[]
   busyness: BusynessSources
-  daysOff: readonly DayOffInput[]
+  /** Every day off the household has, not only this month's: a school year's ends can be months away. */
+  daysOff: readonly (DayOffInput & { schoolYear?: string })[]
+  /** The stated first and last days of school (D59). */
+  schoolYearDays?: readonly Pick<SchoolYearDay, 'schoolYear' | 'which' | 'date'>[]
   holidays: readonly Holiday[]
   blackouts: readonly BlackoutRange[]
   today: CivilDate
@@ -552,6 +557,8 @@ export function calendarMonth(input: {
   trips?: readonly CalendarTrip[]
 }): CalendarMonth {
   const { from, to } = monthBounds(input.month)
+  const yearDays = input.schoolYearDays ?? []
+  const spans = schoolYearSpans(input.daysOff, yearDays)
   const split = splitWeather(input.weather)
   const cells: CalendarCell[] = []
   for (let d = from; compareDates(d, to) <= 0; d = addDays(d, 1)) {
@@ -570,7 +577,7 @@ export function calendarMonth(input: {
       daysOff,
       holidays: input.holidays.filter((h) => h.date === d).map((h) => h.name),
       blackouts: blackoutsOn(input.blackouts, d),
-      noSchool: wd === 0 || wd === 6 || daysOff.length > 0,
+      noSchool: outOfSchool(d, input.daysOff, yearDays, spans),
       trips: tripsOn(input.trips ?? [], d),
     })
   }
