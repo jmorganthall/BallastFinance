@@ -180,7 +180,7 @@ async function AllocatePageRead({
                         <span className="flex items-baseline justify-between gap-3">
                           <span className="font-medium">{s.label}</span>
                           <span className="shrink-0 tabular">
-                            <Money cents={s.shortCents} /> {s.kind === 'plan' ? 'behind' : 'short'}
+                            <Money cents={s.shortCents} /> short
                           </span>
                         </span>
                         <span className="block text-xs text-[var(--color-ink-soft)]">{s.reason}</span>

@@ -2456,8 +2456,8 @@ export class Engine {
                 purpose: 'cover' as const,
                 note:
                   topUp.amountCents < topUp.shortCents
-                    ? `Covers part of the ${formatCents(topUp.shortCents)} it is behind.`
-                    : 'Covers what it is behind, before the rest is shared out.',
+                    ? `Covers part of the ${formatCents(topUp.shortCents)} it is short by.`
+                    : 'Covers what it is short, before the rest is shared out.',
               }
             : {
                 type: 'debt_payment',
@@ -4042,6 +4042,7 @@ export class Engine {
       .select()
       .from(crowdLevelsTable)
       .where(and(eq(crowdLevelsTable.destination, destination), gte(crowdLevelsTable.date, from), lte(crowdLevelsTable.date, to)))
+      .orderBy(crowdLevelsTable.date, crowdLevelsTable.park, crowdLevelsTable.source)
     return rows.map(toCrowdLevel)
   }
 
@@ -4372,6 +4373,7 @@ export class Engine {
           stay === undefined ? undefined : eq(lodgingRatesTable.stay, stay),
         ),
       )
+      .orderBy(lodgingRatesTable.periodStart, lodgingRatesTable.stay, lodgingRatesTable.period, lodgingRatesTable.source)
     return rows.map((r) => ({
       source: r.source,
       stay: r.stay,
@@ -4599,6 +4601,7 @@ export class Engine {
       .select()
       .from(dvcListingsTable)
       .where(and(gte(dvcListingsTable.checkIn, from), lte(dvcListingsTable.checkIn, to)))
+      .orderBy(dvcListingsTable.checkIn, dvcListingsTable.resort, dvcListingsTable.room, dvcListingsTable.nights, dvcListingsTable.source)
     return rows.map(toDvcListing)
   }
 
@@ -4700,12 +4703,17 @@ export class Engine {
   }
 
   // -- Ballast's own park data (D28-D29): reference data, household-independent, written only here
+  //
+  // Every read of reference data (here, crowd levels, lodging rates, DVC listings) says its order, on the
+  // table's own key: without one Postgres hands rows back in whatever order they sit on disk, which a
+  // write elsewhere can change, and a "newest wins" tie would then go to whichever row came first.
 
   async parkWeather(range: { from: CivilDate; to: CivilDate }, destination: TripDestination = 'wdw'): Promise<ParkWeather[]> {
     const rows = await this.db
       .select()
       .from(parkWeatherTable)
       .where(and(eq(parkWeatherTable.destination, destination), gte(parkWeatherTable.date, range.from), lte(parkWeatherTable.date, range.to)))
+      .orderBy(parkWeatherTable.date, parkWeatherTable.horizon)
     return rows.map(toParkWeather)
   }
 
@@ -4732,6 +4740,7 @@ export class Engine {
       .select()
       .from(parkHoursTable)
       .where(and(eq(parkHoursTable.destination, destination), gte(parkHoursTable.date, range.from), lte(parkHoursTable.date, range.to)))
+      .orderBy(parkHoursTable.date, parkHoursTable.park)
     return rows.map(toParkHours)
   }
 

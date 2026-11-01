@@ -203,7 +203,7 @@ describeDb('allocation runs', () => {
       (i) => i.type === 'one_time_move' && i.targetId === account!.id && i.amountCents === 30000,
     )
     expect(topUp).toBeDefined()
-    expect(topUp!.note).toContain('behind')
+    expect(topUp!.note).toContain('short')
 
     // While the cover is open it stands in for the move the position would
     // ask for: the same $300 is never on the list twice, nor offered again.
