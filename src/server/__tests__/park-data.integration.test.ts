@@ -73,6 +73,21 @@ describeDb('park data', () => {
     expect(await engine.recordParkWeather([], { destination: 'wdw', horizon: 'normal', source: 'x', fetchedOn: TODAY })).toBe(0)
   })
 
+  it('reads back in date order even after an earlier day was rewritten', async () => {
+    // Postgres writes an updated row's new version after the others, so a read with no order of its own
+    // would hand the rewritten day back last.
+    const days = ['2027-02-01', '2027-02-02', '2027-02-03']
+    const meta = { destination: 'wdw' as const, horizon: 'normal' as const, source: 'order-check', fetchedOn: TODAY }
+    await engine.recordParkWeather(days.map((date) => ({ date, highF: 75, lowF: 55, precipChance: null })), meta)
+    await engine.recordParkWeather([{ date: days[0]!, highF: 76, lowF: 56, precipChance: null }], meta)
+    await engine.recordParkHours(days.map((date) => ({ date, opens: '09:00', closes: '21:00', earlyEntry: null, extendedEvening: null })), { destination: 'wdw', park: 'epcot', source: 'order-check', fetchedOn: TODAY })
+    await engine.recordParkHours([{ date: days[0]!, opens: '08:00', closes: '21:00', earlyEntry: null, extendedEvening: null }], { destination: 'wdw', park: 'epcot', source: 'order-check', fetchedOn: TODAY })
+    expect((await engine.parkWeather({ from: days[0]!, to: days[2]! })).map((r) => r.date)).toEqual(days)
+    expect((await engine.parkHours({ from: days[0]!, to: days[2]! })).map((r) => r.date)).toEqual(days)
+    await db.delete(schema.parkWeather).where(eq(schema.parkWeather.source, 'order-check'))
+    await db.delete(schema.parkHours).where(eq(schema.parkHours.source, 'order-check'))
+  })
+
   it('park hours are kept one row per park and date, and read back by range', async () => {
     await engine.recordParkHours([{ date: '2026-10-01', opens: '09:00', closes: '22:00', earlyEntry: '08:30', extendedEvening: null }], { destination: 'wdw', park: 'magic_kingdom', source: 'themeparks_wiki', fetchedOn: TODAY })
     await engine.recordParkHours([{ date: '2026-10-01', opens: '09:00', closes: '21:00', earlyEntry: null, extendedEvening: null }], { destination: 'wdw', park: 'epcot', source: 'themeparks_wiki', fetchedOn: TODAY })

@@ -351,7 +351,7 @@ describe('outstanding instructions', () => {
     )
     expect(
       instructionSentence(issued({ instructionId: 'c', type: 'one_time_move', purpose: 'cover', amountCents: 30000 })),
-    ).toBe('Move $300.00 into Annual Expenses once, to cover what it is behind.')
+    ).toBe('Move $300.00 into Annual Expenses once, to cover what it is short.')
     expect(
       instructionSentence(issued({ instructionId: 'l', type: 'one_time_move', purpose: 'left_over', amountCents: 12345 })),
     ).toBe('Decide where $123.45 goes; it was the debt share with nowhere useful to go.')

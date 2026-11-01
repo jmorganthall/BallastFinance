@@ -451,7 +451,7 @@ export function instructionSentenceParts(
             ? [{ text: `On ${later}`, date: { on: later, as: 'lead' } }, t(`, move ${amount} into `), target, t('.')]
             : [t(`Move ${amount} into `), target, t(', its share of what was spare.')]
         case 'cover':
-          return [t(`Move ${amount} into `), target, t(' once, to cover what it is behind.')]
+          return [t(`Move ${amount} into `), target, t(' once, to cover what it is short.')]
         case 'left_over':
           return [t(`Decide where ${amount} goes; it was the debt share with nowhere useful to go.`)]
         case 'catch_up':
