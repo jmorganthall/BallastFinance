@@ -10,6 +10,9 @@ import {
   runningBuild,
   shortRevision,
   updateStatus,
+  checkForUpdatesNow,
+  lastUpdateCheckWords,
+  FORCED_CHECK_GAP_MS,
 } from '../version'
 
 const RUNNING = '8d3ea70f1c2b3a4d5e6f708192a3b4c5d6e7f809'
@@ -197,6 +200,53 @@ describe('the update check the footer reads', () => {
     expect(status.kind).toBe('behind')
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(fetchImpl).toHaveBeenCalledTimes(6)
+  })
+
+  it('"Check for updates" asks now, past the hourly answer, and waits for it', async () => {
+    const env = { BALLAST_BUILD_SHA: RUNNING }
+    let clock = 0
+    const now = () => clock
+    expect(await updateStatus({ env, fetchImpl: registryReturning(RUNNING), now })).toEqual({ kind: 'current' })
+    // A newer build is published; the hourly answer would still say "current" for most of an hour.
+    clock += 5 * 60 * 1000
+    const newer = registryReturning(NEWER)
+    expect(await updateStatus({ env, fetchImpl: newer, now })).toEqual({ kind: 'current' })
+    expect(newer).not.toHaveBeenCalled()
+    expect(await checkForUpdatesNow({ env, fetchImpl: newer, now })).toEqual({ kind: 'behind', latestRevision: NEWER })
+    // And every page after it says so.
+    expect(await updateStatus({ env, fetchImpl: newer, now })).toEqual({ kind: 'behind', latestRevision: NEWER })
+  })
+
+  it('answers a press within a few seconds of the last check from that check, so it never hammers the registry', async () => {
+    const env = { BALLAST_BUILD_SHA: RUNNING }
+    let clock = 0
+    const now = () => clock
+    const fetchImpl = registryReturning(NEWER)
+    await checkForUpdatesNow({ env, fetchImpl, now })
+    clock += FORCED_CHECK_GAP_MS - 1
+    await checkForUpdatesNow({ env, fetchImpl, now })
+    expect(fetchImpl).toHaveBeenCalledTimes(3) // one check: token, manifest, config
+    clock += 2
+    await checkForUpdatesNow({ env, fetchImpl, now })
+    expect(fetchImpl).toHaveBeenCalledTimes(6)
+    // Off, or a local build: nothing is asked.
+    expect(await checkForUpdatesNow({ env: { ...env, BALLAST_UPDATE_CHECK: 'off' }, fetchImpl, now })).toEqual({ kind: 'off' })
+    expect((await checkForUpdatesNow({ env: {}, fetchImpl, now })).kind).toBe('unknown')
+    expect(fetchImpl).toHaveBeenCalledTimes(6)
+  })
+
+  it('says when it last asked', async () => {
+    expect(lastUpdateCheckWords()).toBeNull()
+    let clock = 0
+    const now = () => clock
+    await checkForUpdatesNow({ env: { BALLAST_BUILD_SHA: RUNNING }, fetchImpl: registryReturning(RUNNING), now })
+    expect(lastUpdateCheckWords(now)).toBe('just now')
+    clock = 60_000
+    expect(lastUpdateCheckWords(now)).toBe('1 minute ago')
+    clock = 45 * 60_000
+    expect(lastUpdateCheckWords(now)).toBe('45 minutes ago')
+    clock = 2 * 60 * 60_000 + 5
+    expect(lastUpdateCheckWords(now)).toBe('2 hours ago')
   })
 
   it('never throws when the network is gone', async () => {
