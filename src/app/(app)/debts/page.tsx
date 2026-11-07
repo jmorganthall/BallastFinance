@@ -121,7 +121,8 @@ export default async function DebtsPage({
   })
 
   return (
-    <>
+    // A page of figures (data-wide): the table takes the screen beside the sidebar, never scrolling sideways in a box.
+    <div data-wide="">
       <PageHeader
         title="Payoff order"
         subtitle="Which debt to clear next, and where a lump sum should go."
@@ -172,8 +173,9 @@ export default async function DebtsPage({
           </div>
         </>
       ) : (
-        <>
-          <Card className="mb-4">
+        // On a wide screen the two questions sit side by side above the table, which takes the whole width.
+        <div className="xl:grid xl:grid-cols-2 xl:items-start xl:gap-x-4">
+          <Card className="mb-4 xl:col-start-1 xl:row-start-1">
             <form method="GET" className="space-y-2">
               <label className="block text-sm font-medium">
                 What matters more right now?
@@ -213,13 +215,12 @@ export default async function DebtsPage({
             ) : null}
           </Card>
 
-          <DebtTable rows={rows} today={today} />
+          <div className="xl:col-span-2 xl:row-start-2">
+            <DebtTable rows={rows} today={today} />
+          </div>
 
-          <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
-            Where should a lump sum go?
-          </h2>
-
-          <Card>
+          <Card className="mt-8 xl:col-start-2 xl:row-start-1 xl:mt-0 xl:mb-4">
+            <h2 className="mb-3 text-sm font-medium">Where should a lump sum go?</h2>
             <form method="GET" className="space-y-3">
               <input type="hidden" name="w" value={weight} />
               <label className="block text-sm font-medium">
@@ -268,7 +269,7 @@ export default async function DebtsPage({
               </div>
             ) : null}
           </Card>
-        </>
+        </div>
       )}
 
       {paidOff.length > 0 ? (
@@ -319,6 +320,6 @@ export default async function DebtsPage({
           </details>
         </Card>
       ) : null}
-    </>
+    </div>
   )
 }

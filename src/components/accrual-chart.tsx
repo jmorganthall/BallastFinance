@@ -160,9 +160,12 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
 
   return (
     <figure className="m-0">
-      {/* On a phone the chart keeps a readable size and scrolls sideways inside its card. */}
+      {/*
+        On a phone the chart keeps a readable size and scrolls sideways inside its card; on a wide
+        screen it stops growing at 52rem, so its words stay the size they are in one column.
+      */}
       <div className="overflow-x-auto">
-      <div className="relative min-w-[520px]">
+      <div className="relative min-w-[520px] max-w-[52rem]">
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         className="h-auto w-full min-w-[520px]"

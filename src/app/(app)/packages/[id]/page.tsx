@@ -143,7 +143,7 @@ async function PackageDetailPageRead({
   ))
 
   return (
-    <>
+    <div data-wide="">
       <EditableTitle
         name={view.package.name}
         packageId={view.package.id}
@@ -321,8 +321,11 @@ async function PackageDetailPageRead({
       {curve ? (
         <Card className="mb-4">
           <h2 className="mb-3 text-sm font-semibold">How the money builds up</h2>
-          <AccrualChart chart={curve} today={today} />
-          {plan ? <PlanStory story={curve.story} today={today} /> : null}
+          {/* The chart and the story that reads it, side by side on a wide screen. */}
+          <div className="xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start xl:gap-x-8">
+            <AccrualChart chart={curve} today={today} />
+            {plan ? <PlanStory story={curve.story} today={today} /> : null}
+          </div>
         </Card>
       ) : null}
 
@@ -331,7 +334,8 @@ async function PackageDetailPageRead({
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             Did this get spent?
           </h2>
-          <ul className="space-y-3">
+          {/* Two to a row on a wide screen, like the parts: one card never stretches its box across the page. */}
+          <ul className="grid items-start gap-3 lg:grid-cols-2">
             {closeOuts.map((prompt) => (
               <li key={prompt.roundId}>
                 <CloseOutCard
@@ -352,7 +356,8 @@ async function PackageDetailPageRead({
         What it is made of
       </h2>
 
-      <ul className="space-y-3">
+      {/* Two parts or more sit two to a row on a wide screen. */}
+      <ul className={`grid items-start gap-3 ${live.length > 1 ? 'lg:grid-cols-2' : ''}`}>
         {live.map((item) => {
           // The part's own id is the round saving now (D53); its date is
           // that round's, past an older round still open.
@@ -638,7 +643,7 @@ async function PackageDetailPageRead({
       ) : null}
 
       {!isDone ? (
-        <Card className="mt-3">
+        <Card className="mt-3 xl:max-w-3xl">
           <details>
             <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
               Add another part
@@ -758,6 +763,6 @@ async function PackageDetailPageRead({
           Back to plans
         </Link>
       </p>
-    </>
+    </div>
   )
 }

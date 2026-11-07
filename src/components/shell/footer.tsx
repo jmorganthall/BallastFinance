@@ -38,7 +38,7 @@ export async function AppFooter() {
     .join(' ')
 
   return (
-    <footer className="mx-auto mt-10 w-full max-w-2xl px-4 pb-6 text-xs text-[var(--color-ink-soft)]">
+    <footer className="mx-auto mt-10 w-full max-w-2xl px-4 pb-6 text-xs text-[var(--color-ink-soft)] group-has-[[data-wide]]/shell:max-w-[100rem] md:px-6">
       {status.kind === 'behind' ? (
         <div
           role="status"

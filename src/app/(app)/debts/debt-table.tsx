@@ -93,19 +93,21 @@ export function DebtTable({ rows, today }: { rows: DebtRow[]; today: CivilDate }
   )
 
   return (
-    <div className="overflow-x-auto rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]">
+    // A container: each column appears when the table itself has room for it, wherever it sits (beside the
+    // sidebar on a laptop, full width on a monitor), never by the window's width, so it does not scroll sideways.
+    <div className="@container overflow-x-auto rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)]">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-[var(--color-line)]">
             {heading('rank', '#', 'w-8')}
             {heading('name', 'Debt')}
             {heading('balance', 'Balance', 'text-right')}
-            {heading('rate', 'Rate', 'hidden text-right sm:table-cell')}
+            {heading('rate', 'Rate', 'hidden text-right @2xl:table-cell')}
             {heading('payment', 'Per month', 'text-right')}
-            {heading('payoff', 'Paid off by', 'hidden md:table-cell')}
-            {heading('interest', 'Interest left to pay', 'hidden text-right sm:table-cell')}
-            {/* On a phone the Edit link sits under the debt's name instead, so the table stays inside its card. */}
-            <th className={`${th} hidden w-16 sm:table-cell`}>
+            {heading('payoff', 'Paid off by', 'hidden @4xl:table-cell')}
+            {heading('interest', 'Interest left to pay', 'hidden text-right @2xl:table-cell')}
+            {/* In a narrow table the Edit link sits under the debt's name instead, so the table stays inside its card. */}
+            <th className={`${th} hidden w-16 @2xl:table-cell`}>
               <span className="sr-only">Actions</span>
             </th>
           </tr>
@@ -183,7 +185,8 @@ function Row({
               href={row.link.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="ml-2 whitespace-nowrap text-xs text-[var(--color-accent)] underline underline-offset-4"
+              // On its own line on a phone, so a long site name never widens the Debt column past the screen.
+              className="block w-fit break-all text-xs text-[var(--color-accent)] underline underline-offset-4 @2xl:ml-2 @2xl:inline @2xl:break-normal @2xl:whitespace-nowrap"
               title={`Open ${row.link.site} in a new tab`}
             >
               {row.link.site} ↗
@@ -209,7 +212,7 @@ function Row({
               </span>
             </span>
           ) : null}
-          <span className="-ml-2 mt-1 block sm:hidden">{editButton}</span>
+          <span className="-ml-2 mt-1 block @2xl:hidden">{editButton}</span>
         </td>
         <td className={`${td} whitespace-nowrap text-right font-medium tabular`}>
           {formatCents(row.balanceCents)}
@@ -223,7 +226,7 @@ function Row({
             </span>
           ) : null}
         </td>
-        <td className={`${td} hidden text-right tabular sm:table-cell`}>
+        <td className={`${td} hidden text-right tabular @2xl:table-cell`}>
           {row.effectiveRate}
           {row.listedRate ? (
             <span className="block text-xs text-[var(--color-ink-soft)]">listed {row.listedRate}</span>
@@ -235,10 +238,10 @@ function Row({
             <span className="block text-xs text-[var(--color-ink-soft)]">min {formatCents(row.minimumCents)}</span>
           ) : null}
         </td>
-        <td className={`${td} hidden md:table-cell`}>
+        <td className={`${td} hidden @4xl:table-cell`}>
           {row.payoffDate ? humanDate(row.payoffDate) : <span className="text-[var(--color-ink-soft)]">Never, at this rate</span>}
         </td>
-        <td className={`${td} hidden text-right tabular sm:table-cell`}>
+        <td className={`${td} hidden text-right tabular @2xl:table-cell`}>
           {row.interestLeftCents === null ? (
             <span className="text-xs text-[var(--color-behind)]">Never paid off at this payment</span>
           ) : (
@@ -254,7 +257,7 @@ function Row({
             </>
           )}
         </td>
-        <td className={`${td} hidden text-right sm:table-cell`}>{editButton}</td>
+        <td className={`${td} hidden text-right @2xl:table-cell`}>{editButton}</td>
       </tr>
 
       {open ? (

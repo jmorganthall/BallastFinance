@@ -79,7 +79,8 @@ export function BalanceChart({
     <figure className="m-0">
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="h-auto w-full"
+        // Never wider than one column drew it, so its words do not grow on a wide screen.
+        className="h-auto w-full max-w-[40rem]"
         role="img"
         aria-label={`${formatCents(balanceCents)} today, paid off by ${shortDate(months.at(-1)!.on)} on the payment set up now${dealEnds ? `; ${dealEnds.label} ${shortDate(dealEnds.on)}` : ''}${whatIf ? `; ${whatIf.label}, paid off by ${shortDate(whatIf.months.at(-1)!.on)}` : ''}.`}
       >
@@ -188,7 +189,8 @@ export function PaymentSplitChart({ splits }: { splits: readonly PaymentSplit[] 
     <figure className="m-0">
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-        className="h-auto w-full"
+        // Never wider than one column drew it, so its words do not grow on a wide screen.
+        className="h-auto w-full max-w-[40rem]"
         role="img"
         aria-label={`Each ${bars[0]!.period.length === 4 ? "year's" : "month's"} payments, split into what pays the balance down and what is interest.`}
       >

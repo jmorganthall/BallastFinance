@@ -107,7 +107,7 @@ export default async function DebtPage({
   const dealEnds = paidOff ? null : dealEndMark(debt, projection.payoffDate, today)
 
   return (
-    <>
+    <div data-wide="">
       <p className="mb-2 text-sm">
         <Link href="/debts" className="text-[var(--color-accent)] underline underline-offset-4">
           ← Payoff order
@@ -125,6 +125,11 @@ export default async function DebtPage({
         </p>
       ) : null}
 
+      {/*
+        In the order a phone reads them; on a wide screen the same order in two columns, each card
+        kept whole, so a short card never leaves a gap beside a tall chart.
+      */}
+      <div className="xl:columns-2 xl:gap-4 [&>*]:break-inside-avoid">
       {/* How it stands, and its deal. */}
       <Card className="mb-4">
         {view && view.status !== 'on_track' ? (
@@ -374,7 +379,8 @@ export default async function DebtPage({
           </ul>
         </Card>
       </section>
-    </>
+      </div>
+    </div>
   )
 }
 
