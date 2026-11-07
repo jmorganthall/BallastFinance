@@ -15,6 +15,7 @@ import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui
 import { setPriorityWeightAction, updateDebtBalanceAction } from '@/server/actions'
 import {
   debtFormValuesOf,
+  debtLinkSite,
   debtStatusLabel,
   debtStatusLine,
   isPaidOff,
@@ -83,6 +84,7 @@ export default async function DebtsPage({
       id: rung.debt.id,
       rank: rung.rank,
       name: rung.debt.name,
+      link: rung.debt.linkUrl ? { url: rung.debt.linkUrl, site: debtLinkSite(rung.debt.linkUrl) } : null,
       kind: KIND[rung.debt.category] ?? rung.debt.category,
       balanceCents: rung.debt.balanceCents,
       statedBalanceCents:

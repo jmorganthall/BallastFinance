@@ -33,6 +33,8 @@ export interface DebtRow {
   id: string
   rank: number
   name: string
+  /** The lender's page and its site in words ("chase.com"), to open it in a new tab (D60). */
+  link: { url: string; site: string } | null
   kind: string
   /** The likely balance today (D49 (2)-(3)). */
   balanceCents: number
@@ -176,6 +178,17 @@ function Row({
           <Link href={`/debts/${row.id}`} className="font-medium underline-offset-4 hover:underline">
             {row.name}
           </Link>
+          {row.link ? (
+            <a
+              href={row.link.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="ml-2 whitespace-nowrap text-xs text-[var(--color-accent)] underline underline-offset-4"
+              title={`Open ${row.link.site} in a new tab`}
+            >
+              {row.link.site} ↗
+            </a>
+          ) : null}
           <span className={`block text-xs ${row.stale ? 'text-[var(--color-accent)]' : 'text-[var(--color-ink-soft)]'}`}>
             {row.kind}
             {' · '}

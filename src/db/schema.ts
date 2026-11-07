@@ -451,10 +451,13 @@ export const debts = pgTable(
      * one that counts.
      */
     simplifiNames: text('simplifi_names').array().notNull().default(sql`'{}'::text[]`),
+    /** The lender's page for this debt, opened from Ballast (PRD D60). Only a web address is stored. */
+    linkUrl: text('link_url'),
   },
   (t) => [
     index('debts_household_idx').on(t.householdId, t.state),
     check('debts_payment_day_in_month', sql`${t.paymentDay} is null or ${t.paymentDay} between 1 and 31`),
+    check('debts_link_is_web', sql`${t.linkUrl} is null or ${t.linkUrl} ~ '^https?://'`),
   ],
 )
 

@@ -430,7 +430,16 @@ principles, and they are non-negotiable.
   the dataviz skill's validator on both card surfaces (the dark values sit
   in the dark lightness band, so they are not the accent and caution
   tokens). `debt_updated` now records `planned_payment_cents` too, so a
-  raised payment shows in the history.
+  raised payment shows in the history. **A debt can link to its lender**
+  (PRD D60, rev 115): `debts.link_url` (migration 0029), typed on the debt's
+  form ("Link to the lender's site"), recorded with the terms on
+  `debt_added` / `debt_updated` (`link_url`, "link" in the history). Only a
+  web address is kept: `parseDebtLink` in `src/domain/debt-form.ts` takes
+  "chase.com" as https and refuses anything that is not http(s), and a
+  CHECK refuses it in the database too. Debts shows `debtLinkSite`
+  ("chase.com ↗") beside the name and the debt's page "Open chase.com ↗",
+  each in a new tab with `rel="noopener noreferrer"`; Ballast never fetches
+  it.
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
   picture. An `individual` account can only be renamed, funded, or
@@ -790,7 +799,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 1022 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 1026 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

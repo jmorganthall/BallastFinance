@@ -109,6 +109,36 @@ describeDb('debts, the ladder and the optimizer', () => {
     await engine.removeDebt(created.id)
   })
 
+  it('keeps a link to the lender, records it with the terms, and refuses anything but a web address (D60)', async () => {
+    const created = await engine.createDebt({
+      name: 'Sapphire',
+      category: 'consumer',
+      balanceCents: 120000,
+      aprBasisPoints: 2499,
+      minPaymentRule: { type: 'fixed', amountCents: 4000 },
+      linkUrl: 'chase.com/login',
+    })
+    const read = async () => (await engine.listDebts()).find((d) => d.id === created.id)!
+    expect((await read()).linkUrl).toBe('https://chase.com/login')
+    await engine.updateDebt(created.id, { linkUrl: 'https://secure.chase.com/' })
+    expect((await read()).linkUrl).toBe('https://secure.chase.com/')
+    // Another term changed leaves the link as it was.
+    await engine.updateDebt(created.id, { name: 'Sapphire Preferred' })
+    expect((await read()).linkUrl).toBe('https://secure.chase.com/')
+    await expect(engine.updateDebt(created.id, { linkUrl: 'javascript:alert(1)' })).rejects.toThrow(/web address/)
+    // The database refuses one too, however it is written.
+    await expect(db.update(schema.debts).set({ linkUrl: 'javascript:alert(1)' }).where(eq(schema.debts.id, created.id))).rejects.toThrow()
+    const history = await engine.debtHistory(created.id)
+    expect(history.filter((e) => e.kind === 'terms').map((e) => (e as { changed: string[] }).changed)).toEqual([['link'], ['name']])
+    const added = (await db.select().from(schema.events).where(eq(schema.events.kind, 'debt_added'))).find(
+      (e) => (e.payload as { debt_id: string }).debt_id === created.id,
+    )!
+    expect((added.payload as { terms: { link_url: string } }).terms.link_url).toBe('https://chase.com/login')
+    await engine.updateDebt(created.id, { linkUrl: null })
+    expect((await read()).linkUrl).toBeNull()
+    await engine.removeDebt(created.id)
+  })
+
   it('answers where a lump sum should go', async () => {
     const result = await engine.optimiseLumpSum(107500)
     expect(result.allocations[0]!.debtName).toBe('Store card')

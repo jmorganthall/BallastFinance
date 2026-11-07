@@ -3,9 +3,12 @@ import {
   debtFormValuesFrom,
   debtFormValuesOf,
   EMPTY_DEBT_FORM,
+  debtLinkSite,
   parseDebtForm,
+  parseDebtLink,
   type DebtFormValues,
 } from '../debt-form'
+import { debtTermsChanged } from '../debt'
 
 function filled(over: Partial<DebtFormValues> = {}): DebtFormValues {
   return {
@@ -41,6 +44,7 @@ describe('the add-a-debt form, parsed', () => {
       creditLimitCents: 1500000,
       plannedPaymentCents: null,
       paymentDay: null,
+      linkUrl: null,
     })
   })
 
@@ -128,6 +132,7 @@ describe('the add-a-debt form, parsed', () => {
       creditLimitCents: 1500000,
       plannedPaymentCents: null,
       paymentDay: null,
+      linkUrl: 'https://www.usbank.com/',
     }
     const values = debtFormValuesOf(stored)
     expect(values).toMatchObject({
@@ -218,5 +223,41 @@ describe('more about the deal (D49 (9))', () => {
   it('a deal must start before it ends', () => {
     const late = parseDebtForm({ ...base, promo_started: '2027-07-01' })
     expect(!late.ok && late.problems.map((p) => p.field)).toEqual(['promo_started'])
+  })
+})
+
+describe('a link to the lender (D60)', () => {
+  const base = { ...EMPTY_DEBT_FORM, name: 'Sapphire', balance: '1200', apr: '24.99', min_amount: '40' }
+  it('keeps a web address, takes one typed without https, and none when blank', () => {
+    expect(parseDebtLink('https://secure.chase.com/web/auth/dashboard')).toEqual({ ok: true, url: 'https://secure.chase.com/web/auth/dashboard' })
+    expect(parseDebtLink('  chase.com/login ')).toEqual({ ok: true, url: 'https://chase.com/login' })
+    expect(parseDebtLink('http://card.example.com')).toEqual({ ok: true, url: 'http://card.example.com/' })
+    expect(parseDebtLink('')).toEqual({ ok: true, url: null })
+    const form = parseDebtForm({ ...base, link: 'www.chase.com' })
+    expect(form.ok && form.input.linkUrl).toBe('https://www.chase.com/')
+  })
+  it('refuses anything that is not a web address, next to its box', () => {
+    for (const link of ['javascript:alert(1)', 'data:text/html,hi', 'ftp://files.example.com', 'chase', 'two words.com', 'mailto:help@chase.com']) {
+      expect(parseDebtLink(link).ok).toBe(false)
+      const result = parseDebtForm({ ...base, link })
+      expect(!result.ok && result.problems.map((p) => p.field)).toEqual(['link'])
+    }
+  })
+  it('names the site without www, comes back in the edit form, and is a change the history names', () => {
+    expect(debtLinkSite('https://www.chase.com/login')).toBe('chase.com')
+    expect(debtLinkSite('https://secure.bankofamerica.com/')).toBe('secure.bankofamerica.com')
+    const values = debtFormValuesOf({
+      name: 'Sapphire',
+      category: 'consumer',
+      balanceCents: 120000,
+      aprBasisPoints: 2499,
+      minPaymentRule: { type: 'fixed', amountCents: 4000 },
+      promoRules: [],
+      linkUrl: 'https://www.chase.com/',
+    })
+    expect(values.link).toBe('https://www.chase.com/')
+    const again = parseDebtForm(values)
+    expect(again.ok && again.input.linkUrl).toBe('https://www.chase.com/')
+    expect(debtTermsChanged({ link_url: null }, { link_url: 'https://www.chase.com/' })).toEqual(['link'])
   })
 })

@@ -293,6 +293,21 @@ export function DebtForm({
         statements.
       </p>
 
+      <Field label="Link to the lender's site (optional)" problem={problemFor('link')}>
+        {(a) => (
+          <input
+            {...a}
+            name="link"
+            type="text"
+            inputMode="url"
+            autoComplete="url"
+            value={values.link}
+            onChange={(e) => set('link', e.target.value)}
+            placeholder="https://www.chase.com"
+          />
+        )}
+      </Field>
+
       <label className="flex min-h-11 items-center gap-3 text-sm font-medium">
         <input
           type="checkbox"

@@ -257,6 +257,7 @@ import {
   listingsForTrip,
   schoolYearOf,
   schoolYearOfBound,
+  parseDebtLink,
   splitSchoolYearDays,
   schoolYearDaysNote,
   schoolLeftOutNote,
@@ -2769,7 +2770,10 @@ export class Engine {
     balanceAsOf?: CivilDate
     /** The day of the month the regular payment goes out (D49 (3)). */
     paymentDay?: number | null
+    /** The lender's page for this debt (D60). */
+    linkUrl?: string | null
   }): Promise<Debt> {
+    const linkUrl = debtLinkOrRefuse(input.linkUrl)
     validateDebtInputs({
       balanceCents: input.balanceCents,
       aprBasisPoints: input.aprBasisPoints,
@@ -2797,6 +2801,7 @@ export class Engine {
           creditLimitCents: input.creditLimitCents ?? null,
           plannedPaymentCents: input.plannedPaymentCents ?? null,
           paymentDay: input.paymentDay ?? null,
+          linkUrl,
           enteredOn: this.today(),
           state: 'open',
         })
@@ -2815,6 +2820,7 @@ export class Engine {
           credit_limit_cents: created.creditLimitCents ?? null,
           payment_day: created.paymentDay ?? null,
           planned_payment_cents: created.plannedPaymentCents ?? null,
+          link_url: created.linkUrl ?? null,
         },
       })
       return created
@@ -2842,6 +2848,7 @@ export class Engine {
         | 'creditLimitCents'
         | 'plannedPaymentCents'
         | 'paymentDay'
+        | 'linkUrl'
       >
     >,
   ): Promise<void> {
@@ -2862,6 +2869,7 @@ export class Engine {
         plannedPaymentCents:
           patch.plannedPaymentCents === undefined ? before.plannedPaymentCents : patch.plannedPaymentCents,
         paymentDay: patch.paymentDay === undefined ? before.paymentDay : patch.paymentDay,
+        linkUrl: patch.linkUrl === undefined ? (before.linkUrl ?? null) : debtLinkOrRefuse(patch.linkUrl),
       }
       if (!after.name) throw new EngineError('A debt needs a name')
 
@@ -2885,6 +2893,7 @@ export class Engine {
           creditLimitCents: after.creditLimitCents ?? null,
           plannedPaymentCents: after.plannedPaymentCents ?? null,
           paymentDay: after.paymentDay ?? null,
+          linkUrl: after.linkUrl ?? null,
         })
         .where(eq(debtsTable.id, debtId))
 
@@ -2905,6 +2914,7 @@ export class Engine {
             credit_limit_cents: before.creditLimitCents ?? null,
             payment_day: before.paymentDay ?? null,
             planned_payment_cents: before.plannedPaymentCents ?? null,
+            link_url: before.linkUrl ?? null,
           },
           after: {
             name: after.name,
@@ -2915,6 +2925,7 @@ export class Engine {
             credit_limit_cents: after.creditLimitCents ?? null,
             payment_day: after.paymentDay ?? null,
             planned_payment_cents: after.plannedPaymentCents ?? null,
+            link_url: after.linkUrl ?? null,
           },
         },
       })
@@ -6261,6 +6272,14 @@ function toReserveAccount(r: typeof reserveAccountsTable.$inferSelect): ReserveA
   }
 }
 
+/** A debt's link as the engine keeps it (D60): a web address or nothing, refused in the form's own words. */
+function debtLinkOrRefuse(raw: string | null | undefined): string | null {
+  if (raw === undefined || raw === null) return null
+  const link = parseDebtLink(raw)
+  if (!link.ok) throw new EngineError(link.message)
+  return link.url
+}
+
 function toDebt(r: typeof debtsTable.$inferSelect): Debt {
   return {
     id: r.id,
@@ -6276,6 +6295,7 @@ function toDebt(r: typeof debtsTable.$inferSelect): Debt {
     plannedPaymentCents: r.plannedPaymentCents,
     paymentDay: r.paymentDay,
     enteredOn: r.enteredOn as CivilDate,
+    linkUrl: r.linkUrl,
     fixedPayment: r.fixedPayment,
     state: r.state,
     assetId: r.assetId,
