@@ -75,6 +75,8 @@
  */
 @media (prefers-color-scheme: dark) {
   :root {
+    /* Native parts -- scrollbars, date pickers, checkboxes -- drawn for a dark page, not as white strips. */
+    color-scheme: dark;
     --color-ink: oklch(0.95 0.01 250);
     --color-ink-soft: oklch(0.70 0.02 250);
     --color-surface: oklch(0.19 0.015 250);
@@ -112,6 +114,7 @@
 }
 
 html {
+  color-scheme: light;
   background: var(--color-surface);
   color: var(--color-ink);
   -webkit-text-size-adjust: 100%;

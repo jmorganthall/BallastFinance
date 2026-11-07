@@ -38,7 +38,7 @@ export const dynamic = 'force-dynamic'
 const field =
   'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]'
 const small =
-  'rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]'
+  'w-full min-w-0 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]'
 const heading = 'mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
 
 function figureWords(f: { amountCents: number; frequency: keyof typeof FREQUENCY_WORDS }) {
@@ -94,7 +94,7 @@ export default async function RecurringPage({
   const checkOf = new Map(view.checks.map((c) => [`${c.target.kind}:${c.target.id}`, c]))
 
   return (
-    <>
+    <div data-wide="">
       <PageHeader
         title="Recurring"
         subtitle={
@@ -118,7 +118,8 @@ export default async function RecurringPage({
       {pending ? (
         <PastePreview pending={pending} targets={targets} />
       ) : (
-        <>
+        // In the order a phone reads it; on a wide screen in two columns, each heading kept with its card.
+        <div className="xl:columns-2 xl:gap-6 [&>*]:break-inside-avoid">
           {view.rows.length > 0 ? (
             <Card className="mb-6">
               <p className="text-sm text-[var(--color-ink-soft)]">Going out, a month</p>
@@ -131,7 +132,7 @@ export default async function RecurringPage({
           ) : null}
 
           {differing.length > 0 || view.notInSimplifi.length > 0 ? (
-            <>
+            <section>
               <h2 className={heading}>Where Simplifi and Ballast differ</h2>
               <Card className="mb-6 space-y-2 text-sm">
                 {differing.map((c) => (
@@ -148,9 +149,10 @@ export default async function RecurringPage({
                   </p>
                 ))}
               </Card>
-            </>
+            </section>
           ) : null}
 
+          <section>
           <h2 className={heading}>From Simplifi</h2>
           <Card className="mb-6">
             {out.length === 0 ? (
@@ -163,9 +165,10 @@ export default async function RecurringPage({
               </ul>
             )}
           </Card>
+          </section>
 
           {incoming.length > 0 ? (
-            <>
+            <section>
               <h2 className={heading}>Coming in, per Simplifi</h2>
               <Card className="mb-6">
                 <p className="mb-2 text-xs text-[var(--color-ink-soft)]">
@@ -177,9 +180,10 @@ export default async function RecurringPage({
                   ))}
                 </ul>
               </Card>
-            </>
+            </section>
           ) : null}
 
+          <section>
           <h2 className={heading}>Added here</h2>
           <Card className="mb-6">
             {manual.length > 0 ? (
@@ -199,7 +203,7 @@ export default async function RecurringPage({
                           </span>
                         </span>
                       </summary>
-                      <form action={updateRecurringAction} className="mt-3 grid gap-2 sm:grid-cols-[1fr_8rem_10rem_auto]">
+                      <form action={updateRecurringAction} className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_9rem_auto]">
                         <input type="hidden" name="id" value={row.item.id} />
                         <input name="name" defaultValue={row.item.name} className={small} aria-label="Name" />
                         <input name="amount" defaultValue={(row.item.amountCents / 100).toFixed(2)} inputMode="decimal" className={small} aria-label="Amount" />
@@ -229,7 +233,7 @@ export default async function RecurringPage({
                 Anything Simplifi does not catch, such as cash.
               </p>
             )}
-            <form action={addRecurringAction} className="grid gap-2 border-t border-[var(--color-line)] pt-4 sm:grid-cols-[1fr_8rem_10rem_auto]">
+            <form action={addRecurringAction} className="grid gap-2 border-t border-[var(--color-line)] pt-4 sm:grid-cols-[minmax(0,1fr)_7rem_9rem_auto]">
               <input name="name" required placeholder="Babysitter" className={small} aria-label="Name" />
               <input name="amount" required inputMode="decimal" placeholder="60.00" className={small} aria-label="Amount" />
               <select name="frequency" defaultValue="monthly" className={small} aria-label="How often">
@@ -244,7 +248,9 @@ export default async function RecurringPage({
               </button>
             </form>
           </Card>
+          </section>
 
+          <section>
           <h2 className={heading}>Paste from Simplifi</h2>
           <Card className="mb-6">
             <form action={pasteSimplifiAction} className="space-y-3">
@@ -267,9 +273,10 @@ export default async function RecurringPage({
               </button>
             </form>
           </Card>
-        </>
+          </section>
+        </div>
       )}
-    </>
+    </div>
   )
 }
 

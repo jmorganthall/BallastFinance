@@ -58,7 +58,7 @@ export default async function EquityPage({
     : null
 
   return (
-    <>
+    <div data-wide="">
       <PageHeader
         title="What could we buy?"
         subtitle="What selling would leave you, and the house that buys at the payment you make now."
@@ -95,6 +95,8 @@ export default async function EquityPage({
         </Card>
       ) : null}
 
+      {/* What you have, and what it buys: side by side on a wide screen. */}
+      <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-4">
       <Card className="mb-4">
         <p className="text-sm text-[var(--color-ink-soft)]">
           <Hint detail="Equity: value, less the cost of selling, less every loan on it. Only homes and cars with something left count; one worth less than its loan is shown but not taken off the others.">
@@ -171,6 +173,7 @@ export default async function EquityPage({
           <p className="mt-3 text-sm text-[var(--color-ink-soft)]">Needs a mortgage rate first.</p>
         ) : null}
       </Card>
+      </div>
 
       {staleValues.length > 0 ? (
         <Card className="mb-4 bg-[var(--color-accent-soft)]">
@@ -184,7 +187,7 @@ export default async function EquityPage({
       ) : null}
 
       <h2 className={sectionTitle}>Homes and vehicles</h2>
-      <div className="space-y-3">
+      <div className="grid items-start gap-3 md:grid-cols-2 2xl:grid-cols-3">
         {position.assets.map((row) => {
           const freshness = valueFreshness(row.asset, view.today)
           return (
@@ -255,8 +258,10 @@ export default async function EquityPage({
         </Card>
       </div>
 
+      {/* The loans and the figures behind the buying sum, side by side on a wide screen. */}
+      <div className="xl:grid xl:grid-cols-2 xl:items-start xl:gap-x-4">
       {securedDebts.length > 0 ? (
-        <>
+        <section>
           <h2 className={sectionTitle}>Loans</h2>
           <Card>
             <ul className="divide-y divide-[var(--color-line)]">
@@ -283,9 +288,10 @@ export default async function EquityPage({
               ))}
             </ul>
           </Card>
-        </>
+        </section>
       ) : null}
 
+      <section>
       <h2 className={sectionTitle}>Your numbers</h2>
       <Card>
         <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
@@ -336,7 +342,9 @@ export default async function EquityPage({
           </button>
         </form>
       </Card>
-    </>
+      </section>
+      </div>
+    </div>
   )
 }
 

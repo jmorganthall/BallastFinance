@@ -61,12 +61,12 @@ export default async function PackagesPage({
   const rows = orderPlans(planRows({ views, plans: position.plans, today }), order)
 
   return (
-    <>
+    <div data-wide="">
       <PageHeader title="Plans" subtitle="Things you are setting money aside for." />
 
       <Link
         href="/packages/new"
-        className="mb-4 block rounded-xl bg-[var(--color-accent)] px-4 py-3 text-center font-medium text-white"
+        className="mb-4 block rounded-xl bg-[var(--color-accent)] px-4 py-3 text-center font-medium text-white md:inline-block md:px-8"
       >
         Start a plan
       </Link>
@@ -111,7 +111,8 @@ export default async function PackagesPage({
           <p>A plan is a trip, a bill, a Christmas — anything with a date and a cost.</p>
         </Empty>
       ) : (
-        <ul className="space-y-3">
+        // One column on a phone, side by side as the screen widens: each card is read at a glance (D38 (5)).
+        <ul className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
           {rows.map(({ view, plan, next }) => {
             const copy = STATE_COPY[view.package.state]
             const snoozed = view.items
@@ -121,8 +122,8 @@ export default async function PackagesPage({
             const accounts = plan ? [...new Set(plan.parts.map((p) => p.accountId))] : []
             return (
               <li key={view.package.id}>
-                <Link href={`/packages/${view.package.id}`}>
-                  <Card>
+                <Link href={`/packages/${view.package.id}`} className="block h-full">
+                  <Card className="h-full">
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="font-semibold">{view.package.name}</h2>
                       <span className="flex shrink-0 items-center gap-2">
@@ -194,6 +195,6 @@ export default async function PackagesPage({
           })}
         </ul>
       )}
-    </>
+    </div>
   )
 }

@@ -20,10 +20,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <Sidebar />
 
       {/* Bottom padding on a phone clears the fixed tab bar plus the home indicator. */}
-      <div className="flex min-h-dvh min-w-0 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
+      {/* group/shell: the footer follows a wide page's width too (has-[[data-wide]] below). */}
+      <div className="group/shell flex min-h-dvh min-w-0 flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
         <AppHeader viewer={viewer} />
-        {/* One column for reading; a page that marks itself data-wide (Trips, D48) takes the screen beside the sidebar. */}
-        <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-6 has-[[data-wide]]:max-w-[100rem]">{children}</main>
+        {/*
+          One column for reading and doing (This week, Check in, Share out, Settings). A page full of
+          figures holds a data-wide element (Debts, a debt, Plans, a plan, Recurring, What could we buy,
+          Income, Trips) and takes the screen beside the sidebar, laying itself out in columns as it
+          widens.
+        */}
+        <main className="mx-auto w-full max-w-2xl flex-1 px-4 pt-6 has-[[data-wide]]:max-w-[100rem] md:px-6">{children}</main>
         <AppFooter />
       </div>
 

@@ -578,9 +578,23 @@ principles, and they are non-negotiable.
   low faded unless forecast; the rest is in the tooltip and the tapped day's
   detail (beside the month on a wide screen). Above it, `yearStrip` (the
   next twelve months, a sliver a day, through `Engine.calendarYear`).
-  `/trips` and a trip's page mark themselves `data-wide`, which lifts the
-  shell's `max-w-2xl` (`has-[[data-wide]]` in `(app)/layout.tsx`); other
-  pages keep one column. The `@theme` block is `static` because colours
+  A page full of figures holds a `data-wide` element, which lifts the
+  shell's `max-w-2xl` to `100rem` beside the sidebar (`has-[[data-wide]]` in
+  `(app)/layout.tsx`; the footer follows through `group/shell`): Trips and a
+  trip, Debts and a debt, Plans and a plan, Recurring, What could we buy and
+  Income. Each lays itself out as it widens instead of stretching one column:
+  Debts puts its two questions side by side over a table that never scrolls
+  sideways (it is an `@container`: a column appears when the table itself
+  has room, `@2xl` for rate, interest and Edit, `@4xl` for the payoff date,
+  never by the window's width, which beside the sidebar says nothing about
+  the table's); Plans is a card grid; a plan has its chart beside its story and
+  its parts two to a row; a debt and Recurring flow into two newspaper
+  columns (`columns-2`, each card `break-inside-avoid`, so the phone order is
+  kept). Charts stop growing at the width one column drew them
+  (`max-w-[52rem]` the plan chart, `max-w-[40rem]` a debt's), so their words
+  never swell. This week, Check in, Share out, Settings and a new plan stay
+  one column: they read and act top to bottom. Dark mode sets
+  `color-scheme: dark`, so native scrollbars and pickers are dark too. The `@theme` block is `static` because colours
   read as `var(--color-busy-${step})` from code are invisible to Tailwind's
   scan, and light mode silently lost busy steps 2-5 without it.
 - **A tapped day says each park, and the calendar shows our trips** (PRD
