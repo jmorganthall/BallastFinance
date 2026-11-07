@@ -259,6 +259,7 @@ import {
   schoolYearOfBound,
   splitSchoolYearDays,
   schoolYearDaysNote,
+  schoolLeftOutNote,
   schoolYearRows,
   type SchoolYearRow,
   validateSchoolYearDay,
@@ -4664,10 +4665,12 @@ export class Engine {
     const read = options.read ?? readStructured
     if (source.kind === 'ical') {
       try {
-        const items = await fetchSchoolCalendarIcal(source.url, fetchImpl)
+        const { items, shortEvents } = await fetchSchoolCalendarIcal(source.url, fetchImpl)
         if (items.length > 0) {
-          // The first and last days of school are not days off: they set where each year runs (D59 (4)).
+          // The first and last days of school set where each year runs, and a day that names a school day
+          // (the end of a quarter, students return) is no day off (D59 (4), (6)).
           const split = splitSchoolYearDays(items)
+          const leftOut = schoolLeftOutNote(shortEvents, split.schoolDays)
           await this.stashSchoolCalendar({
             label: source.label,
             source: 'ical',
@@ -4676,7 +4679,10 @@ export class Engine {
             items: split.daysOff,
             yearDays: split.yearDays,
             readOn: this.today(),
-            notes: [`${source.label}: ${split.daysOff.length} ${split.daysOff.length === 1 ? 'day' : 'days'} off read from the feed${schoolYearDaysNote(split.yearDays)}.`],
+            notes: [
+              `${source.label}: ${split.daysOff.length} ${split.daysOff.length === 1 ? 'day' : 'days'} off read from the feed${schoolYearDaysNote(split.yearDays)}.`,
+              ...(leftOut ? [leftOut] : []),
+            ],
           })
           return { ok: true, count: items.length }
         }
@@ -4700,8 +4706,13 @@ export class Engine {
       await this.stashSchoolCalendar(null)
       return { ok: false, notes: [...notes, result.reason] }
     }
-    const answered = result.value as { schoolYear: string; daysOff: DayOffInput[] }
-    const split = splitSchoolYearDays(answered.daysOff)
+    const answered = result.value as { schoolYear: string; daysOff: DayOffInput[]; firstDayOfSchool?: CivilDate | null; lastDayOfSchool?: CivilDate | null }
+    // The first and last day the reader names go through the same check as a feed's (D59 (4)).
+    const named = [
+      ...(answered.firstDayOfSchool ? [{ date: answered.firstDayOfSchool, label: 'First day of school' }] : []),
+      ...(answered.lastDayOfSchool ? [{ date: answered.lastDayOfSchool, label: 'Last day of school' }] : []),
+    ]
+    const split = splitSchoolYearDays([...answered.daysOff, ...named])
     const calendar = { schoolYear: answered.schoolYear, daysOff: split.daysOff }
     if (calendar.daysOff.length === 0 && split.yearDays.length === 0) {
       await this.stashSchoolCalendar(null)
@@ -4715,7 +4726,11 @@ export class Engine {
       items: calendar.daysOff,
       yearDays: split.yearDays,
       readOn: this.today(),
-      notes: [...notes, `The reader read ${calendar.daysOff.length} ${calendar.daysOff.length === 1 ? 'day' : 'days'} off from ${source.label}${schoolYearDaysNote(split.yearDays)}.`],
+      notes: [
+        ...notes,
+        `The reader read ${calendar.daysOff.length} ${calendar.daysOff.length === 1 ? 'day' : 'days'} off from ${source.label}${schoolYearDaysNote(split.yearDays)}.`,
+        ...[schoolLeftOutNote(0, split.schoolDays)].filter((n): n is string => n !== null),
+      ],
     })
     return { ok: true, count: calendar.daysOff.length }
   }

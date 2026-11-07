@@ -498,8 +498,19 @@ principles, and they are non-negotiable.
   summer; a federal holiday alone stays unshaded), and ranking, Explore and
   school days missed read the same spans. A feed event titled as the first or
   last day of school for students (`schoolYearBoundOf`; never a teachers'
-  day) is split out of the days off (`splitSchoolYearDays`), held with them
-  and kept by the same import; a feed never replaces a typed day.
+  day; "1st Day of School" too) is split out of the days off
+  (`splitSchoolYearDays`), held with them and kept by the same import; a
+  feed never replaces a typed day. **A school's feed lists more than days
+  off** (D59 (6), rev 114, found on Baldwin County's real feed, the fixture
+  `src/domain/__tests__/fixtures/bcbe-2026-27.ics`): `parseSchoolIcal`
+  keeps all-day events and timed ones of `SCHOOL_DAY_MINUTES` (8 hours) or
+  more, leaving out board meetings and graduations, and `namesSchoolDay`
+  sets apart an all-day event that is a school day (the end of a quarter or
+  semester, students return, e-learning, early release); the held pull says
+  what it left out (`schoolLeftOutNote`). `parseIcal` itself still reads
+  every event. The reader's `school_calendar` shape asks for
+  `firstDayOfSchool` / `lastDayOfSchool` (null when the document does not
+  say), and they go through the same split.
   `Engine.setSchoolYearDays` takes either end or both (null takes one back)
   and checks the pair together; the /trips form sends only what changed
   (`first_day_was`). Every change is a `school_calendar_changed` with
@@ -551,8 +562,9 @@ principles, and they are non-negotiable.
   the number is printed too.
 - **The calendar reads at a glance** (PRD D48, rev 88). No legend and no
   symbols: a cell's background (`--color-noschool`) is a day with no school
-  (`CalendarCell.noSchool`: a weekend or a day off school; a federal holiday
-  alone is a school day), black stripes (`--color-cantgo`) a day we cannot
+  (`CalendarCell.noSchool`, `outOfSchool` in `school-year.ts`: a weekend, a
+  day off school, or a day outside every known school year, so summer, D59;
+  a federal holiday alone is a school day), black stripes (`--color-cantgo`) a day we cannot
   go, the busy bar on a card-coloured track with its number, the high and
   low faded unless forecast; the rest is in the tooltip and the tapped day's
   detail (beside the month on a wide screen). Above it, `yearStrip` (the
@@ -768,7 +780,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 1012 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 1019 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

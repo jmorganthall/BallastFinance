@@ -23,10 +23,10 @@ describe('the school calendar feed and the DVC listing pulls', () => {
       asked = `${url} ${(init.headers as Record<string, string>)['user-agent']}`
       return new Response(ics)
     }) as unknown as typeof fetch
-    expect(await fetchSchoolCalendarIcal('https://district.example/cal.ics', fake)).toEqual([{ date: '2027-01-18', label: 'MLK Day' }])
+    expect(await fetchSchoolCalendarIcal('https://district.example/cal.ics', fake)).toEqual({ items: [{ date: '2027-01-18', label: 'MLK Day' }], shortEvents: 0 })
     expect(asked).toContain('https://district.example/cal.ics BallastFinance/')
     await expect(fetchSchoolCalendarIcal('https://district.example/cal.ics', respond('nope', 500))).rejects.toThrow('500')
-    expect(await fetchSchoolCalendarIcal('https://district.example/cal.ics', respond('<html>login</html>'))).toEqual([])
+    expect(await fetchSchoolCalendarIcal('https://district.example/cal.ics', respond('<html>login</html>'))).toEqual({ items: [], shortEvents: 0 })
   })
 
   it('tries the broker sources in order, keeps only check-ins in the window, and notes every failure', async () => {

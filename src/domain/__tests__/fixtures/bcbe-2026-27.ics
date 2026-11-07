@@ -1,0 +1,556 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:icalendar-ruby
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VTIMEZONE
+TZID:America/Chicago
+BEGIN:DAYLIGHT
+DTSTART:20270314T030000
+TZOFFSETFROM:-0600
+TZOFFSETTO:-0500
+RRULE:FREQ=YEARLY;BYDAY=2SU;BYMONTH=3
+TZNAME:CDT
+END:DAYLIGHT
+BEGIN:STANDARD
+DTSTART:20261101T010000
+TZOFFSETFROM:-0500
+TZOFFSETTO:-0600
+RRULE:FREQ=YEARLY;BYDAY=1SU;BYMONTH=11
+TZNAME:CST
+END:STANDARD
+END:VTIMEZONE
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:1b4c895d-de20-5389-b175-ee7c7a6f4873
+DTSTART;VALUE=DATE:20261009
+DTEND;VALUE=DATE:20261010
+DESCRIPTION:End of the first quarter (42) days.
+SUMMARY:End of 1st Qtr.
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:2dede067-0a8c-5728-9277-92579169021b
+DTSTART;VALUE=DATE:20261012
+DTEND;VALUE=DATE:20261014
+DESCRIPTION:Fall Break for students and teachers
+SUMMARY:Fall Break
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:9a91e73c-4643-5866-a847-a7b92948f46e
+DTSTART;VALUE=DATE:20261014
+DTEND;VALUE=DATE:20261015
+DESCRIPTION:Variance Day for teachers\, student holiday. Teacher workday.
+SUMMARY:Variance Day
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:4ed47c04-778f-56bb-9260-a057162b05a8
+DTSTART;TZID=America/Chicago:20261020T170000
+DTEND;TZID=America/Chicago:20261020T190000
+DESCRIPTION:The BCBE Board Work Sessions are held at the BCBE Central Offi
+ ce Satellite\, unless otherwise noted. The dates\, times\, and locations 
+ of meetings are subject to change. Note: Meeting moved back one week due 
+ to the SSA Fall Conference 
+LOCATION:1091 B. Avenue\, Loxley\, AL 36551
+SUMMARY:BCBE Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:f65f11f7-be4e-5129-85d8-0f1d61f3d648
+DTSTART;TZID=America/Chicago:20261022T173000
+DTEND;TZID=America/Chicago:20261022T193000
+DESCRIPTION:The BCBE Board Meetings are held in the Tharp Building located 
+ at the BCBE Main Offices in Bay Minette\, AL. 
+LOCATION:2600 Hand Ave.\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:725de894-c903-56c2-9e9e-e72a67dc4e40
+DTSTART;TZID=America/Chicago:20261031T110000
+DTEND;TZID=America/Chicago:20261031T173000
+DESCRIPTION:Welcome to the Stapleton Bluegrass Festival The Stapleton Blue
+ grass Festival is not only an outstanding musical event for our area\, but
+  it is also crucial to Stapleton School. As our primary annual fundraiser\
+ , this event provides much-needed resources to improve the academic and ov
+ erall educational experience for our students. Click here for more informa
+ tion.   
+LOCATION:Stapleton School 35480 Harriott Ave.\, Stapleton\, AL 36578
+SUMMARY:Stapleton Bluegrass Festival
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:8228c032-5eb7-5b2b-a4f9-85b48ac98a57
+DTSTART;VALUE=DATE:20261111
+DTEND;VALUE=DATE:20261112
+DESCRIPTION:Veteran's Day holiday for students &amp\; teachers
+SUMMARY:Veteran's Day holiday
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:7b087ef9-3f99-5076-a49c-378e1cb6c6e2
+DTSTART;TZID=America/Chicago:20261117T170000
+DTEND;TZID=America/Chicago:20261117T190000
+DESCRIPTION:The BCBE Board Work Sessions are held at the BCBE Central Offi
+ ce Satellite\, unless otherwise noted. The dates\, times\, and locations 
+ of meetings are subject to change. 
+LOCATION:1091 B Ave.\, Loxley\, AL 36551
+SUMMARY:BCBE Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:632af055-c138-568f-9dbd-850ea2117140
+DTSTART;TZID=America/Chicago:20261119T173000
+DTEND;TZID=America/Chicago:20261119T193000
+DESCRIPTION:The BCBE Board Meetings are held in the Tharp Building located 
+ at the BCBE Main Office in Bay Minette\, AL.
+LOCATION:2600 Hand Ave.\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:d8181f91-7d29-5ea4-87df-380e6804b2ae
+DTSTART;VALUE=DATE:20261123
+DTEND;VALUE=DATE:20261128
+DESCRIPTION:Thanksgiving Break for teachers and students. 
+SUMMARY:Thanksgiving Break
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:7d5df6e6-3b4f-567b-b7eb-2f93e9bd347c
+DTSTART;TZID=America/Chicago:20261210T163000
+DTEND;TZID=America/Chicago:20261210T193000
+DESCRIPTION:This BCBE Bard Work Session and Board Meeting is being held joi
+ ntly due to the holidays. 
+LOCATION:1091 B Ave.\, Loxley\, AL 36551
+SUMMARY:BCBE Board Meeting & Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:24056c3d-edc8-565c-b8f6-060468d71f5a
+DTSTART;VALUE=DATE:20261218
+DTEND;VALUE=DATE:20261219
+DESCRIPTION:End of the second quarter.
+SUMMARY:End of qtr.
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:10cb663f-b6af-5d7c-a229-2d70d3c0474e
+DTSTART;VALUE=DATE:20261218
+DTEND;VALUE=DATE:20261219
+DESCRIPTION:End of Semester (41)
+SUMMARY:End of semester
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:0805b58f-f085-539a-91d2-e9a87745b408
+DTSTART;VALUE=DATE:20261221
+DTEND;VALUE=DATE:20270101
+DESCRIPTION:Christmas Break for teachers and students. 
+SUMMARY:Christmas Break
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:6e7dcfa6-4660-5d2a-bc45-a4ed5f85b2a5
+DTSTART;VALUE=DATE:20270101
+DTEND;VALUE=DATE:20270102
+DESCRIPTION:New Year's Day holiday for teachers &amp\; students. 
+SUMMARY:NY Holiday
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:73976f73-bfae-5a5f-aafa-744f8d77d71b
+DTSTART;VALUE=DATE:20270104
+DTEND;VALUE=DATE:20270105
+DESCRIPTION:Teacher workday/ variance day. Student holiday.
+SUMMARY:Variance Day
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:cb825013-8d1c-565f-8170-f9e1b58087c1
+DTSTART;VALUE=DATE:20270105
+DTEND;VALUE=DATE:20270106
+DESCRIPTION:Teacher professional development day. Student holiday.
+SUMMARY:District PD
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:6a8e37d6-dc75-52b4-b86a-cb4dd7a93662
+DTSTART;VALUE=DATE:20270106
+DTEND;VALUE=DATE:20270107
+DESCRIPTION:Teacher professional development day. Student holiday.
+SUMMARY:Local PD
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:52e1b8f2-678b-574a-9a64-fd272cf59ac7
+DTSTART;VALUE=DATE:20270107
+DTEND;VALUE=DATE:20270108
+DESCRIPTION:Students return from the Christmas and New Year's breaks. 
+SUMMARY:Students return
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:37b2a12f-f978-59a2-91be-1d9ac405119e
+DTSTART;VALUE=DATE:20270118
+DTEND;VALUE=DATE:20270119
+DESCRIPTION:Martin Luther King holiday for students and teachers. 
+SUMMARY:MLK Holiday
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:83bf82ea-8b94-5142-b143-7f848a35f9cc
+DTSTART;TZID=America/Chicago:20270119T170000
+DTEND;TZID=America/Chicago:20270119T180000
+DESCRIPTION:The BCBE Board Work Sessions are held at the BCBE Central Offi
+ ce Satellite\, unless otherwise noted. The dates\, times\, and locations 
+ of meetings are subject to change. 
+LOCATION:1091 B Avenue\, Loxley AL 36551
+SUMMARY:BCBE Board: Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:123ff61d-8a5e-5b4b-a965-71c99dda9d26
+DTSTART;TZID=America/Chicago:20270121T173000
+DTEND;TZID=America/Chicago:20270121T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL.
+LOCATION:2600 Hand Ave.\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:5142471f-36f1-5c15-8654-a17017fbf2bd
+DTSTART;VALUE=DATE:20270208
+DTEND;VALUE=DATE:20270211
+DESCRIPTION:Mardi Gras holidays for students and teachers.
+SUMMARY:Mardi Gras break
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:18804d59-0c52-5f42-b8fc-57e8062fe8c8
+DTSTART;VALUE=DATE:20270211
+DTEND;VALUE=DATE:20270212
+DESCRIPTION:District PD for teachers\, student holiday. 
+SUMMARY:District PD
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:fe6bf792-9596-5e9e-8db7-1485c91718d0
+DTSTART;VALUE=DATE:20270212
+DTEND;VALUE=DATE:20270213
+DESCRIPTION:Variance day for teachers\, student holiday. 
+SUMMARY:Variance Day
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:152582a9-e8a1-5893-906f-03fc9a1e303d
+DTSTART;VALUE=DATE:20270215
+DTEND;VALUE=DATE:20270216
+DESCRIPTION:Students return to the classroom after the Mardi Gras break and
+  the teacher professional development days. 
+SUMMARY:Students return
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:dace059d-2452-5e0e-a7eb-b30cffa83186
+DTSTART;TZID=America/Chicago:20270216T170000
+DTEND;TZID=America/Chicago:20270216T180000
+DESCRIPTION:The BCBE Board Work Sessions are held at 5:00 p.m. at the BCBE
+  Central Office Satellite\, unless otherwise noted. The dates\, times\, a
+ nd locations of meetings are subject to change. 
+LOCATION:1091 B. Avenue\, Loxley\, AL 36551
+SUMMARY:BCBE Board: Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:94165d1d-9226-574d-9f36-2d752d9d00dc
+DTSTART;TZID=America/Chicago:20270218T173000
+DTEND;TZID=America/Chicago:20270218T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL.
+LOCATION:2600 Hand Ave.\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:d592e5fd-2eb2-5d8c-86dc-8d883477ee7d
+DTSTART;TZID=America/Chicago:20270316T170000
+DTEND;TZID=America/Chicago:20270316T180000
+DESCRIPTION:The BCBE Board Work Sessions are held at 5:00 p.m. at the BCBE
+  Central Office Satellite\, unless otherwise noted. The dates\, times\, a
+ nd locations of meetings are subject to change. 
+LOCATION:1091 B. Avenue\, Loxley\, AL 36551
+SUMMARY:BCBE Board Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:846ddc24-fad0-5b4c-a6c2-497f25ce1acc
+DTSTART;VALUE=DATE:20270317
+DTEND;VALUE=DATE:20270318
+DESCRIPTION:End of 3rd quarter
+SUMMARY:End of qtr.
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:8df27b14-25e2-54a7-9d50-2b42070d45cb
+DTSTART;TZID=America/Chicago:20270318T173000
+DTEND;TZID=America/Chicago:20270318T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL.
+LOCATION:2600 Hand Avenue\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:9c753ebb-1507-5c63-9762-53975569cf3f
+DTSTART;VALUE=DATE:20270326
+DTEND;VALUE=DATE:20270327
+DESCRIPTION:Students will have an E-Learning day on Friday\, March 26 (Good
+  Friday). 
+SUMMARY:E-Learning Day
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:c17b1030-3003-5ddf-8aa7-b1b252da608e
+DTSTART;VALUE=DATE:20270328
+DTEND;VALUE=DATE:20270329
+DESCRIPTION:
+SUMMARY:Easter
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:a05ad960-6a47-57b9-a0d9-8231b6d2f10c
+DTSTART;VALUE=DATE:20270412
+DTEND;VALUE=DATE:20270417
+DESCRIPTION:Spring Break for students and teachers.
+SUMMARY:Spring Break
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:d9a7757c-a605-5409-921b-5ee4da3e0d15
+DTSTART;TZID=America/Chicago:20270420T170000
+DTEND;TZID=America/Chicago:20270420T180000
+DESCRIPTION:The BCBE Board Work Sessions are held at 5:00 p.m. at the BCBE
+  Central Office Satellite\, unless otherwise noted. The dates\, times\, a
+ nd locations of meetings are subject to change.  Meeting moved back due 
+ to Spring Break. 
+LOCATION:1091 B. Avenue\, Loxley\, AL 36551
+SUMMARY:BCBE Board Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:620abc8a-1b81-5678-8601-29fa160675c3
+DTSTART;TZID=America/Chicago:20270422T173000
+DTEND;TZID=America/Chicago:20270422T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL.
+LOCATION:2600 Hand Avenue\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:3d9e7d03-2800-5f7b-9916-8528e4471394
+DTSTART;TZID=America/Chicago:20270517T140000
+DTEND;TZID=America/Chicago:20270517T163000
+DESCRIPTION:The Baldwin County Virtual School graduation will be held on Mo
+ nday\, May 17\, 2027 at 2pm. The graduation will take place at the Daphne 
+ Civic Center. 
+LOCATION:2603 US-98\, Daphne\, AL 36526
+SUMMARY:Graduation: Baldwin County Virtual School
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:c8fb4b99-94b2-545f-8e67-838072e2b5e6
+DTSTART;TZID=America/Chicago:20270517T190000
+DTEND;TZID=America/Chicago:20270517T220000
+DESCRIPTION:Graduation will take place on Monday\, May 17 at 7:00 p.m. for 
+ the following schools at the following locations:  Baldwin Preparatory A
+ cademy\, TBD.\, Foley Event CenterBaldwin County High School\, 7:00 p.m.\
+ , Bill Mitchell FieldSpanish Fort High School\, 7:00 p.m.\, Spanish Fort S
+ tadiumFairhope High School\, 7:00 p.m.\, W.C. Majors StadiumElberta High S
+ chool\, 7:00 p.m.\, Warrior Field
+SUMMARY:Graduation
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:d1fec813-8d2c-575b-948e-f6ee936aff8e
+DTSTART;TZID=America/Chicago:20270518T190000
+DTEND;TZID=America/Chicago:20270518T213000
+DESCRIPTION:Graduation will take place on Wednesday\, May 18 at 7:00 p.m. 
+ for the following schools at the locations:  Daphne High School\, 7:00 p
+ .m.\, Trojan FieldFoley High School\, 7:00 p.m.\, Foley Event CenterRobert
+ sdale High School\, 7:00 p.m.\, J.D. Sellars Stadium
+SUMMARY:Graduation
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:791f5396-232e-593f-8e8f-bebedfdbcb43
+DTSTART;TZID=America/Chicago:20270520T163000
+DTEND;TZID=America/Chicago:20270520T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL. Note: This is a
+  combined meeting due to graduations being held earlier in the week and en
+ d of the school year deadlines. 
+LOCATION:1091 B. Avenue\, Loxley\, AL 36551
+SUMMARY:BCBE Board Work Session & Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:efc57250-744e-5244-b79e-fe1799b95bb8
+DTSTART;VALUE=DATE:20270527
+DTEND;VALUE=DATE:20270528
+DESCRIPTION:The last day of school for the 2026-2027 school year is May 27
+SUMMARY:Last day of school
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:c71cb3c4-580c-5b35-a5b5-22c62d477b39
+DTSTART;VALUE=DATE:20270528
+DTEND;VALUE=DATE:20270529
+DESCRIPTION:Teacher workday
+SUMMARY:Teacher Workday
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:ab90f10a-89f0-543a-b22a-18f6cfd349b2
+DTSTART;VALUE=DATE:20270531
+DTEND;VALUE=DATE:20270601
+DESCRIPTION:The Memorial Day holiday for all employees will be observed on 
+ May 31. 
+SUMMARY:Memorial Day holiday
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:f9666b66-035e-5de9-8c0e-034581d92444
+DTSTART;VALUE=DATE:20270619
+DTEND;VALUE=DATE:20270620
+DESCRIPTION:The Juneteenth holiday is observed on Saturday\, June 19. 
+SUMMARY:Juneteenth
+TRANSP:TRANSPARENT
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:c96ba2d3-ab08-50af-b8e0-99991b2f6deb
+DTSTART;TZID=America/Chicago:20270624T163000
+DTEND;TZID=America/Chicago:20270624T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL. This is a combi
+ ned meeting due to CLAS\, SSA\, and AASB conferences. All combined meeting
+ s begin at 4:30 p.m.
+LOCATION:1091 B. Avenue\, Loxley\, AL 36551
+SUMMARY:BCBE Board Meeting & Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:89be97ed-de67-56e0-bbdc-c09f868792c5
+DTSTART;TZID=America/Chicago:20270713T170000
+DTEND;TZID=America/Chicago:20270713T180000
+DESCRIPTION:The BCBE Board Work Sessions are held at 5:00 p.m. at the BCBE
+  Central Office Satellite\, unless otherwise noted. The dates\, times\, a
+ nd locations of meetings are subject to change. 
+LOCATION:1091 B. Avenue\, Loxley\, AL 36551
+SUMMARY:BCBE Board Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:9cf7d824-eb2c-5063-8471-4153250c295d
+DTSTART;TZID=America/Chicago:20270715T173000
+DTEND;TZID=America/Chicago:20270715T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL.
+LOCATION:2600 Hand Ave.\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:bcb61e9a-1987-5916-8705-7b8eafb7d48d
+DTSTART;TZID=America/Chicago:20270817T170000
+DTEND;TZID=America/Chicago:20270817T180000
+DESCRIPTION:The BCBE Board Work Sessions are held at 5:00 p.m. at the BCBE
+  Central Office Satellite\, unless otherwise noted. The dates\, times\, a
+ nd locations of meetings are subject to change. 
+LOCATION:1091 B. Avenue\, Loxley\, AL 36551
+SUMMARY:BCBE Board Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:3128af6a-24ca-5980-92df-084731b7c3b2
+DTSTART;TZID=America/Chicago:20270819T173000
+DTEND;TZID=America/Chicago:20270819T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL.
+LOCATION:2600 Hand Ave.\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:0dae56a4-5e9f-52f1-9730-ba48c623a887
+DTSTART;TZID=America/Chicago:20270914T170000
+DTEND;TZID=America/Chicago:20270914T180000
+DESCRIPTION:The BCBE Board Work Sessions are held at 5:00 p.m. at the BCBE
+  Central Office Satellite\, unless otherwise noted. The dates\, times\, a
+ nd locations of meetings are subject to change. 
+LOCATION:1091 B. Avenue\, Loxley\, AL 36551
+SUMMARY:BCBE Board Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:d7efa583-8670-5c2e-896e-efe05f787f29
+DTSTART;TZID=America/Chicago:20270916T173000
+DTEND;TZID=America/Chicago:20270916T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL.
+LOCATION:2600 Hand Ave.\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:f602b934-fa20-5d8a-83e8-e138046e7854
+DTSTART;TZID=America/Chicago:20271019T170000
+DTEND;TZID=America/Chicago:20271019T180000
+DESCRIPTION:The BCBE Board Work Sessions are held at 5:00 p.m. at the BCBE
+  Central Office Satellite\, unless otherwise noted. The dates\, times\, a
+ nd locations of meetings are subject to change. 
+LOCATION:1091 B. Ave.\, Loxley\, AL 36551
+SUMMARY:BCBE Board Work Session
+END:VEVENT
+BEGIN:VEVENT
+DTSTAMP:20261107T113432Z
+UID:ec895622-860f-5ac3-9441-c27c0302b7e5
+DTSTART;TZID=America/Chicago:20271021T173000
+DTEND;TZID=America/Chicago:20271021T183000
+DESCRIPTION:The BCBE Board Meetings are held at 5:30 p.m. in the Tharp Buil
+ ding located at the BCBE Main Office in Bay Minette\, AL. The meeting dat
+ e was moved back one week due to SSA Fall Conference. 
+LOCATION:2600 Hand Avenue\, Bay Minette\, AL 36507
+SUMMARY:BCBE Board Meeting
+END:VEVENT
+END:VCALENDAR

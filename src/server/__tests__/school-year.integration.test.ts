@@ -130,4 +130,30 @@ describeDb('the first and last day of school', () => {
     const sept = await engine.calendarMonth('2026-09')
     expect(cell(sept, '2026-09-07').noSchool).toBe(true) // Labor Day, a day off
   })
+
+  it('a PDF read by the reader gives its first and last day the same check, and leaves the school days out', async () => {
+    await engine.setSchoolCalendarSources([{ label: 'District PDF', url: 'https://district.example/calendar.pdf', kind: 'pdf' }])
+    const read = (async () => ({
+      ok: true as const,
+      value: {
+        schoolYear: '2027-28',
+        firstDayOfSchool: '2027-08-11',
+        lastDayOfSchool: '2028-05-25',
+        daysOff: [
+          { date: '2027-09-06', label: 'Labor Day' },
+          { date: '2027-10-08', label: 'End of 1st Quarter' },
+        ],
+      },
+      model: 'test/model',
+      sourceUrl: 'https://district.example/calendar.pdf',
+      chars: 1,
+    })) as never
+    const fake = (async () => new Response('%PDF-1.4')) as unknown as typeof fetch
+    expect(await engine.readSchoolCalendarSource(0, { fallbackToReader: true, fetchImpl: fake, read, env: { READER_API_KEY: 'k', READER_MODEL: 'test/model' } })).toEqual({ ok: true, count: 1 })
+    const held = (await engine.pendingSchoolCalendar())!
+    expect(held.items).toEqual([{ date: '2027-09-06', label: 'Labor Day' }])
+    expect(held.yearDays!.map((d) => `${d.schoolYear} ${d.which} ${d.date}`)).toEqual(['2027-28 first 2027-08-11', '2027-28 last 2028-05-25'])
+    expect(held.notes.at(-1)).toBe('Left out: 1 day that names a school day (End of 1st Quarter).')
+    await engine.stashSchoolCalendar(null)
+  })
 })

@@ -9,13 +9,20 @@ import { CrowdCalendarShape, DvcListingsShape, READER_INSTRUCTIONS, readerJsonSc
 
 describe('reader shapes', () => {
   it('accepts a school calendar and refuses a bad date, a missing field, or an extra one', () => {
-    const good = { schoolYear: '2026-27', daysOff: [{ date: '2027-01-18', label: 'MLK Day' }] }
+    const good = { schoolYear: '2026-27', firstDayOfSchool: null, lastDayOfSchool: null, daysOff: [{ date: '2027-01-18', label: 'MLK Day' }] }
     expect(validateReaderReply('school_calendar', good)).toEqual({ ok: true, value: good })
-    expect(validateReaderReply('school_calendar', { schoolYear: '2026-27', daysOff: [{ date: '2027-02-30', label: 'x' }] })).toMatchObject({ ok: false })
-    expect(validateReaderReply('school_calendar', { schoolYear: '2026-27', daysOff: [{ date: 'Jan 18', label: 'x' }] })).toMatchObject({ ok: false })
-    expect(validateReaderReply('school_calendar', { daysOff: [] })).toMatchObject({ ok: false, problems: [expect.stringContaining('schoolYear')] })
-    expect(SchoolCalendarShape.safeParse({ schoolYear: '2026-27', daysOff: [], extra: 1 }).success).toBe(false)
+    expect(validateReaderReply('school_calendar', { schoolYear: '2026-27', firstDayOfSchool: null, lastDayOfSchool: null, daysOff: [{ date: '2027-02-30', label: 'x' }] })).toMatchObject({ ok: false })
+    expect(validateReaderReply('school_calendar', { schoolYear: '2026-27', firstDayOfSchool: null, lastDayOfSchool: null, daysOff: [{ date: 'Jan 18', label: 'x' }] })).toMatchObject({ ok: false })
+    expect(validateReaderReply('school_calendar', { daysOff: [] })).toMatchObject({ ok: false, problems: expect.arrayContaining([expect.stringContaining('schoolYear')]) })
+    expect(SchoolCalendarShape.safeParse({ schoolYear: '2026-27', firstDayOfSchool: null, lastDayOfSchool: null, daysOff: [], extra: 1 }).success).toBe(false)
     expect(validateReaderReply('school_calendar', 'not even an object')).toMatchObject({ ok: false })
+  })
+
+  it('takes the first and last day of school as dates or null (D59)', () => {
+    const both = { schoolYear: '2026-27', firstDayOfSchool: '2026-08-12', lastDayOfSchool: '2027-05-27', daysOff: [] }
+    expect(validateReaderReply('school_calendar', both)).toEqual({ ok: true, value: both })
+    expect(validateReaderReply('school_calendar', { ...both, firstDayOfSchool: 'Aug 12' })).toMatchObject({ ok: false })
+    expect(validateReaderReply('school_calendar', { schoolYear: '2026-27', daysOff: [] })).toMatchObject({ ok: false })
   })
 
   it('accepts DVC listings and refuses fractional nights or negative cents', () => {
@@ -39,7 +46,7 @@ describe('reader shapes', () => {
 
   it('emits a strict JSON schema: every property required, no extras', () => {
     const schema = readerJsonSchema('school_calendar') as { required: string[]; additionalProperties: boolean; properties: Record<string, unknown> }
-    expect(schema.required).toEqual(['schoolYear', 'daysOff'])
+    expect(schema.required).toEqual(['schoolYear', 'firstDayOfSchool', 'lastDayOfSchool', 'daysOff'])
     expect(schema.additionalProperties).toBe(false)
     const items = (schema.properties.daysOff as { items: { required: string[]; additionalProperties: boolean } }).items
     expect(items.required).toEqual(['date', 'label'])

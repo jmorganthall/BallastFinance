@@ -90,8 +90,9 @@ function dayOffSourceName(source: string): string {
   return source
 }
 
-/** Under a first or last day of school: where it came from, or, while nobody has said, what it is counted from (D59). */
-function schoolYearEndWords(stated: { date: string; source: string } | null, guess: string | null, which: 'first' | 'last'): string {
+/** Under a first or last day of school: where it came from, or, while nobody has said, what it is counted from (D59); asked for when the other end alone counts nothing. */
+function schoolYearEndWords(stated: { date: string; source: string } | null, guess: string | null, which: 'first' | 'last', askForIt: boolean): string {
+  if (!stated && askForIt) return `Add the ${which} day too: until both are set, this year is not counted`
   if (stated) {
     const words = dayOffSourceName(stated.source)
     return words.charAt(0).toUpperCase() + words.slice(1)
@@ -530,12 +531,12 @@ export default async function TripsPage({
                     <label className="block text-xs text-[var(--color-ink-soft)]">
                       First day of school
                       <input name="first_day" type="date" defaultValue={y.first?.date ?? ''} className={input} />
-                      <span className="mt-0.5 block">{schoolYearEndWords(y.first, y.guessFirst, 'first')}</span>
+                      <span className="mt-0.5 block">{schoolYearEndWords(y.first, y.guessFirst, 'first', !y.counted && y.last !== null)}</span>
                     </label>
                     <label className="block text-xs text-[var(--color-ink-soft)]">
                       Last day of school
                       <input name="last_day" type="date" defaultValue={y.last?.date ?? ''} className={input} />
-                      <span className="mt-0.5 block">{schoolYearEndWords(y.last, y.guessLast, 'last')}</span>
+                      <span className="mt-0.5 block">{schoolYearEndWords(y.last, y.guessLast, 'last', !y.counted && y.first !== null)}</span>
                     </label>
                     <button type="submit" className={`${smallButton} self-start mt-4`}>
                       Save

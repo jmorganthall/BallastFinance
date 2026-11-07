@@ -98,9 +98,24 @@ export function fitsSchoolYearBound(which: SchoolYearBound, date: CivilDate): bo
   return which === 'first' ? month >= 7 && month <= 10 : month >= 4 && month <= 7
 }
 
-const FIRST_DAY = /\bfirst day (?:of (?:the )?school(?: year)?|for students|of classes)\b/i
+const FIRST_DAY = /\b(?:first|1st) day (?:of (?:the )?school(?: year)?|for students|of classes)\b/i
 const LAST_DAY = /\blast day (?:of (?:the )?school(?: year)?|for students|of classes)\b/i
 const NOT_STUDENTS = /\b(?:teachers?|staff|employees?|faculty)\b/i
+
+/**
+ * All-day events that name a day students are in school, not a day off
+ * (D59 (6)): the end of a quarter, semester or grading period, students
+ * coming back, an e-learning day (school work from home is still school),
+ * an early release. Taken from what districts' feeds list beside their
+ * holidays; Baldwin County's lists every one of these.
+ */
+const SCHOOL_DAY_TITLE =
+  /\b(?:end of (?:the )?(?:(?:1st|2nd|3rd|4th|first|second|third|fourth) )?(?:qtr|quarter|semester|term|grading period|nine weeks)|students? return|e-?learning|early (?:release|dismissal)|half day|progress reports?|report cards?)\b/i
+
+/** Whether an event's title names a school day rather than a day off (D59 (6)). */
+export function namesSchoolDay(title: string): boolean {
+  return SCHOOL_DAY_TITLE.test(title)
+}
 
 /** Whether an event's title says it is the first or last day of school for students (D59 (4)); else nothing. */
 export function schoolYearBoundOf(title: string): SchoolYearBound | null {
@@ -111,23 +126,28 @@ export function schoolYearBoundOf(title: string): SchoolYearBound | null {
 }
 
 /**
- * A feed's events split in two (D59 (4)): the first and last days of school,
- * which set a year's ends and are not days off, and the days off. Where a
- * year has two first days (a staggered start) the earliest is kept, and the
- * latest of two last days; the titles go with them so a person sees why.
+ * A feed's events sorted three ways (D59 (4), (6)): the first and last days
+ * of school, which set a year's ends; the days that name a school day (the
+ * end of a quarter, students return), which are not days off; and the days
+ * off. Where a year has two first days (a staggered start) the earliest is
+ * kept, and the latest of two last days; the titles go with them so a
+ * person sees why.
  */
 export function splitSchoolYearDays(items: readonly DayOffInput[]): {
   daysOff: DayOffInput[]
   yearDays: (Pick<SchoolYearDay, 'schoolYear' | 'which' | 'date'> & { label: string })[]
+  schoolDays: DayOffInput[]
 } {
   const daysOff: DayOffInput[] = []
+  const schoolDays: DayOffInput[] = []
   const found = new Map<string, Pick<SchoolYearDay, 'schoolYear' | 'which' | 'date'> & { label: string }>()
   for (const item of items) {
     // A matching title in a month no first or last day can be (a January start at a year-round
     // school) is left as the feed gave it, as before D59, so one odd event never stops the rest.
     const which = schoolYearBoundOf(item.label)
     if (!which || !fitsSchoolYearBound(which, item.date)) {
-      daysOff.push(item)
+      if (namesSchoolDay(item.label)) schoolDays.push(item)
+      else daysOff.push(item)
       continue
     }
     const schoolYear = schoolYearOfBound(which, item.date)
@@ -137,7 +157,7 @@ export function splitSchoolYearDays(items: readonly DayOffInput[]): {
     if (better) found.set(key, { schoolYear, which, date: item.date, label: item.label })
   }
   const yearDays = [...found.values()].sort((a, b) => compareDates(a.date, b.date))
-  return { daysOff, yearDays }
+  return { daysOff, yearDays, schoolDays }
 }
 
 /**
@@ -155,6 +175,24 @@ export function schoolYearDaysNote(yearDays: readonly Pick<SchoolYearDay, 'schoo
   return `, and ${parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`}`
 }
 
+/**
+ * What a read of a school calendar left out and why (D59 (6)), one
+ * sentence, or nothing: "Left out: 21 short events with a time, like a
+ * board meeting, and 8 days that name a school day (End of 1st Qtr.,
+ * Students return, E-Learning Day and 2 more)."
+ */
+export function schoolLeftOutNote(shortEvents: number, schoolDays: readonly DayOffInput[]): string | null {
+  const parts: string[] = []
+  if (shortEvents > 0) parts.push(`${shortEvents} short ${shortEvents === 1 ? 'event' : 'events'} with a time, like a board meeting`)
+  if (schoolDays.length > 0) {
+    const names = [...new Set(schoolDays.map((d) => d.label))]
+    const shown = names.slice(0, 3).join(', ')
+    const more = names.length > 3 ? ` and ${names.length - 3} more` : ''
+    parts.push(`${schoolDays.length} ${schoolDays.length === 1 ? 'day that names' : 'days that name'} a school day (${shown}${more})`)
+  }
+  return parts.length === 0 ? null : `Left out: ${parts.join(', and ')}.`
+}
+
 /** One school year as the screen lists it (D59 (1)): each end as stated, or the day it is counted from meanwhile. */
 export interface SchoolYearRow {
   schoolYear: string
@@ -163,6 +201,8 @@ export interface SchoolYearRow {
   /** While an end is not stated: the first or last listed day off it is counted from, or nothing. */
   guessFirst: CivilDate | null
   guessLast: CivilDate | null
+  /** Whether the year is counted at all: false while one end is set and nothing gives the other, so the screen asks for it. */
+  counted: boolean
 }
 
 /** The school years that touch today to a year from today (D59 (1)), soonest first: usually this one and the next. */
@@ -181,6 +221,7 @@ export function schoolYearRows(
   // A first day in July belongs to the year it starts, which schoolYearOf would still call the one before.
   for (const y of yearDays) if (!labels.includes(y.schoolYear) && compareDates(y.date, today) >= 0 && compareDates(y.date, end) <= 0) labels.push(y.schoolYear)
   const guessed = schoolYearSpans(daysOff)
+  const spans = schoolYearSpans(daysOff, yearDays)
   return labels.sort().map((schoolYear) => {
     const first = yearDays.find((y) => y.schoolYear === schoolYear && y.which === 'first')
     const last = yearDays.find((y) => y.schoolYear === schoolYear && y.which === 'last')
@@ -190,6 +231,7 @@ export function schoolYearRows(
       last: last ? { date: last.date, source: last.source } : null,
       guessFirst: first ? null : (guessed.get(schoolYear)?.from ?? null),
       guessLast: last ? null : (guessed.get(schoolYear)?.to ?? null),
+      counted: spans.has(schoolYear),
     }
   })
 }
