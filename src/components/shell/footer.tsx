@@ -8,11 +8,12 @@
  * by remembering.
  */
 
-import { runningBuild, shortRevision, updateStatus } from '@/server/version'
+import { lastUpdateCheckWords, runningBuild, shortRevision, updateStatus } from '@/server/version'
 import { selfUpdateOffered } from '@/server/self-update'
 import { requireEngine } from '@/server/session'
 import { dismissBackupNoticeAction } from '@/server/actions'
 import { UpdateNow } from './update-now'
+import { CheckForUpdates } from './check-for-updates'
 
 const REPO = 'https://github.com/jmorganthall/BallastFinance'
 
@@ -28,6 +29,9 @@ export async function AppFooter() {
   ])
   const revision = shortRevision(build.revision)
   const offered = selfUpdateOffered()
+  // The check runs only for a published build with the check left on; there is nothing to press otherwise.
+  const checkable = status.kind !== 'off' && build.revision !== null
+  const checked = lastUpdateCheckWords()
 
   const buildLabel = [build.version ? `v${build.version}` : null, revision ? `(${revision})` : null]
     .filter(Boolean)
@@ -79,13 +83,21 @@ export async function AppFooter() {
       ) : null}
 
       <div className="flex flex-col gap-1 border-t border-[var(--color-line)] pt-4 sm:flex-row sm:items-center sm:justify-between">
-        <p>
-          Ballast {buildLabel || 'development build'}
-          {status.kind === 'current' ? <span> · Up to date</span> : null}
-          {status.kind === 'unknown' ? (
-            <span title={status.reason}> · Update check unavailable</span>
+        <div>
+          <p>
+            Ballast {buildLabel || 'development build'}
+            {status.kind === 'current' ? <span> · Up to date</span> : null}
+            {status.kind === 'unknown' ? (
+              <span title={status.reason}> · Update check unavailable</span>
+            ) : null}
+            {(status.kind === 'current' || status.kind === 'unknown') && checked ? <span>, checked {checked}</span> : null}
+          </p>
+          {checkable ? (
+            <p className="mt-0.5">
+              <CheckForUpdates />
+            </p>
           ) : null}
-        </p>
+        </div>
         <p>
           Free software under the{' '}
           <a href={`${REPO}/blob/main/LICENSE`} className="underline" target="_blank" rel="noreferrer">

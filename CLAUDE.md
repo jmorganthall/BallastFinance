@@ -744,6 +744,16 @@ principles, and they are non-negotiable.
   paystub line without an amount is dropped, and one that comes to $0 is not
   shown. The income forms keep what was typed when the engine refuses
   (`IncomeFormState`): an error never costs a person their input.
+- **The footer says when it last asked, and "Check for updates" asks now.**
+  `updateStatus` in `src/server/version.ts` answers every page from one
+  check an hour (`CHECK_EVERY_MS`), so a build published since can read "Up
+  to date" for most of an hour. `checkForUpdatesNow` (the footer's
+  `CheckForUpdates`, through `checkForUpdatesAction`, which writes nothing)
+  asks the registry now and waits for the answer, joining a check already
+  running and answering from the last one within `FORCED_CHECK_GAP_MS` (10
+  seconds) so it cannot hammer the registry; `lastUpdateCheckWords` is the
+  footer's "checked 5 minutes ago". Shown only for a published build with
+  the check on.
 - **"Update now" goes through Watchtower, and a migration is backed up first**
   (design `docs/superpowers/specs/2026-10-29-update-now-design.md`, modelled on
   PathBrain). `src/server/self-update.ts`: with `WATCHTOWER_URL` set and the
@@ -780,7 +790,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 1019 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 1022 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

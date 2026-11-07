@@ -163,6 +163,8 @@ export async function fetchLatestRevision(options: {
  * the evening it lands and one that reads "up to date" for most of a day.
  */
 const CHECK_EVERY_MS = 60 * 60 * 1000
+/** "Check for updates" asks the registry at most this often, however often it is pressed. */
+export const FORCED_CHECK_GAP_MS = 10 * 1000
 /** How long a page render will wait on the registry before showing "unknown". */
 const RENDER_WAIT_MS = 3000
 const REQUEST_TIMEOUT_MS = 10_000
@@ -229,8 +231,22 @@ export async function updateStatus(options: {
   const fresh = cache && now() - cache.checkedAt < CHECK_EVERY_MS
   if (fresh && cache) return cache.status
 
+  const check = startCheck(running, env, options.fetchImpl ?? fetch, now)
+
+  // Never hold a page for the registry: stale-while-revalidate, and a first
+  // render that gives up after a short wait rather than hanging.
+  if (cache) return cache.status
+  const waited = await Promise.race([
+    check,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), RENDER_WAIT_MS)),
+  ])
+  return waited ?? { kind: 'unknown', reason: 'Still checking.' }
+}
+
+/** One check at a time: a check already running is joined, never doubled. */
+function startCheck(running: RunningBuild, env: Env, fetchImpl: Fetch, now: () => number): Promise<UpdateStatus> {
   if (!inflight) {
-    inflight = checkNow(running, env, options.fetchImpl ?? fetch)
+    inflight = checkNow(running, env, fetchImpl)
       .then((status) => {
         cache = { checkedAt: now(), status }
         return status
@@ -239,13 +255,37 @@ export async function updateStatus(options: {
         inflight = null
       })
   }
+  return inflight
+}
 
-  // Never hold a page for the registry: stale-while-revalidate, and a first
-  // render that gives up after a short wait rather than hanging.
-  if (cache) return cache.status
-  const waited = await Promise.race([
-    inflight,
-    new Promise<null>((resolve) => setTimeout(() => resolve(null), RENDER_WAIT_MS)),
-  ])
-  return waited ?? { kind: 'unknown', reason: 'Still checking.' }
+/**
+ * "Check for updates" in the footer: ask the registry now rather than wait
+ * for the hourly check, and wait for the answer, so the page drawn next
+ * shows it. Pressed again within FORCED_CHECK_GAP_MS it answers from the
+ * check just made, so the button can never hammer the registry.
+ */
+export async function checkForUpdatesNow(options: {
+  env?: Env
+  fetchImpl?: Fetch
+  now?: () => number
+} = {}): Promise<UpdateStatus> {
+  const env = options.env ?? process.env
+  const now = options.now ?? Date.now
+  const running = runningBuild(env)
+  if (env.BALLAST_UPDATE_CHECK === 'off' || env.BALLAST_UPDATE_CHECK === '0') return { kind: 'off' }
+  if (!running.revision) {
+    return { kind: 'unknown', reason: 'This build was made locally, so there is nothing to compare it to.' }
+  }
+  if (cache && now() - cache.checkedAt < FORCED_CHECK_GAP_MS) return cache.status
+  return startCheck(running, env, options.fetchImpl ?? fetch, now)
+}
+
+/** When the registry was last asked, as the footer says it: "just now", "5 minutes ago", "2 hours ago"; null before the first answer. */
+export function lastUpdateCheckWords(now: () => number = Date.now): string | null {
+  if (!cache) return null
+  const minutes = Math.floor((now() - cache.checkedAt) / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`
+  const hours = Math.floor(minutes / 60)
+  return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
 }

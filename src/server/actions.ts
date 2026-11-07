@@ -22,7 +22,7 @@ import {
   type TripPark,
 } from '@/domain'
 import type { Engine } from '@/server/engine'
-import { runningBuild } from '@/server/version'
+import { checkForUpdatesNow, runningBuild } from '@/server/version'
 import {
   callWatchtower,
   selfUpdateConfig,
@@ -2235,6 +2235,20 @@ export async function removeIncomePaymentAction(formData: FormData): Promise<voi
   await thenBack(`/income#source-${String(formData.get('income_source_id'))}`, (engine) =>
     engine.removeIncomePayment(String(formData.get('id'))),
   )
+}
+
+// ---------------------------------------------------------------- "Check for updates"
+
+/**
+ * The footer's "Check for updates": ask the registry now instead of waiting
+ * for the hourly check, then draw every page again so the footer says what
+ * it found. It reads a public registry and writes nothing, so either spouse
+ * may press it.
+ */
+export async function checkForUpdatesAction(): Promise<void> {
+  await requireEngine()
+  await checkForUpdatesNow()
+  revalidatePath('/', 'layout')
 }
 
 // ---------------------------------------------------------------- "Update now"
