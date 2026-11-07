@@ -23,9 +23,12 @@ const civilDate = z
     return y >= 2000 && y <= 2100 && new Date(Date.UTC(y, m - 1, day)).toISOString().slice(0, 10) === d
   }, 'a real calendar date')
 
-/** A school calendar as read from a district's PDF or page: the year and its days off. */
+/** A school calendar as read from a district's PDF or page: the year, its first and last day of school (D59), and its days off. */
 export const SchoolCalendarShape = z.strictObject({
   schoolYear: z.string().min(1).max(20),
+  // Required but null when the document does not say: the provider's strict mode wants every property.
+  firstDayOfSchool: civilDate.nullable(),
+  lastDayOfSchool: civilDate.nullable(),
   daysOff: z
     .array(
       z.strictObject({
@@ -84,7 +87,7 @@ export const READER_SHAPES = {
 /** The instruction sent with each shape, in plain words the model follows. */
 export const READER_INSTRUCTIONS: Record<ReaderShapeKey, string> = {
   school_calendar:
-    'This is a school district calendar. List every day students do not attend school (holidays, breaks, teacher work days, early-release days are NOT days off). Give each day as a separate entry with its date as YYYY-MM-DD and a short label. Expand a multi-day break into one entry per weekday. Give the school year as the calendar names it, like "2026-27". If no days off can be found, return an empty list.',
+    'This is a school district calendar. List every day students do not attend school: holidays, breaks, and teacher work or training days that are student holidays. An early-release day, an e-learning day, the end of a quarter or semester, and the first and last day of school are school days, not days off. Give each day off as a separate entry with its date as YYYY-MM-DD and a short label. Expand a multi-day break into one entry per weekday. Give the first day and the last day of school for students as YYYY-MM-DD, or null when the calendar does not say. Give the school year as the calendar names it, like "2026-27". If no days off can be found, return an empty list.',
   dvc_listings:
     'This is a page of Disney Vacation Club rooms a broker has available or confirmed. List each room: resort name, room type, check-in date as YYYY-MM-DD, number of nights, points if shown (else null), and the total price in whole US cents if shown (else null). If no rooms can be found, return an empty list.',
   crowd_calendar:

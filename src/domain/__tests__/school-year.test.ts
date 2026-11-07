@@ -118,9 +118,11 @@ describe('reading the first and last day from a feed (D59 (4))', () => {
 describe('the school years in the next 365 days (D59 (1))', () => {
   it('lists this year and the next, each end as stated or what it is counted from', () => {
     expect(schoolYearRows('2026-11-01', daysOff, [stated[0]!])).toEqual([
-      { schoolYear: '2026-27', first: { date: '2026-08-12', source: 'typed' }, last: null, guessFirst: null, guessLast: '2027-05-31' },
-      { schoolYear: '2027-28', first: null, last: null, guessFirst: null, guessLast: null },
+      { schoolYear: '2026-27', first: { date: '2026-08-12', source: 'typed' }, last: null, guessFirst: null, guessLast: '2027-05-31', counted: true },
+      { schoolYear: '2027-28', first: null, last: null, guessFirst: null, guessLast: null, counted: false },
     ])
+    // One end alone, with no days off to give the other: the year is not counted, so the screen asks.
+    expect(schoolYearRows('2026-11-01', [], [stated[0]!])[0]).toMatchObject({ schoolYear: '2026-27', counted: false, guessLast: null })
   })
 
   it('includes a year whose stated start in late July falls inside the window', () => {

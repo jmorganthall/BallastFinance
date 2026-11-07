@@ -39,10 +39,10 @@ describe('the reader', () => {
     const asked: { url: string; init: RequestInit }[] = []
     const fake = (async (url: string, init: RequestInit) => {
       asked.push({ url, init })
-      return reply({ schoolYear: '2026-27', daysOff: [{ date: '2027-01-18', label: 'MLK Day' }] })
+      return reply({ schoolYear: '2026-27', firstDayOfSchool: null, lastDayOfSchool: null, daysOff: [{ date: '2027-01-18', label: 'MLK Day' }] })
     }) as unknown as typeof fetch
     const got = await readStructured({ source: { text: 'Jan 18 2027 MLK Day no school' }, shape: 'school_calendar' }, { fetchImpl: fake, env })
-    expect(got).toEqual({ ok: true, value: { schoolYear: '2026-27', daysOff: [{ date: '2027-01-18', label: 'MLK Day' }] }, model: 'test/model-1', sourceUrl: null, chars: 29 })
+    expect(got).toEqual({ ok: true, value: { schoolYear: '2026-27', firstDayOfSchool: null, lastDayOfSchool: null, daysOff: [{ date: '2027-01-18', label: 'MLK Day' }] }, model: 'test/model-1', sourceUrl: null, chars: 29 })
     expect(asked).toHaveLength(1)
     expect(asked[0]!.url).toBe('https://openrouter.ai/api/v1/chat/completions')
     expect((asked[0]!.init.headers as Record<string, string>).authorization).toBe('Bearer k-test')
@@ -56,7 +56,7 @@ describe('the reader', () => {
   })
 
   it('refuses a reply that does not fit the shape, one that is not JSON, an error status, and a declined request', async () => {
-    const bad = await readStructured({ source: { text: 'x' }, shape: 'school_calendar' }, { fetchImpl: (async () => reply({ schoolYear: '2026-27', daysOff: [{ date: 'Jan 18', label: 'x' }] })) as unknown as typeof fetch, env })
+    const bad = await readStructured({ source: { text: 'x' }, shape: 'school_calendar' }, { fetchImpl: (async () => reply({ schoolYear: '2026-27', firstDayOfSchool: null, lastDayOfSchool: null, daysOff: [{ date: 'Jan 18', label: 'x' }] })) as unknown as typeof fetch, env })
     expect(bad).toMatchObject({ ok: false, reason: expect.stringContaining("did not fit") })
     const prose = await readStructured({ source: { text: 'x' }, shape: 'dvc_listings' }, { fetchImpl: (async () => reply('Sure! Here are the rooms...')) as unknown as typeof fetch, env })
     expect(prose).toMatchObject({ ok: false, reason: 'The reader did not answer with JSON.' })

@@ -35,7 +35,7 @@ import {
   GAS_PRICE_SERIES,
   nominatimUrl,
   parseGasPriceCsv,
-  parseIcal,
+  parseSchoolIcal,
   parseNominatim,
   parseOsrmRoute,
   PARK_LABELS,
@@ -266,13 +266,14 @@ export async function pullCrowdCalendar(
  * An iCal feed of the district's days off, read by the domain parser. An
  * error status is thrown; a page that is not a calendar is nothing.
  */
-export async function fetchSchoolCalendarIcal(url: string, fetchImpl: typeof fetch = fetch): Promise<DayOffInput[]> {
+/** A school's iCal feed, read by `parseSchoolIcal`: its days, and how many short timed events it left out (D59 (6)). */
+export async function fetchSchoolCalendarIcal(url: string, fetchImpl: typeof fetch = fetch): Promise<{ items: DayOffInput[]; shortEvents: number }> {
   const response = await fetchImpl(url, {
     signal: AbortSignal.timeout(20_000),
     headers: { accept: 'text/calendar, text/plain', 'user-agent': userAgent() },
   })
   if (!response.ok) throw new Error(`The calendar feed answered ${response.status}`)
-  return parseIcal(await response.text())
+  return parseSchoolIcal(await response.text())
 }
 
 export interface ListingFetch extends ParsedListings {

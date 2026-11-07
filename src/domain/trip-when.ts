@@ -648,20 +648,41 @@ function icalUnescape(s: string): string {
   return s.replace(/\\n/gi, ' ').replace(/\\,/g, ',').replace(/\\;/g, ';').replace(/\\\\/g, '\\').replace(/\s+/g, ' ').trim()
 }
 
-/**
- * Days off from an iCal feed: every VEVENT with a start date, one day per
- * date it covers (DTEND is exclusive; a timed event counts as its start
- * day), named by SUMMARY. Alarms are skipped, time zones ignored beyond the
- * date. Anything that is not a calendar is nothing.
- */
-export function parseIcal(text: string): DayOffInput[] {
+/** One VEVENT as a feed gives it (D25, D59): its first and last day, whether it is all day, and how long a timed one runs. */
+interface IcalEvent {
+  start: CivilDate
+  /** The last day it covers (an all-day DTEND is the day after; a timed one ends on its own day). */
+  last: CivilDate
+  allDay: boolean
+  /** A timed event's length in minutes, when its end says; null for an all-day one or one with no end. */
+  minutes: number | null
+  label: string
+}
+
+/** "20261020T170000" or "20261020T170000Z" -> minutes since midnight that day, or null. */
+function icalMinutes(value: string): number | null {
+  const m = value.trim().match(/T(\d{2})(\d{2})/)
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null
+}
+
+/** "PT2H", "P1D", "PT90M", "P1DT2H" -> minutes, or null. */
+function icalDurationMinutes(value: string): number | null {
+  const m = value.trim().match(/^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:\d+S)?)?$/)
+  if (!m || value.trim() === 'P') return null
+  return (Number(m[1] ?? 0) * 7 + Number(m[2] ?? 0)) * 1440 + Number(m[3] ?? 0) * 60 + Number(m[4] ?? 0)
+}
+
+/** Every VEVENT with a start date, in the order the feed lists them. Alarms are skipped, time zones ignored beyond the date. */
+function icalEvents(text: string): IcalEvent[] {
   if (typeof text !== 'string' || !/BEGIN:VCALENDAR/i.test(text)) return []
-  const out: DayOffInput[] = []
-  const seen = new Set<string>()
+  const out: IcalEvent[] = []
   let inEvent = false
   let skipDepth = 0
   let start: CivilDate | null = null
   let end: CivilDate | null = null
+  let startAt: number | null = null
+  let endAt: number | null = null
+  let duration: number | null = null
   let allDay = false
   let summary = ''
   for (const line of icalLines(text)) {
@@ -673,6 +694,7 @@ export function parseIcal(text: string): DayOffInput[] {
       if (value.toUpperCase() === 'VEVENT' && !inEvent) {
         inEvent = true
         start = end = null
+        startAt = endAt = duration = null
         allDay = false
         summary = ''
       } else if (inEvent) skipDepth += 1
@@ -686,16 +708,15 @@ export function parseIcal(text: string): DayOffInput[] {
       if (value.toUpperCase() === 'VEVENT' && inEvent) {
         inEvent = false
         if (start) {
-          const label = summary || 'Day off'
           // An all-day DTEND is the day after the last day; a timed one is on the last day itself.
-          const last = end ? (allDay ? addDays(end, -1) : end) : start
-          const stop = compareDates(last, start) < 0 ? start : last
-          for (let d = start; compareDates(d, stop) <= 0 && compareDates(d, start) < 366; d = addDays(d, 1)) {
-            const key = `${d}|${label.toLowerCase()}`
-            if (seen.has(key)) continue
-            seen.add(key)
-            out.push({ date: d, label })
+          const lastRaw = end ? (allDay ? addDays(end, -1) : end) : start
+          const last = compareDates(lastRaw, start) < 0 ? start : lastRaw
+          let minutes: number | null = null
+          if (!allDay) {
+            if (end && startAt !== null && endAt !== null) minutes = compareDates(end, start) * 1440 + endAt - startAt
+            else if (duration !== null) minutes = duration
           }
+          out.push({ start, last, allDay, minutes, label: summary || 'Day off' })
         }
       }
       continue
@@ -704,10 +725,57 @@ export function parseIcal(text: string): DayOffInput[] {
     if (name === 'DTSTART') {
       start = icalDate(value)
       allDay = /VALUE=DATE(?![-T])/i.test(head) || /^\d{8}$/.test(value.trim())
-    } else if (name === 'DTEND') end = icalDate(value)
+      startAt = icalMinutes(value)
+    } else if (name === 'DTEND') {
+      end = icalDate(value)
+      endAt = icalMinutes(value)
+    } else if (name === 'DURATION') duration = icalDurationMinutes(value)
     else if (name === 'SUMMARY') summary = icalUnescape(value)
   }
+  return out
+}
+
+/** An event's days, one entry a day (at most a year), each named by the event. */
+function eventDays(events: readonly IcalEvent[]): DayOffInput[] {
+  const out: DayOffInput[] = []
+  const seen = new Set<string>()
+  for (const e of events) {
+    for (let d = e.start; compareDates(d, e.last) <= 0 && compareDates(d, e.start) < 366; d = addDays(d, 1)) {
+      const key = `${d}|${e.label.toLowerCase()}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ date: d, label: e.label })
+    }
+  }
   return out.sort((a, b) => compareDates(a.date, b.date) || a.label.localeCompare(b.label))
+}
+
+/**
+ * Days off from an iCal feed: every VEVENT with a start date, one day per
+ * date it covers (DTEND is exclusive; a timed event counts as its start
+ * day), named by SUMMARY. Alarms are skipped, time zones ignored beyond the
+ * date. Anything that is not a calendar is nothing. A school's own feed is
+ * read by `parseSchoolIcal`, which also leaves out the short timed events.
+ */
+export function parseIcal(text: string): DayOffInput[] {
+  return eventDays(icalEvents(text))
+}
+
+/** A timed event this long or longer can close a school for the day; shorter ones (a board meeting, a graduation) cannot (D59 (6)). */
+export const SCHOOL_DAY_MINUTES = 8 * 60
+
+/**
+ * A school calendar's feed (D25, D59 (6)): every all-day event, and every
+ * timed one that runs a school day or more, as days; the shorter timed
+ * events -- a board meeting, a graduation, a festival on a Saturday -- are
+ * left out and counted, since a school does not close for them. Which of
+ * the days are a first or last day of school, or a school day by name, is
+ * `splitSchoolYearDays`'s answer.
+ */
+export function parseSchoolIcal(text: string): { items: DayOffInput[]; shortEvents: number } {
+  const events = icalEvents(text)
+  const kept = events.filter((e) => e.allDay || (e.minutes !== null && e.minutes >= SCHOOL_DAY_MINUTES))
+  return { items: eventDays(kept), shortEvents: events.length - kept.length }
 }
 
 /** What an import would do against what is already there: rows to add, rows the calendar no longer has. */
