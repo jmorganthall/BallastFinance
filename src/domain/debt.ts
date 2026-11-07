@@ -67,6 +67,8 @@ export interface Debt {
   paymentDay?: number | null
   /** The day the debt was entered in Ballast: where interest charged back starts when a deal has no start date. */
   enteredOn?: CivilDate
+  /** The lender's page for this debt, to open it from Ballast (D60): an http(s) address, or null. */
+  linkUrl?: string | null
   /**
    * The last balance a person stated, as of `balanceAsOf`, when the engine
    * read it. `balanceCents` is the likely balance today worked out from it
@@ -983,6 +985,7 @@ const TERM_WORDS: Record<string, string> = {
   payment_day: 'payment day',
   planned_payment_cents: 'monthly payment',
   asset_id: 'home or vehicle it is secured on',
+  link_url: 'link',
 }
 
 /** Which terms a `debt_updated` event changed, in plain words. */

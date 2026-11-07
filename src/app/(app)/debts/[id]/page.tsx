@@ -19,6 +19,7 @@ import { Card, Hint, humanDate, Money, PageHeader, Pill, When } from '@/componen
 import { BalanceChart, PaymentSplitChart } from '@/components/debt-charts'
 import { setSimplifiNamesAction } from '@/server/actions'
 import {
+  debtLinkSite,
   debtStatusLabel,
   debtStatusLine,
   debtWhatIf,
@@ -116,6 +117,13 @@ export default async function DebtPage({
         title={debt.name}
         subtitle={`${KIND[debt.category] ?? debt.category}${rung ? ` · number ${rung.rank} in the payoff order` : ''}`}
       />
+      {debt.linkUrl ? (
+        <p className="-mt-2 mb-4 text-sm">
+          <a href={debt.linkUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] underline underline-offset-4">
+            Open {debtLinkSite(debt.linkUrl)} ↗
+          </a>
+        </p>
+      ) : null}
 
       {/* How it stands, and its deal. */}
       <Card className="mb-4">

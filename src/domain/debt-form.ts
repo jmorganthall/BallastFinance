@@ -36,6 +36,8 @@ export interface DebtFormValues {
   promo_charged_back: string
   /** When the deal started, blank for the day the debt was entered. */
   promo_started: string
+  /** Where to go to see or pay it: the lender's site, blank for none (D60). */
+  link: string
 }
 
 export type DebtFormField = keyof DebtFormValues
@@ -55,6 +57,8 @@ export interface DebtInput {
   creditLimitCents: Cents | null
   plannedPaymentCents: Cents | null
   paymentDay: number | null
+  /** The lender's page for this debt, an http(s) address, or null (D60). */
+  linkUrl: string | null
 }
 
 export const EMPTY_DEBT_FORM: DebtFormValues = {
@@ -74,6 +78,7 @@ export const EMPTY_DEBT_FORM: DebtFormValues = {
   promo_until: '',
   promo_charged_back: 'yes',
   promo_started: '',
+  link: '',
 }
 
 const CATEGORIES: readonly DebtCategory[] = ['consumer', 'auto', 'mortgage']
@@ -123,6 +128,9 @@ export function parseDebtForm(values: DebtFormValues): DebtFormResult {
   if (paymentDay !== null && !(paymentDay >= 1 && paymentDay <= 31)) {
     problem('payment_day', 'Enter the day of the month it goes out, 1 to 31, or leave it blank.')
   }
+
+  const link = parseDebtLink(values.link)
+  if (!link.ok) problem('link', link.message)
 
   let minPaymentRule: MinPaymentRule | null = null
   if (values.min_type === 'percent' || values.min_type === 'percent_with_floor') {
@@ -217,7 +225,39 @@ export function parseDebtForm(values: DebtFormValues): DebtFormResult {
       // Zero means the same as blank: nothing beyond the minimum.
       plannedPaymentCents: plannedPaymentCents ? plannedPaymentCents : null,
       paymentDay,
+      linkUrl: link.ok ? link.url : null,
     },
+  }
+}
+
+/**
+ * A debt's link as typed (D60): blank is none; an address with no scheme
+ * ("chase.com/login") is taken as https; only a web address is kept, so a
+ * stored link can never run anything when it is opened.
+ */
+export function parseDebtLink(raw: string): { ok: true; url: string | null } | { ok: false; message: string } {
+  const typed = raw.trim()
+  if (typed === '') return { ok: true, url: null }
+  const bad = { ok: false as const, message: 'Enter the web address, like https://www.chase.com, or leave it blank.' }
+  if (typed.length > 2000 || /\s/.test(typed)) return bad
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(typed) ? typed : `https://${typed}`
+  let url: URL
+  try {
+    url = new URL(withScheme)
+  } catch {
+    return bad
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return bad
+  if (!url.hostname.includes('.') && url.hostname !== 'localhost') return bad
+  return { ok: true, url: url.href }
+}
+
+/** How a debt's link is said on screen: its site, without "www.", like "chase.com". */
+export function debtLinkSite(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
   }
 }
 
@@ -232,6 +272,7 @@ export function debtFormValuesOf(debt: {
   creditLimitCents?: Cents | null
   plannedPaymentCents?: Cents | null
   paymentDay?: number | null
+  linkUrl?: string | null
 }): DebtFormValues {
   const dollars = (cents: Cents) => (cents / 100).toFixed(2)
   const percent = (basisPoints: number) => (basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
@@ -254,6 +295,7 @@ export function debtFormValuesOf(debt: {
     promo_until: promo?.untilDate ?? '',
     promo_charged_back: promo?.chargedBack === true ? 'yes' : promo?.chargedBack === false ? 'no' : promo ? '' : 'yes',
     promo_started: promo?.startDate ?? '',
+    link: debt.linkUrl ?? '',
   }
 }
 
@@ -281,5 +323,6 @@ export function debtFormValuesFrom(get: (name: string) => unknown): DebtFormValu
     promo_until: text('promo_until'),
     promo_charged_back: text('promo_charged_back'),
     promo_started: text('promo_started'),
+    link: text('link'),
   }
 }
