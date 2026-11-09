@@ -16,7 +16,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import type { ReactNode } from 'react'
 import { requireEngine } from '@/server/session'
-import { Card, Hint, humanDate, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Hint, humanDate, Money, PageHeader, Pill, Problem } from '@/components/ui'
 import {
   addReservationAction,
   addTaskAction,
@@ -135,7 +135,7 @@ function listingSourceName(source: string): string {
 function ListingRow({ listing }: { listing: Omit<DvcListing, 'source' | 'sourceUrl' | 'seenOn'> & Partial<Pick<DvcListing, 'source' | 'seenOn'>> }) {
   return (
     <li className="py-1.5 text-sm">
-      <span className="flex items-baseline justify-between gap-3">
+      <span className="flex items-baseline justify-between gap-4">
         <span className="min-w-0">
           {listing.resort}, {listing.room}
         </span>
@@ -210,14 +210,14 @@ export default async function TripPage({
         subtitle={`${humanDate(trip.startDate)} to ${humanDate(trip.endDate)} · ${nights} ${nights === 1 ? 'night' : 'nights'} · ${heads.everyone} going`}
       />
 
-      <p className="-mt-3 mb-4 text-sm">
+      <p className="-mt-4 mb-4 text-sm">
         <Link href="/trips" className="text-[var(--color-accent)] underline underline-offset-4">
           All trips
         </Link>
       </p>
 
       {error ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">{error}</p>
+        <Problem className="mb-4">{error}</Problem>
       ) : saved ? (
         <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">Saved.</p>
       ) : null}
@@ -251,7 +251,7 @@ export default async function TripPage({
               <strong>{hoursAndMinutes(pending.drive[1])}</strong> each way from {trip.home?.label ?? 'home'}. Use it?
               {pending.drive[1] > view.maxDriveMinutes ? ' That is more than a day at the wheel, so a hotel on the way will be added.' : ''}
             </p>
-            <form action={useDriveAction} className="mt-3 flex gap-2">
+            <form action={useDriveAction} className="mt-4 flex gap-2">
               <input type="hidden" name="trip_id" value={trip.id} />
               <input type="hidden" name="miles" value={pending.drive[0]} />
               <input type="hidden" name="minutes" value={pending.drive[1]} />
@@ -272,7 +272,7 @@ export default async function TripPage({
               The US average for regular is <strong><Money cents={pending.gas.centsPerGallon} /></strong> a gallon for the week of{' '}
               {humanDate(pending.gas.observationDate)}. Use it?
             </p>
-            <form action={useGasPriceAction} className="mt-3 flex gap-2">
+            <form action={useGasPriceAction} className="mt-4 flex gap-2">
               <input type="hidden" name="trip_id" value={trip.id} />
               <input type="hidden" name="dollars_per_gallon" value={dollarsForInput(pending.gas.centsPerGallon)} />
               <input type="hidden" name="observation_date" value={pending.gas.observationDate} />
@@ -303,10 +303,10 @@ export default async function TripPage({
                 <li key={n}>{n}</li>
               ))}
             </ul>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-4 flex gap-2">
               <form action={keepCrowdPullAction} className="flex-1">
                 <input type="hidden" name="trip_id" value={trip.id} />
-                <button type="submit" className={primaryButton}>
+                <button type="submit" className={secondaryButton}>
                   Keep these
                 </button>
               </form>
@@ -339,10 +339,10 @@ export default async function TripPage({
                 <li key={n}>{n}</li>
               ))}
             </ul>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-4 flex gap-2">
               <form action={keepDvcPullAction} className="flex-1">
                 <input type="hidden" name="trip_id" value={trip.id} />
-                <button type="submit" className={primaryButton}>
+                <button type="submit" className={secondaryButton}>
                   Keep these
                 </button>
               </form>
@@ -377,15 +377,15 @@ export default async function TripPage({
               : 'No home set, so the drive cannot be looked up.'}
           </p>
           {editable ? (
-            <details className="mt-3">
+            <details className="mt-4">
               <summary className="cursor-pointer text-sm font-medium">Change the trip</summary>
-              <form action={updateTripAction} className="mt-3 space-y-3">
+              <form action={updateTripAction} className="mt-4 space-y-4">
                 <input type="hidden" name="trip_id" value={trip.id} />
                 <label className="block text-sm font-medium">
                   What to call it
                   <input name="name" required defaultValue={trip.name} className={input} />
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-4">
                   <label className="block text-sm font-medium">
                     First day
                     <input name="start_date" type="date" required defaultValue={trip.startDate} className={input} />
@@ -396,7 +396,7 @@ export default async function TripPage({
                   </label>
                 </div>
                 <TravelerFields initial={trip.travelers} />
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-4">
                   <label className="block text-sm font-medium">
                     Car, miles per gallon
                     <input name="car_mpg" inputMode="numeric" defaultValue={trip.car?.mpg ?? ''} className={input} />
@@ -414,7 +414,7 @@ export default async function TripPage({
                   Save the trip
                 </button>
               </form>
-              <form action={retireTripAction} className="mt-3">
+              <form action={retireTripAction} className="mt-4">
                 <input type="hidden" name="trip_id" value={trip.id} />
                 <button type="submit" className={quietButton}>
                   Put this trip away
@@ -438,7 +438,7 @@ export default async function TripPage({
               : 'No crowd calendar yet for these dates'
           }
         >
-          {refreshed ? <p className="mb-3 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
+          {refreshed ? <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
           <h3 className="font-semibold">Look at the year</h3>
           <ParkCalendar
             calendar={calendar}
@@ -484,7 +484,7 @@ export default async function TripPage({
           ) : (
             <ol className="mb-4 divide-y divide-[var(--color-line)]">
               {plan.bestWeeks.top.map((c, i) => (
-                <li key={`${c.startDate}|${c.endDate}`} className={`flex items-start justify-between gap-3 py-2 ${c.current ? 'bg-[var(--color-accent-soft)]' : ''}`}>
+                <li key={`${c.startDate}|${c.endDate}`} className={`flex items-start justify-between gap-4 py-2 ${c.current ? 'bg-[var(--color-accent-soft)]' : ''}`}>
                   <div className="min-w-0 text-sm">
                     <span className="font-medium">
                       {i + 1}. {shortDate(c.startDate)} – {shortDate(c.endDate)}, {c.endDate.slice(0, 4)}
@@ -515,7 +515,7 @@ export default async function TripPage({
             </ol>
           )}
           <h3 className="font-semibold">A few weeks either side</h3>
-          <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+          <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
             The same trip a few weeks either side: how busy the parks are on{' '}
             {parkDays > 0 ? 'the park days' : 'each day'}, what it costs, and what it runs into. How busy is 1 (quiet)
             to 10 (packed).
@@ -609,7 +609,7 @@ export default async function TripPage({
                 const isChosen = variant.id === trip.chosenVariantId
                 return (
                   <li key={variant.id} className="py-3 first:pt-0 last:pb-0">
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start justify-between gap-4">
                       <div>
                         <h3 className="font-semibold">{variant.name}</h3>
                         <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
@@ -641,7 +641,7 @@ export default async function TripPage({
                             Save the choices
                           </button>
                         </form>
-                        <form action={removeVariantAction} className="mt-3">
+                        <form action={removeVariantAction} className="mt-4">
                           <input type="hidden" name="trip_id" value={trip.id} />
                           <input type="hidden" name="variant_id" value={variant.id} />
                           <button type="submit" className={quietButton}>
@@ -687,7 +687,7 @@ export default async function TripPage({
                   .join(', ')
           }
         >
-          <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+          <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
             When Disney opens each thing, and when the money is due, for the way the plan follows
             {followed ? ` ("${followed.name}")` : ''}. Edit a to-do and it is yours; a rebuild leaves it alone.
           </p>
@@ -707,7 +707,7 @@ export default async function TripPage({
             )
           })}
           {planning ? (
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-4">
               <details>
                 <summary className="cursor-pointer text-sm font-medium">Add a to-do</summary>
                 <form action={addTaskAction} className="mt-2 space-y-2">
@@ -772,7 +772,7 @@ export default async function TripPage({
           title="The days"
           headline={`${plan.dayViews.length} ${plan.dayViews.length === 1 ? 'day' : 'days'}, ${parkDays} in the parks`}
         >
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
               Which park, rope drop or a lie-in, and what is booked that day. How busy comes from a public crowd calendar
               (1 quiet to 10 packed), fetched only when you ask, shown before it is kept, and never over a level you typed.
@@ -788,7 +788,7 @@ export default async function TripPage({
             ) : null}
           </div>
           <ParkDayPlanCard plan={plan.parkDayPlan} tripId={trip.id} editable={planning} />
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
             {plan.dayViews.map((d) => (
               <DayCard
                 key={d.date}
@@ -824,7 +824,7 @@ export default async function TripPage({
             </ul>
           )}
           {plan.money.countedIn.length > 0 || plan.money.uncountedCents > 0 ? (
-            <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
+            <p className="mt-4 text-xs text-[var(--color-ink-soft)]">
               {plan.money.countedIn.map((c) => (
                 <span key={c.lineId} className="block">
                   <Money cents={c.cents} /> counted in {lineName(c.lineId) ?? 'a part of the trip'}.
@@ -866,7 +866,7 @@ export default async function TripPage({
                 The two money figures the app can fetch, from public services with no account: the drive, and this
                 week&apos;s gas price. Nothing Disney sells can be looked up. A figure you type yourself is never overwritten.
               </p>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
                   <p className="text-sm">
                     <strong>The drive.</strong>{' '}
@@ -926,12 +926,12 @@ export default async function TripPage({
               const unpriced = variant.lines.filter((l) => l.category !== 'promotion' && lineTotalCents(l) === 0).length
               return (
                 <Card key={variant.id} className={isChosen ? 'border-[var(--color-ahead)]' : ''}>
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start justify-between gap-4">
                     <h3 className="font-semibold">{variant.name}</h3>
                     {isChosen ? <Pill tone="ahead">This is the plan</Pill> : null}
                   </div>
 
-                  <p className="mt-3 text-3xl font-semibold tracking-tight">
+                  <p className="mt-4 text-3xl font-semibold tracking-tight">
                     <Money cents={variant.price.totalCents} />
                   </p>
                   <p className="text-xs text-[var(--color-ink-soft)]">
@@ -953,7 +953,7 @@ export default async function TripPage({
                   </p>
 
                   {editable ? (
-                    <form action={sendToPlansAction} className="mt-3 space-y-2">
+                    <form action={sendToPlansAction} className="mt-4 space-y-2">
                       <input type="hidden" name="trip_id" value={trip.id} />
                       <input type="hidden" name="variant_id" value={variant.id} />
                       <label className="block text-xs text-[var(--color-ink-soft)]">
@@ -1073,7 +1073,7 @@ function Section({ id, title, headline, wide, children }: { id: string; title: s
   return (
     <details id={id} open className={`mb-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] ${wide ? 'xl:col-span-2' : ''}`}>
       <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
-        <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline justify-between gap-4">
           <h2 className="text-lg font-semibold">{title}</h2>
           <span className="min-w-0 truncate text-right text-sm text-[var(--color-ink-soft)]">{headline}</span>
         </div>
@@ -1100,7 +1100,7 @@ function TaskRow({
 }) {
   return (
     <li className="py-2 first:pt-0 last:pb-0">
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-4">
         {editable ? (
           <form action={toggleTaskAction} className="shrink-0">
             <input type="hidden" name="trip_id" value={tripId} />
@@ -1109,9 +1109,15 @@ function TaskRow({
             <button
               type="submit"
               aria-label={task.doneOn ? 'Not done after all' : 'Done'}
-              className={`mt-0.5 h-6 w-6 rounded-md border text-xs ${task.doneOn ? 'border-[var(--color-ahead)] bg-[var(--color-ahead-soft)] text-[var(--color-ahead)]' : 'border-[var(--color-line)]'}`}
+              // A 44px target around the 24px box, so the box looks the same and a thumb can hit it.
+              className="-m-2.5 flex h-11 w-11 items-center justify-center"
             >
-              {task.doneOn ? '✓' : ''}
+              <span
+                aria-hidden="true"
+                className={`flex h-6 w-6 items-center justify-center rounded-md border text-xs ${task.doneOn ? 'border-[var(--color-ahead)] bg-[var(--color-ahead-soft)] text-[var(--color-ahead)]' : 'border-[var(--color-line)]'}`}
+              >
+                {task.doneOn ? '✓' : ''}
+              </span>
             </button>
           </form>
         ) : null}
@@ -1176,7 +1182,7 @@ function TaskRow({
                     </select>
                   </label>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-4">
                   <button type="submit" className={smallButton}>
                     Save
                   </button>
@@ -1234,8 +1240,8 @@ function ParkDayPlanCard({ plan, tripId, editable }: { plan: ParkDayPlan; tripId
     plan.missing.hours.length > 0 ? 'No park hours yet for some days, so opening and closing times did not count there.' : null,
   ].filter((m): m is string => m !== null)
   return (
-    <Card className="mb-3 bg-[var(--color-surface)]">
-      <div className="flex items-baseline justify-between gap-3">
+    <Card className="mb-4 bg-[var(--color-surface)]">
+      <div className="flex items-baseline justify-between gap-4">
         <h3 className="font-semibold">Which park, which day</h3>
         <span className="text-xs text-[var(--color-ink-soft)]">{plan.summary}</span>
       </div>
@@ -1276,7 +1282,7 @@ function ParkDayPlanCard({ plan, tripId, editable }: { plan: ParkDayPlan; tripId
         </p>
       ))}
       {editable && changes.length > 0 ? (
-        <form action={applyParkDayPlanAction} className="mt-3 flex flex-wrap items-center gap-2">
+        <form action={applyParkDayPlanAction} className="mt-4 flex flex-wrap items-center gap-2">
           <input type="hidden" name="trip_id" value={tripId} />
           {plan.assignments.map((a) => (
             <input key={a.dayId} type="hidden" name="assignment" value={`${a.dayId}:${a.park}`} />
@@ -1301,7 +1307,7 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
   const yourPick = day.day?.plan.parkChosen === true
   return (
     <Card>
-      <div id={`day-${day.day?.id ?? day.date}`} className="flex items-baseline justify-between gap-3">
+      <div id={`day-${day.day?.id ?? day.date}`} className="flex items-baseline justify-between gap-4">
         <h3 className="font-semibold">
           {weekdayName(day.date)} <span className="font-normal text-[var(--color-ink-soft)]">{shortDate(day.date)}</span>
         </h3>
@@ -1362,7 +1368,7 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
       ) : null}
 
       {editable && day.day ? (
-        <details className="mt-3">
+        <details className="mt-4">
           <summary className="cursor-pointer text-xs text-[var(--color-accent)]">Plan this day</summary>
           <form action={updateTripDayAction} className="mt-2 space-y-2">
             <input type="hidden" name="trip_id" value={tripId} />
@@ -1391,7 +1397,7 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
               Save the day
             </button>
           </form>
-          <form action={typeCrowdLevelAction} className="mt-3 flex items-end gap-2">
+          <form action={typeCrowdLevelAction} className="mt-4 flex items-end gap-2">
             <input type="hidden" name="trip_id" value={tripId} />
             <input type="hidden" name="date" value={day.date} />
             <input type="hidden" name="park" value={levelPark} />
@@ -1494,7 +1500,7 @@ function ReservationRow({
   const cost = reservationCostCents(r)
   return (
     <li className="py-2 first:pt-0 last:pb-0">
-      <div className="flex items-baseline justify-between gap-3 text-sm">
+      <div className="flex items-baseline justify-between gap-4 text-sm">
         <span className="min-w-0">
           <span className="text-[var(--color-ink-soft)]">
             {shortDate(r.date)}
@@ -1523,7 +1529,7 @@ function ReservationRow({
             <input type="hidden" name="trip_id" value={tripId} />
             <input type="hidden" name="reservation_id" value={r.id} />
             <ReservationFields reservation={r} tripStart={r.date} lines={lines} />
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <button type="submit" className={smallButton}>
                 Save
               </button>
@@ -1560,7 +1566,7 @@ function LineRow({
   const account = line.reserveAccountId ? accounts.find((a) => a.id === line.reserveAccountId) : null
   return (
     <li className="py-2 first:pt-0 last:pb-0">
-      <div className="flex items-baseline justify-between gap-3 text-sm">
+      <div className="flex items-baseline justify-between gap-4 text-sm">
         <span className="min-w-0">
           {line.label}
           {line.quantity !== 1 ? (
@@ -1628,7 +1634,7 @@ function LineRow({
                 <input name="note" defaultValue={line.note ?? ''} placeholder="Where the figure came from" className={input} />
               </label>
             ) : null}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <button type="submit" className={smallButton}>
                 Save
               </button>

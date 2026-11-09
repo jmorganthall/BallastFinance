@@ -21,7 +21,7 @@ const itsFormId = (accountId: Id) => `its-${accountId}`
 
 export function CountField({ accountId, likelyCents }: { accountId: Id; likelyCents: Cents }) {
   return (
-    <div className="mt-3">
+    <div className="mt-4">
       <label htmlFor={balanceField(accountId)} className="block text-sm font-medium">
         What it actually holds
       </label>

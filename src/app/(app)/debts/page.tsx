@@ -16,6 +16,7 @@ import { setPriorityWeightAction, updateDebtBalanceAction } from '@/server/actio
 import {
   debtFormValuesOf,
   debtLinkSite,
+  debtTotals,
   debtStatusLabel,
   debtStatusLine,
   isPaidOff,
@@ -114,6 +115,9 @@ export default async function DebtsPage({
     }
   })
 
+  // The one figure first (UI rule DB1): what is owed in all, as of today.
+  const totals = debtTotals(rows)
+
   // Each debt's interest left as a share of the costliest, for its bar.
   const shares = shareOfLargest(rows.map((row) => row.interestLeftCents))
   rows.forEach((row, i) => {
@@ -128,7 +132,7 @@ export default async function DebtsPage({
         subtitle="Which debt to clear next, and where a lump sum should go."
       />
 
-      <p className="-mt-3 mb-4 text-sm">
+      <p className="-mt-4 mb-4 text-sm">
         <Link href="/debts/equity" className="text-[var(--color-accent)] underline underline-offset-4">
           What could we buy with our equity?
         </Link>
@@ -162,6 +166,24 @@ export default async function DebtsPage({
         </Card>
       ) : null}
 
+
+      {totals.count > 0 ? (
+        <Card className="mb-4">
+          <p className="text-sm text-[var(--color-ink-soft)]">You owe, as of {humanDate(today)}</p>
+          <p className="mt-1">
+            <Money cents={totals.balanceCents} className="text-4xl font-bold tracking-tight" />{' '}
+            <span className="text-[var(--color-ink-soft)]">
+              across {totals.count === 1 ? 'one debt' : `${totals.count} debts`}
+            </span>
+          </p>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+            <Money cents={totals.perMonthCents} /> a month goes to them.{' '}
+            {totals.lastPayoffDate
+              ? `On these payments the last one is paid off by ${humanDate(totals.lastPayoffDate)}.`
+              : 'At least one is never paid off on the payment set up now.'}
+          </p>
+        </Card>
+      ) : null}
 
       {ladder.length === 0 ? (
         <>
@@ -203,7 +225,7 @@ export default async function DebtsPage({
             </form>
 
             {isPreview ? (
-              <form action={setPriorityWeightAction} className="mt-3">
+              <form action={setPriorityWeightAction} className="mt-4">
                 <input type="hidden" name="weight" value={weight} />
                 <button
                   type="submit"
@@ -220,8 +242,8 @@ export default async function DebtsPage({
           </div>
 
           <Card className="mt-8 xl:col-start-2 xl:row-start-1 xl:mt-0 xl:mb-4">
-            <h2 className="mb-3 text-sm font-medium">Where should a lump sum go?</h2>
-            <form method="GET" className="space-y-3">
+            <h2 className="mb-4 text-sm font-medium">Where should a lump sum go?</h2>
+            <form method="GET" className="space-y-4">
               <input type="hidden" name="w" value={weight} />
               <label className="block text-sm font-medium">
                 If you had this much to put at debt
@@ -244,14 +266,14 @@ export default async function DebtsPage({
             {optimisation ? (
               <div className="mt-4 border-t border-[var(--color-line)] pt-4">
                 <p className="text-sm">{optimisation.why}</p>
-                <div className="mt-3">
+                <div className="mt-4">
                   <PayoffImpact result={optimisation} />
                 </div>
 
-                <ul className="mt-3 divide-y divide-[var(--color-line)]">
+                <ul className="mt-4 divide-y divide-[var(--color-line)]">
                   {optimisation.allocations.map((allocation) => (
                     <li key={allocation.debtId} className="py-3 text-sm last:pb-0">
-                      <div className="flex items-baseline justify-between gap-3">
+                      <div className="flex items-baseline justify-between gap-4">
                         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                           <span className="font-medium">{allocation.debtName}</span>
                           {allocation.clearsIt ? <Pill tone="ahead">Paid off</Pill> : null}
@@ -282,10 +304,10 @@ export default async function DebtsPage({
               These are off the payoff order. If one has a balance again, type it in and it goes back
               on.
             </p>
-            <ul className="mt-3 divide-y divide-[var(--color-line)]">
+            <ul className="mt-4 divide-y divide-[var(--color-line)]">
               {paidOff.map((debt) => (
                 <li key={debt.id} className="py-3 text-sm last:pb-0">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-4">
                     <Link href={`/debts/${debt.id}`} className="font-medium underline-offset-4 hover:underline">
                       {debt.name}
                     </Link>

@@ -11,7 +11,7 @@
 
 import { requireEngine } from '@/server/session'
 import type { Engine } from '@/server/engine'
-import { Card, Money, PageHeader } from '@/components/ui'
+import { Card, Money, PageHeader, Problem } from '@/components/ui'
 import { DebtShare } from '@/components/debt-share'
 import { runAllocationAction, updateDebtBalanceAction } from '@/server/actions'
 import { debtTopUps, formatCents, parseAmountToCents } from '@/domain'
@@ -108,7 +108,7 @@ async function AllocatePageRead({
             The share-out decides which debts get money from these balances. Update them from a
             statement if you can; if you go on, Ballast uses them as they are.
           </p>
-          <ul className="mt-3 space-y-2">
+          <ul className="mt-4 space-y-2">
             {staleDebts.map((view) => (
               <li key={view.debt.id}>
                 <form action={updateDebtBalanceAction} className="flex items-end gap-2">
@@ -137,7 +137,7 @@ async function AllocatePageRead({
       ) : null}
 
       <Card className="mb-4">
-        <form method="GET" className="space-y-3">
+        <form method="GET" className="space-y-4">
           {source ? <input type="hidden" name="from" value={source.id} /> : null}
           <label className="block text-sm font-medium">
             {source
@@ -168,7 +168,7 @@ async function AllocatePageRead({
               <ul className="space-y-2">
                 {shortfalls.map((s) => (
                   <li key={keyOf(s)}>
-                    <label className="flex items-start gap-3 text-sm">
+                    <label className="flex items-start gap-4 text-sm">
                       <input
                         type="checkbox"
                         name="fill"
@@ -177,7 +177,7 @@ async function AllocatePageRead({
                         className="mt-1 h-5 w-5 shrink-0"
                       />
                       <span className="min-w-0 flex-1">
-                        <span className="flex items-baseline justify-between gap-3">
+                        <span className="flex items-baseline justify-between gap-4">
                           <span className="font-medium">{s.label}</span>
                           <span className="shrink-0 tabular">
                             <Money cents={s.shortCents} /> short
@@ -201,9 +201,7 @@ async function AllocatePageRead({
         </form>
 
         {error === 'amount' ? (
-          <p className="mt-3 rounded-lg bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
-            That did not look like an amount. Try something like 2500 or 2,500.00.
-          </p>
+          <Problem className="mt-4">That did not look like an amount. Try something like 2500 or 2,500.00.</Problem>
         ) : null}
       </Card>
 
@@ -255,7 +253,7 @@ async function AllocatePageRead({
                 <h2 className="font-semibold">First, what is short</h2>
                 <ul className="mt-2 divide-y divide-[var(--color-line)]">
                   {plan.topUps.map((t) => (
-                    <li key={`${t.kind}:${t.targetId}`} className="flex items-baseline justify-between gap-3 py-2 text-sm first:pt-0 last:pb-0">
+                    <li key={`${t.kind}:${t.targetId}`} className="flex items-baseline justify-between gap-4 py-2 text-sm first:pt-0 last:pb-0">
                       <span>
                         {t.label}
                         <span className="block text-xs text-[var(--color-ink-soft)]">
@@ -280,13 +278,13 @@ async function AllocatePageRead({
               </Card>
             ) : null}
 
-            <ul className="space-y-3">
+            <ul className="space-y-4">
               {plan.shares
                 .filter((share) => share.amountCents > 0)
                 .map((share) => (
                   <li key={share.destination}>
                     <Card>
-                      <div className="flex items-baseline justify-between gap-3">
+                      <div className="flex items-baseline justify-between gap-4">
                         <h2 className="font-semibold">{share.label}</h2>
                         <span className="text-lg font-semibold tabular">
                           <Money cents={share.amountCents} />
@@ -311,7 +309,7 @@ async function AllocatePageRead({
                 ))}
             </ul>
 
-            <form action={runAllocationAction} className="mt-5">
+            <form action={runAllocationAction} className="mt-6">
               <input type="hidden" name="floor" value={floor ?? ''} />
               {source ? <input type="hidden" name="from" value={source.id} /> : null}
               {cover.map((s) => (

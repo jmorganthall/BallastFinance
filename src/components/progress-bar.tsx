@@ -64,7 +64,7 @@ export function ProgressBar({
 
   return (
     <div className={className}>
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-4">
         <span className="flex items-center gap-2">
           <Hint detail={statusDetail}>
             <PartStatusPill status={status} />
@@ -83,7 +83,7 @@ export function ProgressBar({
           ) : null}
         </span>
       </div>
-      <div className="relative mt-5">
+      <div className="relative mt-6">
         {!bar.fullyFunded && tickCents > 0 ? (
           <span
             className="absolute -top-5 -translate-x-1/2"

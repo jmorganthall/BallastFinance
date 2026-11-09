@@ -44,7 +44,7 @@ export function DeletePlan({
         It disappears from your plans and cannot be brought back. What was set aside and spent
         stays in the log, but no screen will show this plan again.
       </p>
-      <label htmlFor={inputId} className="mt-3 block text-xs font-medium">
+      <label htmlFor={inputId} className="mt-4 block text-xs font-medium">
         Type <span className="font-semibold">{name}</span> to confirm
       </label>
       <input
@@ -57,7 +57,7 @@ export function DeletePlan({
         spellCheck={false}
         className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
       />
-      <div className="mt-3 grid grid-cols-2 gap-2">
+      <div className="mt-4 grid grid-cols-2 gap-2">
         <button
           type="submit"
           disabled={!matches}

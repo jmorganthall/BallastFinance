@@ -12,7 +12,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { requireEngine } from '@/server/session'
 import type { Engine } from '@/server/engine'
-import { Card, humanDate, Money, Pill, When } from '@/components/ui'
+import { Card, humanDate, Money, Pill, When, Problem } from '@/components/ui'
 import { CloseOutCard } from '@/components/close-out-card'
 import { EditableTitle } from '@/components/editable-title'
 import { AccrualChart } from '@/components/accrual-chart'
@@ -159,9 +159,7 @@ async function PackageDetailPageRead({
       />
 
       {error ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
-          {error}
-        </p>
+        <Problem className="mb-4">{error}</Problem>
       ) : null}
       {saved ? (
         <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm font-medium text-[var(--color-ahead)]">
@@ -195,7 +193,7 @@ async function PackageDetailPageRead({
                 <ul className="mt-2 space-y-1 text-sm">
                   {whatIf.map((line) => (
                     <li key={line.accountId}>
-                      <div className="flex justify-between gap-3">
+                      <div className="flex justify-between gap-4">
                         <span>{line.accountName}</span>
                         <span className="tabular">
                           <Money cents={line.weeklyNowCents} /> →{' '}
@@ -225,7 +223,7 @@ async function PackageDetailPageRead({
               radio state, so the page stays server-rendered: nothing here is
               worked out in the browser.
             */}
-            <form action={commitPackageAction} className="group mt-4 space-y-3">
+            <form action={commitPackageAction} className="group mt-4 space-y-4">
               <input type="hidden" name="package_id" value={view.package.id} />
 
               {repeating.length > 0 ? (
@@ -320,7 +318,7 @@ async function PackageDetailPageRead({
 
       {curve ? (
         <Card className="mb-4">
-          <h2 className="mb-3 text-sm font-semibold">How the money builds up</h2>
+          <h2 className="mb-4 text-sm font-semibold">How the money builds up</h2>
           {/* The chart and the story that reads it, side by side on a wide screen. */}
           <div className="xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start xl:gap-x-8">
             <AccrualChart chart={curve} today={today} />
@@ -331,11 +329,11 @@ async function PackageDetailPageRead({
 
       {closeOuts.length > 0 ? (
         <section className="mt-6">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             Did this get spent?
           </h2>
           {/* Two to a row on a wide screen, like the parts: one card never stretches its box across the page. */}
-          <ul className="grid items-start gap-3 lg:grid-cols-2">
+          <ul className="grid items-start gap-4 lg:grid-cols-2">
             {closeOuts.map((prompt) => (
               <li key={prompt.roundId}>
                 <CloseOutCard
@@ -352,12 +350,12 @@ async function PackageDetailPageRead({
         </section>
       ) : null}
 
-      <h2 className="mb-3 mt-6 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
         What it is made of
       </h2>
 
       {/* Two parts or more sit two to a row on a wide screen. */}
-      <ul className={`grid items-start gap-3 ${live.length > 1 ? 'lg:grid-cols-2' : ''}`}>
+      <ul className={`grid items-start gap-4 ${live.length > 1 ? 'lg:grid-cols-2' : ''}`}>
         {live.map((item) => {
           // The part's own id is the round saving now (D53); its date is
           // that round's, past an older round still open.
@@ -367,7 +365,7 @@ async function PackageDetailPageRead({
           return (
           <li key={item.lineItem.id}>
             <Card>
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start justify-between gap-4">
                 <div>
                   <h3 className="font-medium">{item.lineItem.label}</h3>
                   <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
@@ -410,7 +408,7 @@ async function PackageDetailPageRead({
                     </p>
                   ) : null}
                   <ProgressBar
-                    className="mt-3"
+                    className="mt-4"
                     totalCents={part.totalCents}
                     countedCents={part.countedCents}
                     tickCents={part.tickCents}
@@ -450,11 +448,11 @@ async function PackageDetailPageRead({
                 round now, and what it still held stays in the account.
               */}
               {open.length > 0 ? (
-                <details className="mt-3 border-t border-[var(--color-line)] pt-3">
+                <details className="mt-4 border-t border-[var(--color-line)] pt-3">
                   <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
                     Money went out for this
                   </summary>
-                  <form action={recordSpendAction} className="mt-3 space-y-2">
+                  <form action={recordSpendAction} className="mt-4 space-y-2">
                     <input type="hidden" name="line_item_id" value={item.lineItem.id} />
                     <input type="hidden" name="package_id" value={view.package.id} />
                     {open.length > 1 ? (
@@ -502,18 +500,18 @@ async function PackageDetailPageRead({
               ) : null}
 
               {!isDone ? (
-                <details className="mt-3 border-t border-[var(--color-line)] pt-3">
+                <details className="mt-4 border-t border-[var(--color-line)] pt-3">
                   <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
                     Change this part
                   </summary>
-                  <form action={updateLineItemAction} className="mt-3 space-y-3">
+                  <form action={updateLineItemAction} className="mt-4 space-y-4">
                     <input type="hidden" name="line_item_id" value={item.lineItem.id} />
                     <input type="hidden" name="package_id" value={view.package.id} />
                     <label className="block text-sm font-medium">
                       What is it?
                       <input name="label" defaultValue={item.lineItem.label} required className={field} />
                     </label>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-4">
                       <label className="block text-sm font-medium">
                         Cost of one
                         <input
@@ -534,7 +532,7 @@ async function PackageDetailPageRead({
                         />
                       </label>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-4">
                       <label className="block text-sm font-medium">
                         Needed by
                         <input
@@ -598,13 +596,13 @@ async function PackageDetailPageRead({
 
       {history.length > 0 ? (
         <section className="mt-6">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             What went out
           </h2>
           <Card>
             <ul className="divide-y divide-[var(--color-line)] text-sm">
               {history.map((entry) => (
-                <li key={entry.eventId} className="flex items-center justify-between gap-3 py-2">
+                <li key={entry.eventId} className="flex items-center justify-between gap-4 py-2">
                   <div className={entry.undone ? 'text-[var(--color-ink-soft)] line-through' : ''}>
                     <p>
                       {entry.kind === 'spend' ? (
@@ -643,18 +641,18 @@ async function PackageDetailPageRead({
       ) : null}
 
       {!isDone ? (
-        <Card className="mt-3 xl:max-w-3xl">
+        <Card className="mt-4 xl:max-w-3xl">
           <details>
             <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
               Add another part
             </summary>
-            <form action={addLineItemAction} className="mt-3 space-y-3">
+            <form action={addLineItemAction} className="mt-4 space-y-4">
               <input type="hidden" name="package_id" value={view.package.id} />
               <label className="block text-sm font-medium">
                 What is it?
                 <input name="label" required placeholder="Hotel" className={field} />
               </label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <label className="block text-sm font-medium">
                   Cost of one
                   <input name="unit_amount" inputMode="decimal" placeholder="600" className={field} />
@@ -664,7 +662,7 @@ async function PackageDetailPageRead({
                   <input name="quantity" type="number" min={1} defaultValue={1} className={field} />
                 </label>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <label className="block text-sm font-medium">
                   Needed by
                   <input name="due_date" type="date" className={field} />
@@ -695,14 +693,14 @@ async function PackageDetailPageRead({
       ) : null}
 
       {retired.length > 0 ? (
-        <p className="mt-3 text-xs text-[var(--color-ink-soft)]">
+        <p className="mt-4 text-xs text-[var(--color-ink-soft)]">
           No longer part of this plan: {retired.map((i) => i.lineItem.label).join(', ')}.
         </p>
       ) : null}
 
       {isDone ? (
         <>
-          <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-4 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             The plan itself
           </h2>
           <Card>
@@ -711,7 +709,7 @@ async function PackageDetailPageRead({
         </>
       ) : (
         <>
-          <h2 className="mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-4 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             The plan itself
           </h2>
           <Card>
@@ -727,7 +725,7 @@ async function PackageDetailPageRead({
                     shows up as extra at your next check-in, where you can decide what to do
                     with it.
                   </p>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
+                  <div className="mt-4 grid grid-cols-2 gap-2">
                     <form action={retirePackageAction}>
                       <input type="hidden" name="package_id" value={view.package.id} />
                       <button

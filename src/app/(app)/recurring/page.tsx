@@ -10,7 +10,7 @@
  */
 
 import { requireEngine } from '@/server/session'
-import { Card, Hint, Money, PageHeader, Pill, When, humanDate } from '@/components/ui'
+import { Card, Hint, Money, PageHeader, Pill, When, humanDate, Problem } from '@/components/ui'
 import {
   addRecurringAction,
   discardSimplifiPasteAction,
@@ -112,9 +112,7 @@ export default async function RecurringPage({
         </Card>
       ) : null}
       {error ? (
-        <Card className="mb-4 bg-[var(--color-behind-soft)]">
-          <p className="text-sm text-[var(--color-behind)]">{error}</p>
-        </Card>
+        <Problem className="mb-4">{error}</Problem>
       ) : null}
 
       {pending ? (
@@ -193,7 +191,7 @@ export default async function RecurringPage({
                 {manual.map((row) => (
                   <li key={row.item.id} className="py-2">
                     <details>
-                      <summary className="flex cursor-pointer items-start justify-between gap-3 text-sm">
+                      <summary className="flex cursor-pointer items-start justify-between gap-4 text-sm">
                         <span>
                           <span className="font-medium">{row.item.name}</span>{' '}
                           <Pill tone="neutral">Not in Simplifi</Pill>
@@ -205,7 +203,7 @@ export default async function RecurringPage({
                           </span>
                         </span>
                       </summary>
-                      <form action={updateRecurringAction} className="mt-3 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_9rem_auto]">
+                      <form action={updateRecurringAction} className="mt-4 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_9rem_auto]">
                         <input type="hidden" name="id" value={row.item.id} />
                         <label className={fieldName}>
                           Name
@@ -273,7 +271,7 @@ export default async function RecurringPage({
           <section>
           <h2 className={heading}>Paste from Simplifi</h2>
           <Card className="mb-6">
-            <form action={pasteSimplifiAction} className="space-y-3">
+            <form action={pasteSimplifiAction} className="space-y-4">
               <label className="block text-sm font-medium">
                 Simplifi&apos;s recurring list
                 <textarea
@@ -314,7 +312,7 @@ function RowLine({
   const { item, link } = row
   return (
     <li className="py-2">
-      <div className="flex items-start justify-between gap-3 text-sm">
+      <div className="flex items-start justify-between gap-4 text-sm">
         <span className="min-w-0">
           <span className="font-medium">{item.name}</span>
           <span className="block text-xs text-[var(--color-ink-soft)]">
@@ -373,7 +371,7 @@ function PastePreview({
     <>
       <h2 className={heading}>What this paste changes</h2>
       <Card className="mb-6">
-        <form action={keepSimplifiPasteAction} className="space-y-5 text-sm">
+        <form action={keepSimplifiPasteAction} className="space-y-6 text-sm">
           <p>
             {paste.rows.length} rows read: {diff.added.length} new, {diff.changed.length} changed,{' '}
             {diff.unchanged.length} the same, {diff.gone.length} no longer in Simplifi.
@@ -399,7 +397,7 @@ function PastePreview({
                 {diff.added.map((row) => {
                   const { linked, suggested } = linkable(row.name)
                   return (
-                    <li key={row.name} className="flex items-center justify-between gap-3">
+                    <li key={row.name} className="flex items-center justify-between gap-4">
                       <span className="min-w-0 flex-1">
                         {row.name}{' '}
                         <span className="text-[var(--color-ink-soft)]">

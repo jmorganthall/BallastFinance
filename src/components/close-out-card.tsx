@@ -9,7 +9,7 @@
  * snoozed one can be answered early or woken up.
  */
 
-import { Card, humanDate, Money, Pill, When, Zzz } from '@/components/ui'
+import { Card, humanDate, Money, Pill, When, Zzz, Problem } from '@/components/ui'
 import {
   addDays,
   formatCents,
@@ -56,7 +56,7 @@ export function CloseOutCard({
   )
   return (
     <Card className={snoozed ? 'border-dashed' : 'border-[var(--color-behind)]'}>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <p className="font-medium">{prompt.label}</p>
           <p className="mt-0.5 text-sm text-[var(--color-ink-soft)]">
@@ -89,7 +89,7 @@ export function CloseOutCard({
         )}
       </p>
 
-      <form action={recordSpendAction} className="mt-3 flex items-end gap-2">
+      <form action={recordSpendAction} className="mt-4 flex items-end gap-2">
         {back}
         <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
           How much went out
@@ -102,7 +102,7 @@ export function CloseOutCard({
         </label>
         <button
           type="submit"
-          className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
+          className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
         >
           Record spend
         </button>
@@ -112,7 +112,7 @@ export function CloseOutCard({
         finishes it, and the extra comes out of what this account holds for other plans.
       </p>
 
-      <div className="mt-3">
+      <div className="mt-4">
         <form action={finishRoundAction}>
           {back}
           <button
@@ -130,7 +130,7 @@ export function CloseOutCard({
       </div>
 
       {snoozed ? (
-        <div className="mt-3 flex items-center justify-between gap-3">
+        <div className="mt-4 flex items-center justify-between gap-4">
           <p className="text-xs text-[var(--color-ink-soft)]">
             Asks again <When date={snoozed} today={today} />. The money stays held until then.
           </p>
@@ -145,7 +145,7 @@ export function CloseOutCard({
           </form>
         </div>
       ) : (
-        <details className="mt-3">
+        <details className="mt-4">
           <summary className="cursor-pointer text-sm text-[var(--color-ink-soft)] underline underline-offset-4">
             Not spent yet? Snooze it
           </summary>
@@ -191,7 +191,7 @@ export function CloseOutCard({
           </p>
         </details>
       )}
-      {error ? <p className="mt-2 text-sm text-[var(--color-behind)]">{error}</p> : null}
+      {error ? <Problem className="mt-2">{error}</Problem> : null}
       {!snoozed ? (
         <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
           Until it is finished, what it still holds stays counted in your totals.

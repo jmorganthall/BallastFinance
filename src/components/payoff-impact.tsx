@@ -54,7 +54,7 @@ export function PayoffImpact({ result }: { result: OptimizerResult }) {
   const touched = result.allocations.map((a) => a.debtName)
 
   return (
-    <dl className="grid grid-cols-2 gap-3">
+    <dl className="grid grid-cols-2 gap-4">
       <div className="rounded-xl bg-[var(--color-surface)] p-3 sm:p-4">
         <dt className="text-xs text-[var(--color-ink-soft)]">Freed up each month</dt>
         <dd className="mt-1 text-2xl font-semibold tracking-tight text-[var(--color-ink)]">

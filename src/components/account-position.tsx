@@ -26,7 +26,7 @@ export function AccountPositionCard({
 
   return (
     <Card>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between gap-4">
         <h3 className="font-semibold">{a.account.name}</h3>
         <AccountStatusPill status={a.status} />
       </div>
@@ -72,7 +72,7 @@ export function AccountPositionCard({
         </p>
       ) : null}
 
-      <div className="mt-3 rounded-xl bg-[var(--color-surface)] p-3 text-sm">
+      <div className="mt-4 rounded-xl bg-[var(--color-surface)] p-3 text-sm">
         {a.bank ? (
           <p>
             The bank moves <Money cents={a.bank.perWeekCents} /> a week

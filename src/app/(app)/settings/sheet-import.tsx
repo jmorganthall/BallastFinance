@@ -9,7 +9,7 @@
 
 import { useActionState } from 'react'
 import { formatCents } from '@/domain/money'
-import { humanDate } from '@/components/ui'
+import { humanDate, Problem } from '@/components/ui'
 import { sheetImportAction, type SheetImportState } from '@/server/actions'
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -23,7 +23,7 @@ export function SheetImport() {
 
   if (state.phase === 'done') {
     return (
-      <div className="space-y-3 text-sm">
+      <div className="space-y-4 text-sm">
         <p className="rounded-xl bg-[var(--color-ahead-soft)] p-3 font-medium text-[var(--color-ahead)]">
           Done. {state.plansCreated.length} plan{state.plansCreated.length === 1 ? '' : 's'},{' '}
           {state.debtsCreated.length} debt{state.debtsCreated.length === 1 ? '' : 's'}
@@ -78,9 +78,7 @@ export function SheetImport() {
       </label>
 
       {state.phase === 'idle' && state.error ? (
-        <p className="rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
-          {state.error}
-        </p>
+        <Problem>{state.error}</Problem>
       ) : null}
 
       {preview ? (
@@ -116,7 +114,7 @@ export function SheetImport() {
               <ul className="mt-2 divide-y divide-[var(--color-line)]">
                 {preview.expenses.map((e) => (
                   <li key={e.row} className="py-2">
-                    <div className="flex items-baseline justify-between gap-3">
+                    <div className="flex items-baseline justify-between gap-4">
                       <span className="font-medium">{e.label}</span>
                       <span className="shrink-0 tabular">{formatCents(e.amountCents)}</span>
                     </div>
@@ -144,7 +142,7 @@ export function SheetImport() {
               <ul className="mt-2 divide-y divide-[var(--color-line)]">
                 {preview.debts.map((d) => (
                   <li key={d.row} className="py-2">
-                    <div className="flex items-baseline justify-between gap-3">
+                    <div className="flex items-baseline justify-between gap-4">
                       <span className="font-medium">{d.name}</span>
                       <span className="shrink-0 tabular">{formatCents(d.balanceCents)}</span>
                     </div>

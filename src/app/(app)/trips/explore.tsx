@@ -100,7 +100,7 @@ export function ExploreSection({
       </nav>
 
       {lookedUp ? (
-        <div className="mt-3 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
+        <div className="mt-4 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
           <p>
             The route says {lookedUp.miles} miles, {hoursWords(lookedUp.minutes)} one way. Keep it? Every trip from home uses it.
           </p>
@@ -113,7 +113,7 @@ export function ExploreSection({
           </form>
         </div>
       ) : !drive ? (
-        <div className="mt-3 rounded-xl border border-[var(--color-line)] p-3 text-sm">
+        <div className="mt-4 rounded-xl border border-[var(--color-line)] p-3 text-sm">
           <p>The drive has not been looked up, so every travel day is a full one. Look it up, or type it.</p>
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <form action={checkHomeDriveAction}>
@@ -139,11 +139,11 @@ export function ExploreSection({
       ) : null}
 
       {result.top.length === 0 ? (
-        <p className="mt-3 text-sm text-[var(--color-ink-soft)]">Every window ahead runs into a day we cannot go.</p>
+        <p className="mt-4 text-sm text-[var(--color-ink-soft)]">Every window ahead runs into a day we cannot go.</p>
       ) : (
-        <ol className="mt-3 divide-y divide-[var(--color-line)]">
+        <ol className="mt-4 divide-y divide-[var(--color-line)]">
           {result.top.map((w, i) => (
-            <li key={`${w.startDate}|${w.parkDays}`} className="flex items-start justify-between gap-3 py-2">
+            <li key={`${w.startDate}|${w.parkDays}`} className="flex items-start justify-between gap-4 py-2">
               <div className="min-w-0 text-sm">
                 <span className="font-medium">
                   {i + 1}. {dayWord(w.startDate)} {shortDate(w.startDate)} – {dayWord(w.endDate)} {shortDate(w.endDate)}, {w.endDate.slice(0, 4)}

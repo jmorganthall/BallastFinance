@@ -137,7 +137,7 @@ export function Pill({
 
 export function PageHeader({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
-    <header className="mb-5">
+    <header className="mb-6">
       <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
       {subtitle ? <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{subtitle}</p> : null}
     </header>
@@ -150,5 +150,24 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
       <p className="font-medium">{title}</p>
       {children ? <div className="mt-2 text-sm text-[var(--color-ink-soft)]">{children}</div> : null}
     </Card>
+  )
+}
+
+/**
+ * Something went wrong, said in words with a mark beside it, never by the red
+ * alone (an error is the one thing on a page a colour-blind reader must not
+ * miss). The words should say how to put it right.
+ */
+export function Problem({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return (
+    <div
+      role="alert"
+      className={`flex items-start gap-2 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)] ${className}`}
+    >
+      <svg aria-hidden="true" viewBox="0 0 20 20" className="mt-0.5 h-4 w-4 shrink-0" fill="currentColor">
+        <path d="M10 1.5a8.5 8.5 0 1 0 0 17 8.5 8.5 0 0 0 0-17Zm0 4a1 1 0 0 1 1 1v4.25a1 1 0 1 1-2 0V6.5a1 1 0 0 1 1-1Zm0 9.25a1.15 1.15 0 1 1 0-2.3 1.15 1.15 0 0 1 0 2.3Z" />
+      </svg>
+      <div className="min-w-0">{children}</div>
+    </div>
   )
 }

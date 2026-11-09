@@ -11,6 +11,7 @@ import { addIncomePaymentAction, saveIncomeSourceAction, type IncomeFormState } 
 import { FREQUENCIES, FREQUENCY_WORDS } from '@/domain/recurring'
 import type { IncomeSource, PaystubLine } from '@/domain/income'
 import { PaystubLines, type LineValue } from './paystub-lines'
+import { Problem as ProblemNote } from '@/components/ui'
 
 const small =
   'w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]'
@@ -40,9 +41,7 @@ function typed(state: IncomeFormState) {
 
 function Problem({ state }: { state: IncomeFormState }) {
   return state.error ? (
-    <p role="alert" className="rounded-lg bg-[var(--color-behind-soft)] p-2 text-sm text-[var(--color-behind)]">
-      {state.error}
-    </p>
+    <ProblemNote>{state.error}</ProblemNote>
   ) : null
 }
 
@@ -73,9 +72,9 @@ export function SourceForm({
 
   return (
     // The key remounts the fields after a refusal, so they show what was posted.
-    <form key={state.attempt} action={formAction} className="space-y-3 text-sm">
+    <form key={state.attempt} action={formAction} className="space-y-4 text-sm">
       {source ? <input type="hidden" name="id" value={source.id} /> : null}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         <fieldset className="block">
           <legend className="font-medium">Whose</legend>
           <select name="whose" defaultValue={one('whose', whoseDefault)} className={`mt-1 ${small}`}>
@@ -129,7 +128,7 @@ export function SourceForm({
         <PaystubLines prefix="pretax" initial={lines('pretax', (source?.pretax ?? []).map((l) => ({ label: l.label, amount: lineInput(l) })))} placeholder="Health insurance, 401k, HSA…" />
       </fieldset>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2">
         <label className="block font-medium">
           Take-home per check
           <input

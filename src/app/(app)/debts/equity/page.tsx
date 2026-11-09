@@ -11,7 +11,7 @@
 
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Hint, humanDate, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Hint, humanDate, Money, PageHeader, Pill, Problem } from '@/components/ui'
 import {
   createAssetAction,
   linkDebtToAssetAction,
@@ -31,7 +31,7 @@ const input =
   'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]'
 const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium'
 const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]'
-const sectionTitle = 'mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
+const sectionTitle = 'mb-4 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
 
 export default async function EquityPage({
   searchParams,
@@ -64,14 +64,14 @@ export default async function EquityPage({
         subtitle="What selling would leave you, and the house that buys at the payment you make now."
       />
 
-      <p className="-mt-3 mb-4 text-sm">
+      <p className="-mt-4 mb-4 text-sm">
         <Link href="/debts" className="text-[var(--color-accent)] underline underline-offset-4">
           Back to payoff order
         </Link>
       </p>
 
       {error ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">{error}</p>
+        <Problem className="mb-4">{error}</Problem>
       ) : saved ? (
         <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">Saved.</p>
       ) : null}
@@ -109,7 +109,7 @@ export default async function EquityPage({
         </p>
 
         {mostHouse ? (
-          <p className="mt-3 text-base">
+          <p className="mt-4 text-base">
             A house up to <strong><Money cents={mostHouse.priceCents} /></strong> keeps your{' '}
             <Hint detail="Principal, interest, property tax, home insurance, mortgage insurance and HOA.">
               full housing payment
@@ -117,7 +117,7 @@ export default async function EquityPage({
             at <strong><Money cents={view.targetPaymentCents} /></strong> a month, at {rateWords}.
           </p>
         ) : (
-          <p className="mt-3 text-sm text-[var(--color-ink-soft)]">
+          <p className="mt-4 text-sm text-[var(--color-ink-soft)]">
             {!rateUsed
               ? "There's no mortgage rate yet. The weekly average arrives on its own once the app can reach FRED; until then, type a rate under Your numbers."
               : view.targetPaymentCents <= 0
@@ -128,7 +128,7 @@ export default async function EquityPage({
 
         {mostHouse ? <CostParts cost={mostHouse} /> : null}
 
-        <p className="mt-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+        <p className="mt-4 text-xs leading-snug text-[var(--color-ink-soft)]">
           A planning figure, not a loan approval: a lender also looks at income and your other debts.
           {rateUsed?.source === 'weekly_average' && rateUsed.observedOn
             ? ` The rate is Freddie Mac's national average for the week of ${humanDate(rateUsed.observedOn)}; your own quote may differ.`
@@ -142,7 +142,7 @@ export default async function EquityPage({
       </Card>
 
       <Card className="mb-4">
-        <form method="GET" className="space-y-3">
+        <form method="GET" className="space-y-4">
           <label className="block text-sm font-medium">
             What would a house at this price cost a month?
             <input name="price" inputMode="decimal" defaultValue={price ?? ''} placeholder="450000" className={input} />
@@ -152,7 +152,7 @@ export default async function EquityPage({
           </button>
         </form>
         {price && priceCents === null ? (
-          <p className="mt-3 text-sm text-[var(--color-behind)]">Enter a price like 450,000.</p>
+          <p className="mt-4 text-sm text-[var(--color-behind)]">Enter a price like 450,000.</p>
         ) : null}
         {atPrice ? (
           <div className="mt-4 border-t border-[var(--color-line)] pt-4">
@@ -170,7 +170,7 @@ export default async function EquityPage({
             <CostParts cost={atPrice} />
           </div>
         ) : price && priceCents !== null && !rateUsed ? (
-          <p className="mt-3 text-sm text-[var(--color-ink-soft)]">Needs a mortgage rate first.</p>
+          <p className="mt-4 text-sm text-[var(--color-ink-soft)]">Needs a mortgage rate first.</p>
         ) : null}
       </Card>
       </div>
@@ -187,12 +187,12 @@ export default async function EquityPage({
       ) : null}
 
       <h2 className={sectionTitle}>Homes and vehicles</h2>
-      <div className="grid items-start gap-3 md:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid items-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
         {position.assets.map((row) => {
           const freshness = valueFreshness(row.asset, view.today)
           return (
             <Card key={row.asset.id}>
-              <div className="flex items-baseline justify-between gap-3">
+              <div className="flex items-baseline justify-between gap-4">
                 <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="font-medium">{row.asset.name}</span>
                   <Pill>{row.asset.kind === 'home' ? 'Home' : 'Vehicle'}</Pill>
@@ -227,7 +227,7 @@ export default async function EquityPage({
         <Card>
           <details open={view.assets.length === 0}>
             <summary className="cursor-pointer text-sm font-medium">Add a home or vehicle</summary>
-            <form action={createAssetAction} className="mt-3 space-y-3">
+            <form action={createAssetAction} className="mt-4 space-y-4">
               <label className="block text-sm font-medium">
                 Name
                 <input name="name" required placeholder="Our house" className={input} />
@@ -294,11 +294,11 @@ export default async function EquityPage({
       <section>
       <h2 className={sectionTitle}>Your numbers</h2>
       <Card>
-        <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+        <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
           Starting figures are estimates. Property tax varies most from place to place and moves the answer
           most, so put in your county&apos;s rate.
         </p>
-        <form action={saveHomeBuyingAction} className="space-y-3">
+        <form action={saveHomeBuyingAction} className="space-y-4">
           <label className="block text-sm font-medium">
             What you pay for housing each month now
             <input name="current_payment" inputMode="decimal" defaultValue={form.currentHousingPayment} placeholder={dollarsBox(view.mortgagePaymentsCents)} className={input} />
@@ -311,7 +311,7 @@ export default async function EquityPage({
             Mortgage rate, %
             <input name="typed_rate" inputMode="decimal" defaultValue={rateUsed?.source === 'typed' ? percentBox(rateUsed.rateBasisPoints) : ''} placeholder="Blank = this week's average" className={input} />
           </label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-4">
             <label className="block text-sm font-medium">
               Property tax, % a year
               <input name="property_tax" inputMode="decimal" defaultValue={form.propertyTaxPercent} className={input} />
@@ -358,7 +358,7 @@ function CostParts({ cost }: { cost: HomeCost }) {
     ...(cost.hoaCents > 0 ? ([['HOA', cost.hoaCents]] as [string, number][]) : []),
   ]
   return (
-    <div className="mt-3 text-sm">
+    <div className="mt-4 text-sm">
       <ul className="divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
         {rows.map(([label, cents]) => (
           <li key={label} className="flex justify-between px-3 py-2">
@@ -402,7 +402,7 @@ function AssetEditor({
   return (
     <details className="mt-2">
       <summary className="cursor-pointer text-xs font-medium text-[var(--color-accent)]">Change</summary>
-      <form action={updateAssetAction} className="mt-3 space-y-3">
+      <form action={updateAssetAction} className="mt-4 space-y-4">
         <input type="hidden" name="asset_id" value={asset.id} />
         <label className="block text-sm font-medium">
           Name

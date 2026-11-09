@@ -18,7 +18,7 @@ export default async function NewPackagePage() {
           subtitle="Name a savings account you already have at Capital One 360."
         />
         <Empty title="No savings accounts set up yet.">
-          <form action={createReserveAccountAction} className="mt-4 space-y-3 text-left">
+          <form action={createReserveAccountAction} className="mt-4 space-y-4 text-left">
             <label className="block text-sm font-medium">
               Account name
               <input

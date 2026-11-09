@@ -118,7 +118,7 @@ function SidebarGroup({ title, items, pathname }: { title: string; items: readon
               <Link
                 href={item.href}
                 aria-current={active ? 'page' : undefined}
-                className={`flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors ${
+                className={`flex min-h-11 items-center gap-4 rounded-xl px-3 text-sm font-medium transition-colors ${
                   active
                     ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
                     : 'text-[var(--color-ink-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-ink)]'
@@ -138,7 +138,7 @@ function SidebarGroup({ title, items, pathname }: { title: string; items: readon
 export function SidebarNav() {
   const pathname = usePathname()
   return (
-    <nav aria-label="Main" className="flex-1 space-y-5 px-3">
+    <nav aria-label="Main" className="flex-1 space-y-6 px-3">
       <SidebarGroup title="Every week" items={EVERY_WEEK_ITEMS} pathname={pathname} />
       <SidebarGroup title="More" items={MORE_ITEMS} pathname={pathname} />
     </nav>
@@ -192,7 +192,7 @@ export function BottomNav() {
                   <Link
                     href={item.href}
                     aria-current={active ? 'page' : undefined}
-                    className={`flex min-h-12 items-center gap-3 rounded-xl px-3 text-base font-medium ${
+                    className={`flex min-h-12 items-center gap-4 rounded-xl px-3 text-base font-medium ${
                       active ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]' : 'text-[var(--color-ink)]'
                     }`}
                   >

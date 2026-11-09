@@ -183,7 +183,7 @@ export function ParkCalendar({
         </table>
 
         {cell ? (
-          <div className="mt-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-sm lg:mt-0">
+          <div className="mt-4 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 text-sm lg:mt-0">
             <h4 className="font-semibold">
               {weekdayName(cell.date)}, {humanDate(cell.date)}
             </h4>
@@ -264,7 +264,7 @@ export function ParkCalendar({
         ) : null}
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-[var(--color-ink-soft)]">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-2 text-xs text-[var(--color-ink-soft)]">
         <div title={`Weather ${age(calendar.freshness.weather)} · park hours ${age(calendar.freshness.hours)} · how busy ${age(calendar.freshness.busyness)}`}>{refresh}</div>
         <p>
           <a href={QUEUE_TIMES_ATTRIBUTION.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4">

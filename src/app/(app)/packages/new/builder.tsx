@@ -20,6 +20,7 @@ import { useActionState, useState } from 'react'
 import { createPackageAction, type FormState } from '@/server/actions'
 import { type Recurrence } from '@/domain/recurrence'
 import { RecurrenceFields } from '@/components/recurrence-fields'
+import { Problem as ProblemNote } from '@/components/ui'
 
 interface AccountOption {
   id: string
@@ -55,7 +56,11 @@ const field =
 
 function Problem({ message }: { message?: string }) {
   return message ? (
-    <span className="mt-1 block text-sm font-normal text-[var(--color-behind)]">{message}</span>
+    // A mark beside the words, so the field's problem never rests on the red alone.
+    <span role="alert" className="mt-1 flex items-start gap-1 text-sm font-normal text-[var(--color-behind)]">
+      <span aria-hidden="true">⚠</span>
+      <span>{message}</span>
+    </span>
   ) : null
 }
 
@@ -85,7 +90,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
 
   const costFields = (row: Row, index: number) => (
     <>
-      <div className="mt-3 grid grid-cols-2 gap-3">
+      <div className="mt-4 grid grid-cols-2 gap-4">
         <label className="block text-sm font-medium">
           Cost of one
           <input
@@ -113,7 +118,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
         </label>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-3">
+      <div className="mt-4 grid grid-cols-2 gap-4">
         <label className="block text-sm font-medium">
           Needed by
           <input
@@ -133,7 +138,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
         />
       </div>
 
-      <div className="mt-3">
+      <div className="mt-4">
         <label className="block text-sm font-medium">
           Save it in
           <select
@@ -157,13 +162,13 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
   )
 
   return (
-    <form action={formAction} className="space-y-5">
+    <form action={formAction} className="space-y-6">
       {generalProblems.length > 0 ? (
-        <div className="rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
+        <ProblemNote>
           {generalProblems.map((p) => (
             <p key={p.path}>{p.message}</p>
           ))}
-        </div>
+        </ProblemNote>
       ) : null}
 
       {!isBundle ? (
@@ -245,7 +250,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
                 <button
                   type="button"
                   onClick={() => setRows((c) => c.filter((r) => r.key !== row.key))}
-                  className="mt-3 min-h-11 text-sm text-[var(--color-ink-soft)] underline"
+                  className="mt-4 min-h-11 text-sm text-[var(--color-ink-soft)] underline"
                 >
                   Remove this part
                 </button>
@@ -263,7 +268,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
         {isBundle ? 'Add another part' : 'This has more than one part'}
       </button>
       {!isBundle ? (
-        <p className="-mt-3 text-center text-xs text-[var(--color-ink-soft)]">
+        <p className="-mt-4 text-center text-xs text-[var(--color-ink-soft)]">
           Tickets, hotel and flights can be one plan with several parts, each with its own date.
         </p>
       ) : null}

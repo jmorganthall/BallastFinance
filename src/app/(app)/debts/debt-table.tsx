@@ -269,7 +269,7 @@ function Row({
                 <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
                   It comes off the payoff order. What it said stays in the log.
                 </p>
-                <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="mt-4 grid grid-cols-2 gap-2">
                   <form action={removeDebtAction}>
                     <input type="hidden" name="debt_id" value={row.id} />
                     <button
@@ -289,14 +289,14 @@ function Row({
                 </div>
               </div>
             ) : (
-              <div className="space-y-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] p-3">
+              <div className="space-y-4 rounded-xl border border-[var(--color-line)] bg-[var(--color-card)] p-3">
                 <p className="text-xs text-[var(--color-ink-soft)]">
                   Clearing everything down to here costs {formatCents(row.cumulativeCostCents)} and frees{' '}
                   {formatCents(row.cumulativeFreedCents)} a month
                   {row.breakEvenMonths !== null ? ` — it pays for itself in ${row.breakEvenMonths} months.` : '.'}
                 </p>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <form action={confirmDebtPaymentAction} className="flex items-end gap-2">
                     <input type="hidden" name="debt_id" value={row.id} />
                     <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
@@ -336,7 +336,7 @@ function Row({
                   <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
                     Change its terms
                   </summary>
-                  <div className="mt-3">
+                  <div className="mt-4">
                     <DebtForm
                       action={updateDebtAction}
                       initial={row.initial}
@@ -347,7 +347,7 @@ function Row({
                   </div>
                 </details>
 
-                <div className="flex items-center justify-between gap-3 border-t border-[var(--color-line)] pt-3">
+                <div className="flex items-center justify-between gap-4 border-t border-[var(--color-line)] pt-3">
                   <button
                     type="button"
                     onClick={() => setOpen(null)}

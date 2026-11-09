@@ -7,7 +7,7 @@
  */
 
 import { requireEngine } from '@/server/session'
-import { Card, Hint, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Hint, Money, PageHeader, Pill, Problem } from '@/components/ui'
 import {
   createReserveAccountAction,
   saveAllocationRulesAction,
@@ -62,18 +62,16 @@ export default async function SettingsPage({
         </Card>
       ) : null}
       {error ? (
-        <Card className="mb-4 bg-[var(--color-behind-soft)]">
-          <p className="text-sm text-[var(--color-behind)]">{error}</p>
-        </Card>
+        <Problem className="mb-4">{error}</Problem>
       ) : null}
 
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
         How spare money gets shared out
       </h2>
       <Card className="mb-6">
-        <form action={saveAllocationRulesAction} className="space-y-3">
+        <form action={saveAllocationRulesAction} className="space-y-4">
           {rules.map((rule) => (
-            <label key={rule.destination} className="flex items-center justify-between gap-3 text-sm">
+            <label key={rule.destination} className="flex items-center justify-between gap-4 text-sm">
               <span className="font-medium">{rule.label}</span>
               <span className="flex items-center gap-1">
                 <input
@@ -116,7 +114,7 @@ export default async function SettingsPage({
         The weekly transfer
       </h2>
       <Card className="mb-4">
-        <form action={saveTransferWeekdayAction} className="space-y-3">
+        <form action={saveTransferWeekdayAction} className="space-y-4">
           <label className="block text-sm font-medium">
             Our transfer runs on
             <select name="transfer_weekday" defaultValue={String(transferWeekday)} className={field}>
@@ -140,7 +138,7 @@ export default async function SettingsPage({
         </form>
       </Card>
       <Card className="mb-6">
-        <form action={saveTransferRoundingAction} className="space-y-3">
+        <form action={saveTransferRoundingAction} className="space-y-4">
           <label className="block text-sm font-medium">
             Round each account&apos;s weekly transfer up to the nearest
             <span className="mt-1 flex items-center gap-2">
@@ -171,7 +169,7 @@ export default async function SettingsPage({
         Reminders
       </h2>
       <Card className="mb-6">
-        <form action={saveNudgeSettingsAction} className="space-y-3">
+        <form action={saveNudgeSettingsAction} className="space-y-4">
           <label className="block text-sm font-medium">
             Nudge us if we have not checked balances for this many weeks
             <input
@@ -208,7 +206,7 @@ export default async function SettingsPage({
           action={saveNotificationPrefsAction}
           className="mt-4 border-t border-[var(--color-line)] pt-4"
         >
-          <label className="flex items-start gap-3 text-sm font-medium">
+          <label className="flex items-start gap-4 text-sm font-medium">
             <input
               type="checkbox"
               name="muted"
@@ -224,7 +222,7 @@ export default async function SettingsPage({
           </label>
           <button
             type="submit"
-            className="mt-3 w-full rounded-xl border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+            className="mt-4 w-full rounded-xl border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
           >
             Save
           </button>
@@ -251,7 +249,7 @@ export default async function SettingsPage({
         {accounts.length > 0 ? (
           <ul className="mb-4 space-y-2 text-sm">
             {accounts.map((account) => (
-              <li key={account.id} className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-b border-[var(--color-line)] pb-3 last:border-0">
+              <li key={account.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 border-b border-[var(--color-line)] pb-3 last:border-0">
                 <span>
                   <span className="font-medium">{account.name}</span>
                   <span className="block text-xs text-[var(--color-ink-soft)]">
@@ -292,7 +290,7 @@ export default async function SettingsPage({
           </p>
         )}
 
-        <form action={createReserveAccountAction} className="space-y-3 border-t border-[var(--color-line)] pt-4">
+        <form action={createReserveAccountAction} className="space-y-4 border-t border-[var(--color-line)] pt-4">
           <label className="block text-sm font-medium">
             Add an account
             <input name="name" required placeholder="Gifts &amp; Giving" className={field} />
@@ -326,7 +324,7 @@ export default async function SettingsPage({
         Bring in your spreadsheet
       </h2>
       <Card className="mb-6">
-        <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
+        <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
           A one-off way in from the old sheet, until everything lives here. The Expense and Loan
           tabs are both understood.
         </p>
@@ -345,7 +343,7 @@ export default async function SettingsPage({
         <a
           href="/api/export"
           download
-          className="mt-3 block rounded-xl border border-[var(--color-line)] px-4 py-3 text-center font-medium"
+          className="mt-4 block rounded-xl border border-[var(--color-line)] px-4 py-3 text-center font-medium"
         >
           Download everything
         </a>

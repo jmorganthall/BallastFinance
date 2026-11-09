@@ -132,7 +132,7 @@ export function DebtForm({
         )}
       </Field>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Kind" problem={problemFor('category')}>
           {(a) => (
             <select
@@ -161,7 +161,7 @@ export function DebtForm({
         </Field>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field
           label="Interest rate (%)"
           problem={problemFor('apr')}
@@ -221,7 +221,7 @@ export function DebtForm({
           )}
         </Field>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field
             label="Percentage"
             hint="On top of the month's interest. Most cards use 1%."
@@ -260,7 +260,7 @@ export function DebtForm({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[2fr_1fr]">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-[2fr_1fr]">
         <Field label="What you actually pay each month (optional)" problem={problemFor('monthly_payment')}>
           {(a) => (
             <input
@@ -308,7 +308,7 @@ export function DebtForm({
         )}
       </Field>
 
-      <label className="flex min-h-11 items-center gap-3 text-sm font-medium">
+      <label className="flex min-h-11 items-center gap-4 text-sm font-medium">
         <input
           type="checkbox"
           name="has_promo"
@@ -321,7 +321,7 @@ export function DebtForm({
 
       {values.has_promo ? (
         <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Promotional rate (%)" problem={problemFor('promo_rate')}>
               {(a) => (
                 <input
@@ -357,7 +357,7 @@ export function DebtForm({
             open={Boolean(problemFor('promo_started')) || undefined}
           >
             <summary className="cursor-pointer text-sm font-medium">More about this deal</summary>
-            <div className="mt-3 space-y-3">
+            <div className="mt-4 space-y-4">
               <Field
                 label="If it is not paid off by the end, is the interest charged back?"
                 problem={problemFor('promo_charged_back')}
@@ -484,7 +484,7 @@ function ShareFromStatement({
       <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
         Work it out from a statement
       </summary>
-      <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="block text-sm font-medium">
           Statement balance
           <input inputMode="decimal" value={box.balance} onChange={put('balance')} placeholder="3341.75" className={small} />
@@ -505,7 +505,7 @@ function ShareFromStatement({
       <button
         type="button"
         onClick={workItOut}
-        className="mt-3 min-h-11 w-full rounded-lg border border-[var(--color-line)] px-4 text-sm font-medium"
+        className="mt-4 min-h-11 w-full rounded-lg border border-[var(--color-line)] px-4 text-sm font-medium"
       >
         Work out the percentage
       </button>

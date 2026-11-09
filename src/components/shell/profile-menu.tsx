@@ -113,7 +113,7 @@ export function ProfileMenu({ viewer }: { viewer: ProfileViewer }) {
           role="menu"
           className="absolute right-0 z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-2 shadow-lg"
         >
-          <div className="flex items-center gap-3 px-3 py-3">
+          <div className="flex items-center gap-4 px-3 py-3">
             <Avatar viewer={viewer} size="lg" />
             <div className="min-w-0">
               <p className="truncate font-medium">{viewer.name ?? 'Signed in'}</p>
