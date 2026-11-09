@@ -268,7 +268,7 @@ async function PackageDetailPageRead({
                       type="submit"
                       name="use_suggested"
                       value="1"
-                      className="hidden w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white group-has-[.tl-commit:checked]:block"
+                      className="hidden w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)] group-has-[.tl-commit:checked]:block"
                     >
                       Yes, start with what I would have set aside by now
                     </button>
@@ -294,8 +294,8 @@ async function PackageDetailPageRead({
                 type="submit"
                 className={`w-full rounded-xl px-4 py-3 font-medium ${
                   elapsed.length > 0
-                    ? 'border border-[var(--color-line)] group-has-[.tl-commit:checked]:bg-transparent group-has-[.tl-commit:checked]:text-[var(--color-ink)] bg-[var(--color-accent)] text-white'
-                    : 'bg-[var(--color-accent)] text-white'
+                    ? 'border border-[var(--color-line)] group-has-[.tl-commit:checked]:bg-transparent group-has-[.tl-commit:checked]:text-[var(--color-ink)] bg-[var(--color-accent)] text-[var(--color-on-fill)]'
+                    : 'bg-[var(--color-accent)] text-[var(--color-on-fill)]'
                 }`}
               >
                 Start saving for this
@@ -483,7 +483,7 @@ async function PackageDetailPageRead({
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="submit"
-                        className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+                        className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
                       >
                         Record spend
                       </button>
@@ -572,7 +572,7 @@ async function PackageDetailPageRead({
                     </label>
                     <button
                       type="submit"
-                      className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+                      className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
                     >
                       Save this part
                     </button>
@@ -732,7 +732,7 @@ async function PackageDetailPageRead({
                       <input type="hidden" name="package_id" value={view.package.id} />
                       <button
                         type="submit"
-                        className="w-full rounded-lg bg-[var(--color-behind)] px-3 py-2 text-sm font-medium text-white"
+                        className="w-full rounded-lg bg-[var(--color-behind)] px-3 py-2 text-sm font-medium text-[var(--color-on-fill)]"
                       >
                         Yes, stop it
                       </button>

@@ -207,7 +207,7 @@ export default async function DebtsPage({
                 <input type="hidden" name="weight" value={weight} />
                 <button
                   type="submit"
-                  className="w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+                  className="w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
                 >
                   Make this the normal setting
                 </button>

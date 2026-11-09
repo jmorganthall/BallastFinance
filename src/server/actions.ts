@@ -379,17 +379,21 @@ export async function confirmBalancesAction(formData: FormData): Promise<void> {
       return typeof value === 'string' ? value : null
     },
   })
+  let recorded = 0
   for (const count of counts) {
     try {
       await engine.confirmBalance({ reserveAccountId: count.accountId, amountCents: count.amountCents })
+      recorded += 1
     } catch {
       // An account the viewer may not write is skipped, as before; the others still record.
     }
   }
 
   afterWrite()
-  // The same form lives on This week (D34); it lands back where it was.
-  redirect(formData.get('back') === 'home' ? '/?balances=1' : '/check-in?done=1')
+  // The same form lives on This week (D34); it lands back where it was, with
+  // how many it recorded, so a form sent with every box empty never says
+  // "Balances recorded".
+  redirect(formData.get('back') === 'home' ? `/?balances=${recorded}` : `/check-in?done=${recorded}`)
 }
 
 export async function confirmInstructionAction(formData: FormData): Promise<void> {

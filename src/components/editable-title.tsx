@@ -48,7 +48,7 @@ export function EditableTitle({
           />
           <button
             type="submit"
-            className="min-h-11 shrink-0 rounded-lg bg-[var(--color-accent)] px-3 text-sm font-medium text-white"
+            className="min-h-11 shrink-0 rounded-lg bg-[var(--color-accent)] px-3 text-sm font-medium text-[var(--color-on-fill)]"
           >
             Save
           </button>

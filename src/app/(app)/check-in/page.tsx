@@ -14,7 +14,7 @@ import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, PageHeader } from '@/components/ui'
 import { MoneySince } from '@/components/money-since'
-import { CountField, ItsForms } from '@/components/count-field'
+import { BalancesRecorded, CountField, ItsForms } from '@/components/count-field'
 import { AccountPositionCard } from '@/components/account-position'
 import { confirmBalancesAction } from '@/server/actions'
 
@@ -39,12 +39,8 @@ export default async function CheckInPage({
         subtitle="Open Capital One and tell Ballast what each account really holds today."
       />
 
-      {done ? (
-        <Card className="mb-4 bg-[var(--color-ahead-soft)]">
-          <p className="text-sm font-medium text-[var(--color-ahead)]">
-            Balances recorded. Everything below has been worked out again from them.
-          </p>
-        </Card>
+      {done !== undefined ? (
+        <BalancesRecorded count={Number(done) || 0} after="Everything below has been worked out again from them." />
       ) : null}
 
       {live.length === 0 ? (
@@ -68,7 +64,7 @@ export default async function CheckInPage({
 
             <button
               type="submit"
-              className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"
+              className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]"
             >
               Record these balances
             </button>

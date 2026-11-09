@@ -158,7 +158,7 @@ export function SourceForm({
         </span>
       </label>
       <Problem state={state} />
-      <button type="submit" disabled={pending} className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white disabled:opacity-60">
+      <button type="submit" disabled={pending} className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)] disabled:opacity-60">
         {pending ? 'Saving…' : source ? 'Save' : 'Add this income'}
       </button>
     </form>

@@ -190,7 +190,7 @@ export function SheetImport() {
             name="mode"
             value="import"
             disabled={pending}
-            className="rounded-xl bg-[var(--color-accent)] px-4 py-3 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-xl bg-[var(--color-accent)] px-4 py-3 text-sm font-medium text-[var(--color-on-fill)] disabled:opacity-60"
           >
             {pending ? 'Bringing in…' : `Bring in ${count} row${count === 1 ? '' : 's'}`}
           </button>

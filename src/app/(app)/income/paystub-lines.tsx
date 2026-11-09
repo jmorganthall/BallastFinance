@@ -33,6 +33,12 @@ export function PaystubLines({
 
   return (
     <div className="mt-1 space-y-1">
+      {/* A visible name over each column: the grey examples go once you type. */}
+      <div aria-hidden="true" className="grid grid-cols-[1fr_8rem_auto] gap-2 text-xs font-medium text-[var(--color-ink-soft)]">
+        <span>What</span>
+        <span>Amount ($ or %)</span>
+        <span className="invisible">Remove</span>
+      </div>
       {rows.map((row) => (
         <div key={row.key} className="grid grid-cols-[1fr_8rem_auto] items-center gap-2">
           <input name={`${prefix}_label`} defaultValue={row.label} placeholder={placeholder} className={input} aria-label="What" />

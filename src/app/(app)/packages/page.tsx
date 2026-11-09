@@ -66,7 +66,7 @@ export default async function PackagesPage({
 
       <Link
         href="/packages/new"
-        className="mb-4 block rounded-xl bg-[var(--color-accent)] px-4 py-3 text-center font-medium text-white md:inline-block md:px-8"
+        className="mb-4 block rounded-xl bg-[var(--color-accent)] px-4 py-3 text-center font-medium text-[var(--color-on-fill)] md:inline-block md:px-8"
       >
         Start a plan
       </Link>
@@ -89,7 +89,7 @@ export default async function PackagesPage({
                 aria-current={active ? 'true' : undefined}
                 className={`rounded-full border px-3 py-1 text-sm ${
                   active
-                    ? 'border-transparent bg-[var(--color-accent)] font-medium text-white'
+                    ? 'border-transparent bg-[var(--color-accent)] font-medium text-[var(--color-on-fill)]'
                     : 'border-[var(--color-line)] text-[var(--color-ink-soft)]'
                 }`}
               >

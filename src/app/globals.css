@@ -22,8 +22,19 @@
   --color-behind-soft: oklch(0.96 0.03 25);
   --color-ahead: oklch(0.52 0.12 155);
   --color-ahead-soft: oklch(0.95 0.04 155);
-  --color-caution: oklch(0.58 0.13 80);
+  /*
+   * Darker than the chart's amber on purpose: Running down and "the money
+   * runs out" are words to read, so the text keeps 4.5:1 on the card (5.6:1)
+   * and on its own tint (5.0:1). The old oklch(0.58 0.13 80) was 4.35:1 and
+   * 3.9:1.
+   */
+  --color-caution: oklch(0.52 0.12 80);
   --color-caution-soft: oklch(0.96 0.04 85);
+  /*
+   * Text on a filled button (accent, behind, ahead). White in light mode
+   * (5.2:1 or better); dark mode fills are light, so it turns dark there.
+   */
+  --color-on-fill: oklch(1 0 0);
   /*
    * How busy, 1 quiet to 10 packed, two levels a step: green for quiet
    * through amber to deep red for packed (PRD D32). The order is carried by
@@ -90,6 +101,8 @@
     --color-ahead-soft: oklch(0.29 0.06 155);
     --color-caution: oklch(0.82 0.14 88);
     --color-caution-soft: oklch(0.32 0.06 85);
+    /* Dark text on the light dark-mode fills: 7.6:1 on accent, 6.9:1 on behind. White was 2.4:1 and 2.7:1. */
+    --color-on-fill: oklch(0.19 0.015 250);
     /*
      * The same green-to-red scale with its lightness anchor flipped for a
      * dark card: quiet sits near the surface as a deep green, packed stands

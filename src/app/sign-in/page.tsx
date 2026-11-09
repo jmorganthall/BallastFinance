@@ -50,7 +50,7 @@ export default async function SignInPage({
       >
         <button
           type="submit"
-          className="flex w-full items-center justify-center gap-3 rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"
+          className="flex w-full items-center justify-center gap-3 rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]"
         >
           {/*
             * Google's four-colour G. Their brand rules keep it on white, so on

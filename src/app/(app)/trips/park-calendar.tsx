@@ -169,7 +169,7 @@ export function ParkCalendar({
                     {c ? <DayCell cell={c} href={dayHref(c.date)} selected={c.date === selected} /> : null}
                     {c && ranks?.[c.date] ? (
                       <span
-                        className="pointer-events-none absolute right-0.5 top-0.5 min-w-[1.4em] rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-semibold leading-[1.4em] text-white"
+                        className="pointer-events-none absolute right-0.5 top-0.5 min-w-[1.4em] rounded-full bg-[var(--color-accent)] px-1 text-[10px] font-semibold leading-[1.4em] text-[var(--color-on-fill)]"
                         title={`Number ${ranks[c.date]} of the best times to go leaves this day`}
                       >
                         {ranks[c.date]}
