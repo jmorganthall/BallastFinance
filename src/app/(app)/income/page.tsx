@@ -7,7 +7,7 @@
  */
 
 import { requireEngine } from '@/server/session'
-import { Card, Hint, Money, PageHeader, Pill, humanDate } from '@/components/ui'
+import { Card, Hint, Money, PageHeader, Pill, humanDate, Problem } from '@/components/ui'
 import { PaymentForm, SourceForm, type Member } from './forms'
 import {
   endIncomeSourceAction,
@@ -93,7 +93,7 @@ function SourceCard({
   const { source, paycheck } = view
   return (
     <Card className="mb-4">
-      <div id={`source-${source.id}`} className="mb-3 flex items-start justify-between gap-3">
+      <div id={`source-${source.id}`} className="mb-4 flex items-start justify-between gap-4">
         <div>
           <p className="font-semibold">{source.name}</p>
           <p className="text-xs text-[var(--color-ink-soft)]">
@@ -135,17 +135,17 @@ function SourceCard({
       ) : null}
 
       {check ? (
-        <p className={`mt-3 text-sm ${check.differs ? 'text-[var(--color-caution)]' : 'text-[var(--color-ink-soft)]'}`}>
+        <p className={`mt-4 text-sm ${check.differs ? 'text-[var(--color-caution)]' : 'text-[var(--color-ink-soft)]'}`}>
           {check.differs
             ? `Simplifi expects ${check.items.map((i) => `${formatCents(i.amountCents)} ${FREQUENCY_WORDS[i.frequency]}`).join(' + ')}: ${formatCents(Math.abs(check.differenceYearlyCents))} a year ${check.differenceYearlyCents > 0 ? 'more' : 'less'} than these paystub figures. These are the ones that count; update Simplifi, or the stub lines here.`
             : `Simplifi agrees (${check.items.map((i) => i.name).join(', ')}).`}
         </p>
       ) : source.simplifiNames.length === 0 ? (
-        <p className="mt-3 text-xs text-[var(--color-ink-soft)]">Not linked to Simplifi yet: give its name under Change.</p>
+        <p className="mt-4 text-xs text-[var(--color-ink-soft)]">Not linked to Simplifi yet: give its name under Change.</p>
       ) : null}
 
       <div className="mt-4 border-t border-[var(--color-line)] pt-3">
-        <div className="flex items-baseline justify-between gap-3">
+        <div className="flex items-baseline justify-between gap-4">
           <p className="text-sm font-medium">Bonuses and commission</p>
           {view.bonus ? (
             <Hint
@@ -208,7 +208,7 @@ function SourceCard({
 
       <details className="mt-4 border-t border-[var(--color-line)] pt-3">
         <summary className="cursor-pointer text-sm underline">Change</summary>
-        <div className="mt-3">
+        <div className="mt-4">
           <SourceForm source={source} takeHomeCents={paycheck.netCents} members={members} viewerId={viewerId} />
           <form action={endIncomeSourceAction} className="mt-2">
             <input type="hidden" name="id" value={source.id} />
@@ -248,9 +248,7 @@ export default async function IncomePage({
           </Card>
         ) : null}
         {error ? (
-          <Card className="mb-4 bg-[var(--color-behind-soft)]">
-            <p className="text-sm text-[var(--color-behind)]">{error}</p>
-          </Card>
+          <Problem className="mb-4">{error}</Problem>
         ) : null}
 
         {income.people.length > 0 ? (
@@ -286,7 +284,7 @@ export default async function IncomePage({
 
         <h2 className={heading}>Add income</h2>
         <Card className="mb-6">
-          <p className="mb-3 text-xs text-[var(--color-ink-soft)]">
+          <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
             One per job. Type the lines off a real paystub: Ballast only adds and subtracts them, it never works out tax.
           </p>
           <SourceForm members={members} viewerId={viewer.userId} />

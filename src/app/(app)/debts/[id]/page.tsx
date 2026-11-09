@@ -133,7 +133,7 @@ export default async function DebtPage({
       {/* How it stands, and its deal. */}
       <Card className="mb-4">
         {view && view.status !== 'on_track' ? (
-          <div className="mb-3">
+          <div className="mb-4">
             <Pill tone={view.status === 'short' ? 'behind' : 'caution'}>{debtStatusLabel(view)}</Pill>
             <p className="mt-2 text-sm">
               {debtStatusLine(view).map((part, i) =>
@@ -145,14 +145,14 @@ export default async function DebtPage({
             </p>
           </div>
         ) : paidOff ? (
-          <p className="mb-3 text-sm font-medium text-[var(--color-ahead)]">Paid off.</p>
+          <p className="mb-4 text-sm font-medium text-[var(--color-ahead)]">Paid off.</p>
         ) : (
-          <p className="mb-3">
+          <p className="mb-4">
             <Pill tone="ahead">On track</Pill>
           </p>
         )}
 
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3">
           <div>
             <dt className="text-xs text-[var(--color-ink-soft)]">Balance</dt>
             <dd className="font-medium tabular">
@@ -256,7 +256,7 @@ export default async function DebtPage({
             What if we paid more?
           </h2>
           <Card>
-            <form method="GET" className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <form method="GET" className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
               <label className="block text-sm font-medium">
                 More each month
                 <input
@@ -285,7 +285,7 @@ export default async function DebtPage({
               </button>
             </form>
             {whatIf ? (
-              <p className="mt-3 text-sm">
+              <p className="mt-4 text-sm">
                 {whatIf.then.months === null
                   ? `Even with ${whatIfLabel}, it is never paid off.`
                   : whatIf.monthsSooner === null
@@ -306,7 +306,7 @@ export default async function DebtPage({
           </h2>
           <Card>
             <PaymentSplitChart splits={paymentSplits(months)} />
-            <details className="mt-3 text-sm">
+            <details className="mt-4 text-sm">
               <summary className="cursor-pointer text-[var(--color-accent)]">See the numbers</summary>
               <table className="mt-2 w-full text-xs tabular">
                 <thead>
@@ -365,13 +365,13 @@ export default async function DebtPage({
         <Card>
           <ul className="space-y-2 text-sm">
             {[...history].reverse().map((entry, i) => (
-              <li key={i} className="flex justify-between gap-3">
+              <li key={i} className="flex justify-between gap-4">
                 <span>{historyWords(entry)}</span>
                 <span className="shrink-0 text-[var(--color-ink-soft)]">{humanDate(entry.on)}</span>
               </li>
             ))}
             {debt.enteredOn ? (
-              <li className="flex justify-between gap-3 text-[var(--color-ink-soft)]">
+              <li className="flex justify-between gap-4 text-[var(--color-ink-soft)]">
                 <span>Entered in Ballast</span>
                 <span className="shrink-0">{humanDate(debt.enteredOn)}</span>
               </li>

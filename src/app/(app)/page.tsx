@@ -11,7 +11,7 @@
 
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Empty, humanDate, Money, PageHeader, Pill, When, Zzz } from '@/components/ui'
+import { Card, Empty, humanDate, Money, PageHeader, Pill, When, Zzz, Problem } from '@/components/ui'
 import { AccountPositionCard } from '@/components/account-position'
 import { CloseOutCard } from '@/components/close-out-card'
 import { SmartSavingCard } from '@/components/smart-saving'
@@ -109,7 +109,7 @@ function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate 
               ? confirmMoveInAction
               : confirmTransferAction
         }
-        className="mt-3 flex items-end gap-2"
+        className="mt-4 flex items-end gap-2"
       >
         <input type="hidden" name="reserve_account_id" value={todo.accountId} />
         {todo.kind === 'move_between' ? (
@@ -126,7 +126,7 @@ function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate 
         </label>
         <button
           type="submit"
-          className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
+          className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
         >
           {todo.kind === 'set_transfer' && todo.reason === 'confirm' ? "That's it" : 'Done'}
         </button>
@@ -153,7 +153,7 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
         <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
           Most store cards and some balance transfers do this. Until you say, Ballast assumes it is.
         </p>
-        <form action={setDealChargedBackAction} className="mt-3 flex gap-2">
+        <form action={setDealChargedBackAction} className="mt-4 flex gap-2">
           <input type="hidden" name="debt_id" value={todo.debtId} />
           <button
             type="submit"
@@ -179,7 +179,7 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
   return (
     <Card className={todo.blocking ? '' : 'border-dashed'}>
       <Parts parts={debtTodoSentenceParts(todo)} today={today} />
-      <form action={raise ? raiseDebtPaymentAction : updateDebtBalanceAction} className="mt-3 flex items-end gap-2">
+      <form action={raise ? raiseDebtPaymentAction : updateDebtBalanceAction} className="mt-4 flex items-end gap-2">
         <input type="hidden" name="debt_id" value={todo.debtId} />
         {raise ? null : <input type="hidden" name="back" value="home" />}
         <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
@@ -193,7 +193,7 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
         </label>
         <button
           type="submit"
-          className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
+          className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
         >
           Done
         </button>
@@ -227,7 +227,7 @@ function AskCard({
     <Card>
       <Sentence instruction={instruction} transferWeekday={transferWeekday} today={today} />
       {instruction.note ? <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p> : null}
-      <div className="mt-3 flex items-end gap-2">
+      <div className="mt-4 flex items-end gap-2">
         <form action={confirmInstructionAction} className="flex flex-1 items-end gap-2">
           <input type="hidden" name="instruction_id" value={instruction.instructionId} />
           {/* A payment toward a debt comes off its balance at what
@@ -349,14 +349,12 @@ export default async function ThisWeekPage({
         * verdict, never this screen's.
         */}
       {error ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
-          {error}
-        </p>
+        <Problem className="mb-4">{error}</Problem>
       ) : null}
 
       {shown.some((a) => a.parts.length > 0) || debtState.debts.length > 0 ? (
         caughtUp ? (
-          <Card className="mb-5 bg-[var(--color-ahead-soft)]">
+          <Card className="mb-6 bg-[var(--color-ahead-soft)]">
             <p className="font-semibold text-[var(--color-ahead)]">All caught up.</p>
             <p className="mt-1 text-sm">
               On autopilot, every account covers everything due
@@ -380,7 +378,7 @@ export default async function ThisWeekPage({
             ) : null}
           </Card>
         ) : (
-          <Card className="mb-5 bg-[var(--color-caution-soft)]">
+          <Card className="mb-6 bg-[var(--color-caution-soft)]">
             <p className="font-semibold">{household.headline} this week.</p>
             <p className="mt-1 text-sm">
               The to-dos below are what it takes. Once they are done, every account has the money
@@ -397,7 +395,7 @@ export default async function ThisWeekPage({
         * unconfirmed ask is the only thing that can silently rot.
         */}
       {justSnoozed?.snoozedUntil ? (
-        <Card className="mb-5 flex items-center justify-between gap-3 border-dashed">
+        <Card className="mb-6 flex items-center justify-between gap-4 border-dashed">
           <p className="text-sm">
             <Zzz className="mr-1 text-[var(--color-accent)]" />
             {justSnoozed.label} is snoozed: it asks again{' '}
@@ -414,11 +412,11 @@ export default async function ThisWeekPage({
       ) : null}
 
       {closeOuts.length > 0 ? (
-        <section className="mb-5">
+        <section className="mb-6">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             Did this get spent?
           </h2>
-          <ul className="space-y-3">
+          <ul className="space-y-4">
             {closeOuts.map((prompt) => (
               <li key={prompt.roundId}>
                 <CloseOutCard
@@ -435,11 +433,11 @@ export default async function ThisWeekPage({
       ) : null}
 
       {anythingToDo ? (
-        <section className="mb-5">
+        <section className="mb-6">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             To do
           </h2>
-          <ul className="space-y-3">
+          <ul className="space-y-4">
             {todos.map((item) => (
               <li key={item.key}>
                 {item.from === 'position' ? (
@@ -469,11 +467,11 @@ export default async function ThisWeekPage({
         * do, ask for the count that makes it a fact. The likely balance is the position's, never stored.
         */}
       {!moneyToDo && toCount.length > 0 ? (
-        <section className="mb-5">
+        <section className="mb-6">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             Update what these accounts hold
           </h2>
-          <form action={confirmBalancesAction} className="space-y-3">
+          <form action={confirmBalancesAction} className="space-y-4">
             <input type="hidden" name="back" value="home" />
             {toCount.map((a) => (
               <Card key={a.account.id}>
@@ -497,11 +495,11 @@ export default async function ThisWeekPage({
       ) : null}
 
       {comingUp.length > 0 ? (
-        <section className="mb-5">
+        <section className="mb-6">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             Coming up
           </h2>
-          <ul className="space-y-3">
+          <ul className="space-y-4">
             {comingUp.map((instruction) => (
               <li key={instruction.instructionId}>
                 <Card className="border-dashed">
@@ -509,7 +507,7 @@ export default async function ThisWeekPage({
                   {instruction.note ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
                   ) : null}
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-4 flex gap-2">
                     <form action={confirmInstructionAction} className="flex-1">
                       <input
                         type="hidden"
@@ -550,14 +548,14 @@ export default async function ThisWeekPage({
         * there are any, so the weekly number is never crowded by them.
         */}
       {tripToDos.length > 0 ? (
-        <section className="mb-5">
+        <section className="mb-6">
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             Coming up for trips
           </h2>
           <Card>
             <ul className="divide-y divide-[var(--color-line)]">
               {tripToDos.map((task) => (
-                <li key={task.id} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                <li key={task.id} className="flex items-center justify-between gap-4 py-2 first:pt-0 last:pb-0">
                   <div className="min-w-0">
                     <p className="text-sm">{task.label}</p>
                     <p className="text-xs text-[var(--color-ink-soft)]">
@@ -606,7 +604,7 @@ export default async function ThisWeekPage({
                   <Card className="mt-2">
                     <ul className="space-y-2 text-sm">
                       {(running.get(a.account.id) ?? []).map((r) => (
-                        <li key={r.instructionId} className="flex items-center justify-between gap-3">
+                        <li key={r.instructionId} className="flex items-center justify-between gap-4">
                           <span>
                             {r.perWeekCents > 0
                               ? `A catch-up from before: ${formatCents(r.perWeekCents)} a week extra`

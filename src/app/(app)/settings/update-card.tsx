@@ -54,7 +54,7 @@ export async function UpdateCard({ engine }: { engine: Engine }) {
       </div>
       <TestConnection />
 
-      <div className="mt-5 text-sm">
+      <div className="mt-6 text-sm">
         <p className="font-medium">Last backup before an update</p>
         {backup ? (
           <p className="mt-1">
@@ -70,12 +70,12 @@ export async function UpdateCard({ engine }: { engine: Engine }) {
         )}
       </div>
 
-      <div className="mt-5 text-sm">
+      <div className="mt-6 text-sm">
         <p className="font-medium">Update history</p>
         {history.length === 0 ? (
           <p className="mt-1 text-[var(--color-ink-soft)]">Update now has not been pressed yet.</p>
         ) : (
-          <ul className="mt-2 space-y-3">
+          <ul className="mt-2 space-y-4">
             {history.map((attempt) => {
               const words = attemptWords(attempt)
               return (

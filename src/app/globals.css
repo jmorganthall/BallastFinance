@@ -11,6 +11,11 @@
  * those bars in nothing (dark mode sets them on :root and was unaffected).
  */
 @theme static {
+  /*
+   * Small print reads at 1.5 line height, not Tailwind's 1.33: most of the
+   * app's helper sentences are text-xs and run to two or three lines.
+   */
+  --text-xs--line-height: 1.5;
   --color-ink: oklch(0.22 0.02 250);
   --color-ink-soft: oklch(0.48 0.02 250);
   --color-surface: oklch(0.99 0.004 250);
@@ -143,9 +148,12 @@ input, select, textarea {
   font-size: max(1rem, 16px);
 }
 
-/* Tap targets never below 44px, per the one-handed requirement. */
+/* Tap targets never below 44px, per the one-handed requirement: tall and wide, so a short word like "Undo" is still a 44px target. */
 button, a[role='button'], input, select {
   min-height: 44px;
+}
+button, a[role='button'] {
+  min-width: 44px;
 }
 
 /*

@@ -896,6 +896,35 @@ export function shareOfLargest(values: readonly (Cents | null)[]): (number | nul
   return values.map((v) => (v === null ? null : largest === 0 ? 0 : v / largest))
 }
 
+/**
+ * The Debts page's lead figure (the UI rule "one number first"): what is owed
+ * in all, what goes to it a month, and the day the last debt is paid off on
+ * the payments set up now. `lastPayoffDate` is null when any debt never pays
+ * off at its payment, so a date is never claimed for a debt that has none.
+ */
+export interface DebtTotals {
+  count: number
+  balanceCents: Cents
+  perMonthCents: Cents
+  lastPayoffDate: CivilDate | null
+}
+
+export function debtTotals(
+  debts: readonly { balanceCents: Cents; paymentCents: Cents; payoffDate: CivilDate | null }[],
+): DebtTotals {
+  let balanceCents = 0
+  let perMonthCents = 0
+  let lastPayoffDate: CivilDate | null = null
+  let never = false
+  for (const d of debts) {
+    balanceCents += d.balanceCents
+    perMonthCents += d.paymentCents
+    if (d.payoffDate === null) never = true
+    else if (lastPayoffDate === null || compareDates(d.payoffDate, lastPayoffDate) > 0) lastPayoffDate = d.payoffDate
+  }
+  return { count: debts.length, balanceCents, perMonthCents, lastPayoffDate: never ? null : lastPayoffDate }
+}
+
 /** One month of a debt's payoff, as `projectPayoff` works it out. */
 export interface PayoffMonth {
   /** The day this month's payment lands. */

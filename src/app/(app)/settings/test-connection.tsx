@@ -19,7 +19,7 @@ export function TestConnection() {
   }
 
   return (
-    <div className="mt-3">
+    <div className="mt-4">
       <button
         type="button"
         onClick={run}
@@ -31,7 +31,7 @@ export function TestConnection() {
       {result ? (
         <div
           role="status"
-          className={`mt-3 space-y-1 rounded-xl p-3 text-sm ${
+          className={`mt-4 space-y-1 rounded-xl p-3 text-sm ${
             result.ok
               ? 'bg-[var(--color-ahead-soft)] text-[var(--color-ahead)]'
               : 'bg-[var(--color-caution-soft)] text-[var(--color-ink)]'

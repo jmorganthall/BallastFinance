@@ -30,7 +30,7 @@ export function EditableTitle({
   }, [editing])
 
   return (
-    <header className="mb-5">
+    <header className="mb-6">
       {editing ? (
         <form action={action} className="flex items-center gap-2" onReset={() => setEditing(false)}>
           <input type="hidden" name="package_id" value={packageId} />
@@ -68,7 +68,7 @@ export function EditableTitle({
               onClick={() => setEditing(true)}
               aria-label={`Rename ${name}`}
               title="Rename"
-              className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-ink-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-ink)]"
+              className="-my-1.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--color-ink-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-ink)]"
             >
               <svg
                 aria-hidden="true"

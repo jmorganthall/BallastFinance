@@ -59,7 +59,7 @@ function Stretch({ phase, n, first, today }: { phase: StoryPhase; n: number; fir
     )
   const until = phase.to !== phase.from ? ` to ${shortDate(phase.to, today)}` : ''
   return (
-    <li className="flex gap-3">
+    <li className="flex gap-4">
       <StretchBadge n={n} waiting={waiting} />
       <div className="min-w-0">
         <p className="text-xs text-[var(--color-ink-soft)]">
@@ -103,7 +103,7 @@ function Stretch({ phase, n, first, today }: { phase: StoryPhase; n: number; fir
 export function PlanStory({ story, today }: { story: Story; today: CivilDate }) {
   const { now, phases, full, due } = story
   return (
-    <div className="mt-5 space-y-5 text-sm">
+    <div className="mt-6 space-y-6 text-sm">
       <section>
         <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
           Where the money is today
@@ -151,7 +151,7 @@ export function PlanStory({ story, today }: { story: Story; today: CivilDate }) 
           <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
             What happens next
           </h3>
-          <ol className="mt-2 space-y-3">
+          <ol className="mt-2 space-y-4">
             {phases.map((p, i) => (
               <Stretch key={p.from} phase={p} n={i + 1} first={i === 0} today={today} />
             ))}

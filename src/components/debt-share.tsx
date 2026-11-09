@@ -17,7 +17,7 @@ export function DebtShare({ optimised }: { optimised: OptimizerResult | null }) 
     // The optimizer says which; a plan with debts must never read as "none".
     const noDebts = optimised.consideredDebts === 0
     return (
-      <p className="mt-3 rounded-xl bg-[var(--color-surface)] p-3 text-sm text-[var(--color-ink-soft)]">
+      <p className="mt-4 rounded-xl bg-[var(--color-surface)] p-3 text-sm text-[var(--color-ink-soft)]">
         {noDebts ? (
           <>
             No debts recorded yet, so this has nowhere specific to go.{' '}
@@ -44,7 +44,7 @@ export function DebtShare({ optimised }: { optimised: OptimizerResult | null }) 
         <ul className="mt-2 divide-y divide-[var(--color-line)]">
           {optimised.allocations.map((allocation) => (
             <li key={allocation.debtId} className="py-3 first:pt-1 last:pb-1">
-              <div className="flex items-baseline justify-between gap-3">
+              <div className="flex items-baseline justify-between gap-4">
                 <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   <span className="font-medium">{allocation.debtName}</span>
                   {allocation.clearsIt ? <Pill tone="ahead">Paid off</Pill> : null}

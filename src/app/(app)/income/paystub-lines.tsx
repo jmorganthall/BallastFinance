@@ -46,7 +46,7 @@ export function PaystubLines({
           <button
             type="button"
             onClick={() => setRows((rs) => (rs.length === 1 ? [{ label: '', amount: '', key: next }] : rs.filter((r) => r.key !== row.key)))}
-            className="px-1 text-xs text-[var(--color-ink-soft)] underline"
+            className="px-2 text-xs text-[var(--color-ink-soft)] underline"
             aria-label="Remove this line"
           >
             Remove

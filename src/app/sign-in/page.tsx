@@ -2,6 +2,7 @@ import Image from 'next/image'
 import { signIn } from '@/auth'
 import { currentViewer } from '@/server/session'
 import { redirect } from 'next/navigation'
+import { Problem } from '@/components/ui'
 
 export default async function SignInPage({
   searchParams,
@@ -36,9 +37,7 @@ export default async function SignInPage({
       </p>
 
       {error ? (
-        <p className="mt-6 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
-          That account is not set up for this household. Ask Josh to add your email.
-        </p>
+        <Problem className="mt-6">That account is not set up for this household. Ask Josh to add your email.</Problem>
       ) : null}
 
       <form
@@ -50,7 +49,7 @@ export default async function SignInPage({
       >
         <button
           type="submit"
-          className="flex w-full items-center justify-center gap-3 rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]"
+          className="flex w-full items-center justify-center gap-4 rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]"
         >
           {/*
             * Google's four-colour G. Their brand rules keep it on white, so on

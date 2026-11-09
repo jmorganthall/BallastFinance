@@ -14,7 +14,7 @@ export function AppHeader({ viewer }: { viewer: Viewer }) {
   return (
     <header className="sticky top-0 z-20 border-b border-[var(--color-line)] bg-[var(--color-card)]/90 pt-[env(safe-area-inset-top)] backdrop-blur">
       {/* Full width, no centred cap: the person is always at the far right edge. */}
-      <div className="flex h-14 w-full items-center gap-3 px-4">
+      <div className="flex h-14 w-full items-center gap-4 px-4">
         <Link href="/" className="flex items-center gap-2 md:hidden" aria-label="Ballast home">
           <Image src="/logo-mark.png" alt="" width={32} height={32} priority className="h-8 w-8 shrink-0" />
           <span className="text-lg font-semibold tracking-tight">Ballast</span>

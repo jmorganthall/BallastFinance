@@ -63,14 +63,14 @@ export function UpdateNow({ revision }: { revision: string | null }) {
 
   if (phase.kind === 'updating') {
     return (
-      <p className="mt-3 font-medium" role="status">
+      <p className="mt-4 font-medium" role="status">
         Updating — back in a minute
       </p>
     )
   }
   if (phase.kind === 'stuck') {
     return (
-      <p className="mt-3" role="status">
+      <p className="mt-4" role="status">
         Watchtower took the request, but Ballast is still on {revision ? revision.slice(0, 7) : 'the same build'}.{' '}
         <a href="/settings#updates" className="underline">
           See the update history
@@ -80,7 +80,7 @@ export function UpdateNow({ revision }: { revision: string | null }) {
     )
   }
   return (
-    <div className="mt-3">
+    <div className="mt-4">
       <button
         type="button"
         onClick={press}

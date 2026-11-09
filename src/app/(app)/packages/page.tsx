@@ -79,7 +79,7 @@ export default async function PackagesPage({
       </p>
 
       {views.length > 1 ? (
-        <nav aria-label="Sort plans" className="mb-3 flex flex-wrap gap-2">
+        <nav aria-label="Sort plans" className="mb-4 flex flex-wrap gap-2">
           {PLAN_SORTS.map((s) => {
             const active = order.sort === s.key
             return (
@@ -112,7 +112,7 @@ export default async function PackagesPage({
         </Empty>
       ) : (
         // One column on a phone, side by side as the screen widens: each card is read at a glance (D38 (5)).
-        <ul className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+        <ul className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
           {rows.map(({ view, plan, next }) => {
             const copy = STATE_COPY[view.package.state]
             const snoozed = view.items
@@ -124,7 +124,7 @@ export default async function PackagesPage({
               <li key={view.package.id}>
                 <Link href={`/packages/${view.package.id}`} className="block h-full">
                   <Card className="h-full">
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start justify-between gap-4">
                       <h2 className="font-semibold">{view.package.name}</h2>
                       <span className="flex shrink-0 items-center gap-2">
                         {snoozed.length > 0 ? (
@@ -179,7 +179,7 @@ export default async function PackagesPage({
                     ) : null}
                     {plan && plan.parts.length > 0 ? (
                       <ProgressBar
-                        className="mt-3"
+                        className="mt-4"
                         totalCents={plan.totalCents}
                         countedCents={plan.countedCents}
                         tickCents={plan.tickCents}

@@ -78,7 +78,7 @@ export default async function CheckInPage({
             <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
               Where you stand
             </h2>
-            <p className="mb-3 text-sm text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
               Each account is run forward on the transfer the bank has: is the money there on
               every date something is due? A plan below its steady line is fine as long as its
               account has it on the day.{' '}

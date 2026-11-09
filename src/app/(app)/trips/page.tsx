@@ -6,7 +6,7 @@
 
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
-import { Card, Empty, humanDate, Money, PageHeader, Pill } from '@/components/ui'
+import { Card, Empty, humanDate, Money, PageHeader, Pill, Problem } from '@/components/ui'
 import {
   addSchoolDayOffAction,
   createTripAction,
@@ -70,7 +70,7 @@ const input =
   'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]'
 const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]'
 const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium'
-const sectionTitle = 'mb-3 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
+const sectionTitle = 'mb-4 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
 const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium'
 
 /** The three questions behind the score (D25), each answered A lot / Some / A little / Not at all. */
@@ -202,7 +202,7 @@ export default async function TripsPage({
       <PageHeader title="Trips" subtitle="Price a trip, pick a way to do it, and add it to Plans in one tap." />
 
       {error ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">{error}</p>
+        <Problem className="mb-4">{error}</Problem>
       ) : saved === 'home' ? (
         <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">
           Home saved{home?.resolvedName ? ` and found on the map: ${home.resolvedName}` : ''}.
@@ -216,7 +216,7 @@ export default async function TripsPage({
           <p>Start one below: dates and who is going. Then try a few ways to do it, side by side.</p>
         </Empty>
       ) : (
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {open.map((trip) => {
             const status = tripStatus(trip)
             const heads = headCount(trip.travelers)
@@ -224,7 +224,7 @@ export default async function TripsPage({
               <li key={trip.id}>
                 <Link href={`/trips/${trip.id}`}>
                   <Card>
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start justify-between gap-4">
                       <h2 className="font-semibold">{trip.name}</h2>
                       <Pill tone={status.tone}>{status.label}</Pill>
                     </div>
@@ -244,9 +244,9 @@ export default async function TripsPage({
         Look at the year
       </h2>
       <Card>
-        {refreshed ? <p className="mb-3 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
+        {refreshed ? <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
         {pendingCrowds ? (
-          <div className="mb-3 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
+          <div className="mb-4 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
             <p className="font-semibold">How busy, as {pendingCrowds.label} sees it</p>
             <p className="mt-1">
               {pendingCrowds.levels.length} park-days read for {pendingCrowds.months.join(', ')}, fetched {humanDate(pendingCrowds.fetchedOn)}. Keep them? A level
@@ -262,10 +262,10 @@ export default async function TripsPage({
                 <li key={n}>{n}</li>
               ))}
             </ul>
-            <div className="mt-3 flex gap-2">
+            <div className="mt-4 flex gap-2">
               <form action={keepCrowdPullAction} className="flex-1">
                 <input type="hidden" name="month" value={month} />
-                <button type="submit" className={primaryButton}>
+                <button type="submit" className={secondaryButton}>
                   Keep these
                 </button>
               </form>
@@ -317,12 +317,12 @@ export default async function TripsPage({
             New trip
           </h2>
           <Card>
-            <form action={createTripAction} className="space-y-3">
+            <form action={createTripAction} className="space-y-4">
               <label className="block text-sm font-medium">
                 What to call it
                 <input name="name" required placeholder="Disney, June 2027" defaultValue={newTripLayout ? (nameParam ?? '') : ''} className={input} />
               </label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <label className="block text-sm font-medium">
                   First day
                   <input name="start_date" type="date" required defaultValue={newTripStart} className={input} />
@@ -340,7 +340,7 @@ export default async function TripsPage({
                 </p>
               ) : null}
               <TravelerFields />
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-4">
                 <label className="block text-sm font-medium">
                   Car, miles per gallon
                   <input name="car_mpg" inputMode="numeric" placeholder="25" className={input} />
@@ -386,12 +386,12 @@ export default async function TripsPage({
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
           <h2 className={sectionTitle}>Where home is</h2>
           <Card>
-            <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
               For looking up the drive to Orlando. Type the address; saving finds it on the map once, through the public
               OpenStreetMap service, and keeps the spot. Nothing is sent anywhere except when you press save.
             </p>
             {home ? (
-              <p className="mb-3 text-sm">
+              <p className="mb-4 text-sm">
                 {homeIsLocated(home) ? (
                   <>
                     <strong>{home.address ?? home.label}</strong>
@@ -414,7 +414,7 @@ export default async function TripsPage({
                 )}
               </p>
             ) : null}
-            <form action={saveHomeAddressAction} className="space-y-3">
+            <form action={saveHomeAddressAction} className="space-y-4">
               <label className="block text-sm font-medium">
                 Address
                 <input
@@ -436,7 +436,7 @@ export default async function TripsPage({
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
           <h2 className={sectionTitle}>Weeks we cannot go</h2>
           <Card>
-            <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
               School terms, work trips, the recital. A trip&apos;s &ldquo;When&rdquo; section flags any week that runs into
               one of these. Leave a row blank to drop it.
             </p>
@@ -469,7 +469,7 @@ export default async function TripsPage({
             School calendar
           </h2>
           {pendingCalendar ? (
-            <Card className="mb-3 bg-[var(--color-accent-soft)]">
+            <Card className="mb-4 bg-[var(--color-accent-soft)]">
               <h3 className="font-semibold">Days off school, as {pendingCalendar.label} lists them</h3>
               <p className="mt-1 text-sm">
                 {pendingCalendar.items.length} {pendingCalendar.items.length === 1 ? 'day' : 'days'}
@@ -500,9 +500,9 @@ export default async function TripsPage({
                   </li>
                 ))}
               </ul>
-              <div className="mt-3 flex gap-2">
+              <div className="mt-4 flex gap-2">
                 <form action={keepSchoolCalendarAction} className="flex-1">
-                  <button type="submit" className={primaryButton}>
+                  <button type="submit" className={secondaryButton}>
                     Keep these
                   </button>
                 </form>
@@ -546,21 +546,21 @@ export default async function TripsPage({
               ))}
             </ul>
             <h3 className="text-sm font-semibold">Days off school</h3>
-            <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
               Days off school make long weekends, and a trip on a school day is a day missed. The best-weeks list on each trip
               uses both. Type the days, or point at the district&apos;s calendar below and read it in.
             </p>
             {daysOff.length === 0 ? (
-              <p className="mb-3 text-sm text-[var(--color-ink-soft)]">
+              <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
                 No days off yet, so every weekday counts as school. Federal holidays are already known.
               </p>
             ) : (
               bySchoolYear(daysOff).map((group) => (
-                <div key={group.schoolYear} className="mb-3">
+                <div key={group.schoolYear} className="mb-4">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">{group.schoolYear}</h3>
                   <ul className="mt-1 divide-y divide-[var(--color-line)]">
                     {group.days.map((d) => (
-                      <li key={d.id} className="flex items-center justify-between gap-3 py-1.5 text-sm">
+                      <li key={d.id} className="flex items-center justify-between gap-4 py-1.5 text-sm">
                         <span className="min-w-0">
                           {weekdayName(d.date).slice(0, 3)} {shortDate(d.date)}, {d.date.slice(0, 4)} · {d.label}
                           <span className="block text-xs text-[var(--color-ink-soft)]">{dayOffSourceName(d.source)}</span>
@@ -595,7 +595,7 @@ export default async function TripsPage({
               </button>
             </form>
 
-            <h3 className="mt-5 text-sm font-semibold">Where the calendar is</h3>
+            <h3 className="mt-6 text-sm font-semibold">Where the calendar is</h3>
             <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
               A district&apos;s calendar feed is read straight in. A PDF or a web page has no fixed shape, so those go to the
               reader, which shows you what it found before anything is kept.
@@ -604,9 +604,9 @@ export default async function TripsPage({
                 : ' The reader is off on this machine: add a reader key in the environment to read PDFs and pages.'}
             </p>
             {calendarSources.length > 0 ? (
-              <ul className="mb-3 divide-y divide-[var(--color-line)]">
+              <ul className="mb-4 divide-y divide-[var(--color-line)]">
                 {calendarSources.map((s, i) => (
-                  <li key={`${s.url}|${i}`} className="flex items-center justify-between gap-3 py-2 text-sm">
+                  <li key={`${s.url}|${i}`} className="flex items-center justify-between gap-4 py-2 text-sm">
                     <span className="min-w-0">
                       {s.label}
                       <span className="block truncate text-xs text-[var(--color-ink-soft)]">
@@ -658,7 +658,7 @@ export default async function TripsPage({
             How we like to go
           </h2>
           <Card>
-            <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
               The best times to go above are trips of this shape: park days with a travel day each side. A drive longer than an easy stretch
               can leave the evening before and finish in the morning; when a travel day would cost school, that makes the first day a quick park
               day. Each trip also lists its ten best weeks of its own length. A week you cannot go is left out.
@@ -707,7 +707,7 @@ export default async function TripsPage({
               <div className="col-span-2 space-y-2 sm:col-span-4">
                 <p className="text-sm font-medium">How much does each matter?</p>
                 {WEIGHT_QUESTIONS.map((q) => (
-                  <fieldset key={q.field} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <fieldset key={q.field} className="flex flex-wrap items-center gap-x-4 gap-y-1">
                     <legend className="float-left w-40 text-sm">{q.label}</legend>
                     <div className="flex flex-wrap gap-1">
                       {IMPORTANCES.map((level) => (
@@ -741,7 +741,7 @@ export default async function TripsPage({
             What a night costs
           </h2>
           <Card>
-            <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
               The best times to go are priced night by night from the surest figure there is: a price we were quoted for those nights, then
               Disney&apos;s rate for the week, then for the month. Disney&apos;s rates come from{' '}
               <a href={RESORTINGS_CREDIT.url} className="underline">
@@ -750,7 +750,7 @@ export default async function TripsPage({
               : open its prices-by-month page, copy the whole page and paste it here. It is shown before it is kept.
             </p>
             {lodgingPull ? (
-              <div className="mb-3 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
+              <div className="mb-4 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
                 <p className="font-semibold">Disney&apos;s rates, as {lodgingPull.label} lists them</p>
                 {(() => {
                   const sum = ratesPullSummary(lodgingPull.rates)
@@ -763,9 +763,9 @@ export default async function TripsPage({
                   )
                 })()}
                 {lodgingPull.basis ? <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{lodgingPull.basis}.</p> : null}
-                <div className="mt-3 flex gap-2">
+                <div className="mt-4 flex gap-2">
                   <form action={keepLodgingPullAction} className="flex-1">
-                    <button type="submit" className={primaryButton}>
+                    <button type="submit" className={secondaryButton}>
                       Keep these
                     </button>
                   </form>
@@ -786,7 +786,7 @@ export default async function TripsPage({
                 Read the page
               </button>
             </form>
-            <h3 className="mt-5 text-sm font-semibold">Prices we were quoted</h3>
+            <h3 className="mt-6 text-sm font-semibold">Prices we were quoted</h3>
             {quotes.length === 0 ? (
               <p className="mt-1 text-xs text-[var(--color-ink-soft)]">None yet. A quote beats Disney&apos;s published rate for its nights.</p>
             ) : (
@@ -846,7 +846,7 @@ export default async function TripsPage({
             Where the park data comes from
           </h2>
           <Card>
-            <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
               Weather comes from Open-Meteo and park hours from ThemeParks.wiki; neither needs setting. How busy comes from
               Thrill Data&rsquo;s crowd calendar, checked by &ldquo;Refresh park data&rdquo; and
               shown to you before it is kept. A crowd outlook is read only from an address you give below: there is no
@@ -883,19 +883,19 @@ export default async function TripsPage({
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
           <h2 className={sectionTitle}>Our usual figures</h2>
           <Card>
-            <p className="mb-3 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
               Where every new trip&apos;s figures start. Each one has the date it was checked and where; nothing Disney
               sells can be looked up by the app, so these are yours to keep current. Changing a figure marks it checked
               today unless you type a date.
               {stale.length > 0 ? ` ${stale.length} ${stale.length === 1 ? 'is' : 'are'} over six months old.` : ''}
             </p>
-            <form action={saveReferencePricesAction} className="space-y-3">
+            <form action={saveReferencePricesAction} className="space-y-4">
               <ul className="divide-y divide-[var(--color-line)]">
                 {prices.map((price) => {
                   const fresh = referenceFreshness(price, today)
                   return (
                     <li key={price.key} className="py-3 first:pt-0 last:pb-0">
-                      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                         <span className="text-sm font-medium">{price.label}</span>
                         <span className="text-xs text-[var(--color-ink-soft)]">
                           {sourceName(price.sourceUrl)}, {humanDate(price.asOf)}
