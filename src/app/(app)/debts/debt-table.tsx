@@ -274,7 +274,7 @@ function Row({
                     <input type="hidden" name="debt_id" value={row.id} />
                     <button
                       type="submit"
-                      className="min-h-11 w-full rounded-lg bg-[var(--color-behind)] px-3 text-sm font-medium text-white"
+                      className="min-h-11 w-full rounded-lg bg-[var(--color-behind)] px-3 text-sm font-medium text-[var(--color-on-fill)]"
                     >
                       Yes, remove it
                     </button>

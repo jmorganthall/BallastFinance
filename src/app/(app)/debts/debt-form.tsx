@@ -399,7 +399,7 @@ export function DebtForm({
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white disabled:opacity-60"
+        className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)] disabled:opacity-60"
       >
         {pending ? (editing ? 'Saving…' : 'Adding…') : submitLabel}
       </button>

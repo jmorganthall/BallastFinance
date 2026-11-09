@@ -40,6 +40,8 @@ const field =
 const small =
   'w-full min-w-0 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]'
 const heading = 'mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
+// A visible name above each small box: a grey example inside the box is not a label (it goes when you type).
+const fieldName = 'block text-xs font-medium text-[var(--color-ink-soft)]'
 
 function figureWords(f: { amountCents: number; frequency: keyof typeof FREQUENCY_WORDS }) {
   return `${formatCents(f.amountCents)} ${FREQUENCY_WORDS[f.frequency]}`
@@ -203,17 +205,26 @@ export default async function RecurringPage({
                           </span>
                         </span>
                       </summary>
-                      <form action={updateRecurringAction} className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_9rem_auto]">
+                      <form action={updateRecurringAction} className="mt-3 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_7rem_9rem_auto]">
                         <input type="hidden" name="id" value={row.item.id} />
-                        <input name="name" defaultValue={row.item.name} className={small} aria-label="Name" />
-                        <input name="amount" defaultValue={(row.item.amountCents / 100).toFixed(2)} inputMode="decimal" className={small} aria-label="Amount" />
-                        <select name="frequency" defaultValue={row.item.frequency} className={small} aria-label="How often">
-                          {FREQUENCIES.map((f) => (
-                            <option key={f} value={f}>
-                              {FREQUENCY_WORDS[f]}
-                            </option>
-                          ))}
-                        </select>
+                        <label className={fieldName}>
+                          Name
+                          <input name="name" defaultValue={row.item.name} className={`${small} mt-1`} />
+                        </label>
+                        <label className={fieldName}>
+                          Amount
+                          <input name="amount" defaultValue={(row.item.amountCents / 100).toFixed(2)} inputMode="decimal" className={`${small} mt-1`} />
+                        </label>
+                        <label className={fieldName}>
+                          How often
+                          <select name="frequency" defaultValue={row.item.frequency} className={`${small} mt-1`}>
+                            {FREQUENCIES.map((f) => (
+                              <option key={f} value={f}>
+                                {FREQUENCY_WORDS[f]}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
                         <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm font-medium">
                           Save
                         </button>
@@ -233,16 +244,25 @@ export default async function RecurringPage({
                 Anything Simplifi does not catch, such as cash.
               </p>
             )}
-            <form action={addRecurringAction} className="grid gap-2 border-t border-[var(--color-line)] pt-4 sm:grid-cols-[minmax(0,1fr)_7rem_9rem_auto]">
-              <input name="name" required placeholder="Babysitter" className={small} aria-label="Name" />
-              <input name="amount" required inputMode="decimal" placeholder="60.00" className={small} aria-label="Amount" />
-              <select name="frequency" defaultValue="monthly" className={small} aria-label="How often">
-                {FREQUENCIES.map((f) => (
-                  <option key={f} value={f}>
-                    {FREQUENCY_WORDS[f]}
-                  </option>
-                ))}
-              </select>
+            <form action={addRecurringAction} className="grid items-end gap-2 border-t border-[var(--color-line)] pt-4 sm:grid-cols-[minmax(0,1fr)_7rem_9rem_auto]">
+              <label className={fieldName}>
+                Name
+                <input name="name" required placeholder="Babysitter" className={`${small} mt-1`} />
+              </label>
+              <label className={fieldName}>
+                Amount
+                <input name="amount" required inputMode="decimal" placeholder="60.00" className={`${small} mt-1`} />
+              </label>
+              <label className={fieldName}>
+                How often
+                <select name="frequency" defaultValue="monthly" className={`${small} mt-1`}>
+                  {FREQUENCIES.map((f) => (
+                    <option key={f} value={f}>
+                      {FREQUENCY_WORDS[f]}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm font-medium">
                 Add
               </button>
@@ -268,7 +288,7 @@ export default async function RecurringPage({
                   figure is the amount times how often.
                 </span>
               </label>
-              <button type="submit" className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white">
+              <button type="submit" className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]">
                 Read it
               </button>
             </form>
@@ -444,7 +464,7 @@ function PastePreview({
             </div>
           ) : null}
 
-          <button type="submit" className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white">
+          <button type="submit" className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]">
             Keep this
           </button>
         </form>

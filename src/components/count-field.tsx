@@ -1,7 +1,8 @@
 /**
- * One account's box in a balance form (PRD D57 (1)): empty, with the likely
- * balance as a grey hint, and beside it "It's $X", which records exactly
- * that figure as the count. Typing records what was typed; leaving it empty
+ * One account's box in a balance form (PRD D57 (1)): empty, and beside it
+ * "It's $X", which records exactly that figure as the count. The box has no
+ * grey hint: a hint of the likely balance read as a figure already typed, and
+ * pressing Record over boxes that only looked filled recorded nothing. Typing records what was typed; leaving it empty
  * records nothing. What a submitted form records is `countsFromForm`.
  *
  * "It's $X" belongs to a small form of its own (`ItsForms`, drawn after the
@@ -11,12 +12,12 @@
  * typed. In its own form, Enter can only press "Record these balances".
  */
 
+import { Card } from '@/components/ui'
 import { balanceField, formatCents, ITS_FIELD, itsValue, type Cents, type Id } from '@/domain'
 
 /** The id of the form an account's "It's $X" submits. */
 const itsFormId = (accountId: Id) => `its-${accountId}`
 
-const plain = (cents: Cents) => formatCents(cents).replace('$', '').replace(/,/g, '')
 
 export function CountField({ accountId, likelyCents }: { accountId: Id; likelyCents: Cents }) {
   return (
@@ -29,7 +30,6 @@ export function CountField({ accountId, likelyCents }: { accountId: Id; likelyCe
           id={balanceField(accountId)}
           name={balanceField(accountId)}
           inputMode="decimal"
-          placeholder={plain(likelyCents)}
           className="min-w-0 flex-1 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
         />
         <button
@@ -68,5 +68,31 @@ export function ItsForms({
         </form>
       ))}
     </>
+  )
+}
+
+/**
+ * What a balance form just recorded, from the count `confirmBalancesAction`
+ * lands back with. Nothing recorded is said as such, never as "Balances
+ * recorded": every box empty, or not an amount, leaves every figure as it was.
+ */
+export function BalancesRecorded({ count, after }: { count: number; after?: string }) {
+  if (count > 0) {
+    return (
+      <Card className="mb-4 bg-[var(--color-ahead-soft)]">
+        <p className="text-sm font-medium text-[var(--color-ahead)]">
+          {count === 1 ? 'One balance recorded.' : `${count} balances recorded.`}
+          {after ? ` ${after}` : ''}
+        </p>
+      </Card>
+    )
+  }
+  return (
+    <Card className="mb-4 bg-[var(--color-caution-soft)]">
+      <p className="text-sm font-medium">Nothing was recorded.</p>
+      <p className="mt-1 text-sm">
+        Every box was empty or not an amount. Type what each account holds, or tap It&apos;s $X when the figure is right.
+      </p>
+    </Card>
   )
 }

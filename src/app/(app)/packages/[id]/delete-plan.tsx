@@ -61,7 +61,7 @@ export function DeletePlan({
         <button
           type="submit"
           disabled={!matches}
-          className="w-full rounded-lg bg-[var(--color-behind)] px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+          className="w-full rounded-lg bg-[var(--color-behind)] px-3 py-2 text-sm font-medium text-[var(--color-on-fill)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           Yes, delete it for good
         </button>

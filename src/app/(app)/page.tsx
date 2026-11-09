@@ -16,7 +16,7 @@ import { AccountPositionCard } from '@/components/account-position'
 import { CloseOutCard } from '@/components/close-out-card'
 import { SmartSavingCard } from '@/components/smart-saving'
 import { MoneySince } from '@/components/money-since'
-import { CountField, ItsForms } from '@/components/count-field'
+import { BalancesRecorded, CountField, ItsForms } from '@/components/count-field'
 import {
   awakeCloseOuts,
   roundKey,
@@ -126,7 +126,7 @@ function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate 
         </label>
         <button
           type="submit"
-          className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+          className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
         >
           {todo.kind === 'set_transfer' && todo.reason === 'confirm' ? "That's it" : 'Done'}
         </button>
@@ -193,7 +193,7 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
         </label>
         <button
           type="submit"
-          className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
+          className="rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
         >
           Done
         </button>
@@ -461,11 +461,7 @@ export default async function ThisWeekPage({
         </section>
       ) : null}
 
-      {balances ? (
-        <Card className="mb-4 bg-[var(--color-ahead-soft)]">
-          <p className="text-sm font-medium text-[var(--color-ahead)]">Balances recorded.</p>
-        </Card>
-      ) : null}
+      {balances !== undefined ? <BalancesRecorded count={Number(balances) || 0} /> : null}
 
       {/*
         * A move or a spend marked done is money the account holds or no longer
@@ -488,7 +484,7 @@ export default async function ThisWeekPage({
             ))}
             <button
               type="submit"
-              className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"
+              className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]"
             >
               Record these balances
             </button>

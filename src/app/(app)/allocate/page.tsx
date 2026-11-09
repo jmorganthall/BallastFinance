@@ -319,7 +319,7 @@ async function AllocatePageRead({
               ))}
               <button
                 type="submit"
-                className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white"
+                className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]"
               >
                 Use this split
               </button>

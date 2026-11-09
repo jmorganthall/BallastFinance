@@ -20,7 +20,14 @@
 import { formatCents, type PaymentSplit, type PayoffMonth } from '@/domain'
 
 const WIDTH = 400
-const PAD = { top: 18, right: 12, bottom: 26, left: 56 }
+/*
+ * The words are drawn at 14 in a 400-wide box, as the plan chart draws them:
+ * on a phone the box is about 330px across, so 11 came out near 9px, too
+ * small for a dollar figure. The padding leaves room for "$12,345" and the
+ * deal's label at that size.
+ */
+const FONT = 14
+const PAD = { top: 22, right: 12, bottom: 28, left: 64 }
 
 function dayNumber(iso: string): number {
   const [y, m, d] = iso.split('-').map(Number) as [number, number, number]
@@ -85,10 +92,10 @@ export function BalanceChart({
         aria-label={`${formatCents(balanceCents)} today, paid off by ${shortDate(months.at(-1)!.on)} on the payment set up now${dealEnds ? `; ${dealEnds.label} ${shortDate(dealEnds.on)}` : ''}${whatIf ? `; ${whatIf.label}, paid off by ${shortDate(whatIf.months.at(-1)!.on)}` : ''}.`}
       >
         <line x1={PAD.left} y1={sy(0)} x2={WIDTH - PAD.right} y2={sy(0)} stroke="var(--color-line)" strokeWidth="1" />
-        <text x="2" y={sy(yMax) + 4} fontSize="11" fill="var(--color-ink-soft)">
+        <text x="2" y={sy(yMax) + 4} fontSize={FONT} fill="var(--color-ink-soft)">
           {dollars(yMax)}
         </text>
-        <text x="2" y={sy(0) + 4} fontSize="11" fill="var(--color-ink-soft)">
+        <text x="2" y={sy(0) + 4} fontSize={FONT} fill="var(--color-ink-soft)">
           $0
         </text>
 
@@ -106,8 +113,8 @@ export function BalanceChart({
             <text
               x={dealX}
               y={PAD.top - 6}
-              fontSize="11"
-              textAnchor={dealX > WIDTH - 70 ? 'end' : 'middle'}
+              fontSize={FONT}
+              textAnchor={dealX > WIDTH - 90 ? 'end' : dealX < PAD.left + 50 ? 'start' : 'middle'}
               fill="var(--color-ink-soft)"
             >
               {dealEnds!.label}
@@ -142,10 +149,10 @@ export function BalanceChart({
           <title>{`Today: ${formatCents(balanceCents)}`}</title>
         </circle>
 
-        <text x={PAD.left} y={HEIGHT - 8} fontSize="11" fill="var(--color-ink-soft)">
+        <text x={PAD.left} y={HEIGHT - 8} fontSize={FONT} fill="var(--color-ink-soft)">
           Today
         </text>
-        <text x={WIDTH - PAD.right} y={HEIGHT - 8} fontSize="11" textAnchor="end" fill="var(--color-ink-soft)">
+        <text x={WIDTH - PAD.right} y={HEIGHT - 8} fontSize={FONT} textAnchor="end" fill="var(--color-ink-soft)">
           {shortDate(end)}
         </text>
       </svg>
@@ -195,10 +202,10 @@ export function PaymentSplitChart({ splits }: { splits: readonly PaymentSplit[] 
         aria-label={`Each ${bars[0]!.period.length === 4 ? "year's" : "month's"} payments, split into what pays the balance down and what is interest.`}
       >
         <line x1={PAD.left} y1={base} x2={WIDTH - PAD.right} y2={base} stroke="var(--color-line)" strokeWidth="1" />
-        <text x="2" y={PAD.top + 4} fontSize="11" fill="var(--color-ink-soft)">
+        <text x="2" y={PAD.top + 4} fontSize={FONT} fill="var(--color-ink-soft)">
           {dollars(yMax)}
         </text>
-        <text x="2" y={base + 4} fontSize="11" fill="var(--color-ink-soft)">
+        <text x="2" y={base + 4} fontSize={FONT} fill="var(--color-ink-soft)">
           $0
         </text>
         {bars.map((bar, i) => {
@@ -228,17 +235,17 @@ export function PaymentSplitChart({ splits }: { splits: readonly PaymentSplit[] 
           <text
             x={Math.min(WIDTH - PAD.right, PAD.left + bars.indexOf(spike) * slot + slot / 2)}
             y={PAD.top - 4}
-            fontSize="11"
+            fontSize={FONT}
             textAnchor={bars.indexOf(spike) > bars.length / 2 ? 'end' : 'middle'}
             fill="var(--color-ink-soft)"
           >
             interest charged back
           </text>
         ) : null}
-        <text x={PAD.left} y={HEIGHT - 8} fontSize="11" fill="var(--color-ink-soft)">
+        <text x={PAD.left} y={HEIGHT - 8} fontSize={FONT} fill="var(--color-ink-soft)">
           {bars[0]!.label}
         </text>
-        <text x={WIDTH - PAD.right} y={HEIGHT - 8} fontSize="11" textAnchor="end" fill="var(--color-ink-soft)">
+        <text x={WIDTH - PAD.right} y={HEIGHT - 8} fontSize={FONT} textAnchor="end" fill="var(--color-ink-soft)">
           {bars.at(-1)!.label}
         </text>
       </svg>

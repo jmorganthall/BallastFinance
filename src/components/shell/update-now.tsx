@@ -85,7 +85,7 @@ export function UpdateNow({ revision }: { revision: string | null }) {
         type="button"
         onClick={press}
         disabled={phase.kind === 'starting'}
-        className="rounded-xl bg-[var(--color-accent)] px-4 py-2 font-medium text-white disabled:opacity-60"
+        className="rounded-xl bg-[var(--color-accent)] px-4 py-2 font-medium text-[var(--color-on-fill)] disabled:opacity-60"
       >
         {phase.kind === 'starting' ? 'Starting…' : 'Update now'}
       </button>

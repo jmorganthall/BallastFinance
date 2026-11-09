@@ -271,7 +271,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
       <button
         type="submit"
         disabled={pending}
-        className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-white disabled:opacity-60"
+        className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)] disabled:opacity-60"
       >
         {pending ? 'Working it out…' : 'See what this would cost per week'}
       </button>

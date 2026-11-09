@@ -104,7 +104,7 @@ export const dynamic = 'force-dynamic'
 
 const input =
   'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]'
-const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white'
+const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]'
 const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium'
 const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium'
 const quietButton = 'text-sm text-[var(--color-behind)] underline underline-offset-4'
@@ -526,7 +526,7 @@ export default async function TripPage({
                 <tr className="text-left text-xs text-[var(--color-ink-soft)]">
                   <th className="py-1 pr-2 font-medium">Week</th>
                   <th className="py-1 pr-2 font-medium">How busy</th>
-                  <th className="py-1 pr-2 font-medium">Price</th>
+                  <th className="py-1 pr-4 text-right font-medium">Price</th>
                   <th className="py-1 pr-2 font-medium">Getting there</th>
                   <th className="py-1 pr-2 font-medium">Runs into</th>
                   <th className="py-1 font-medium"></th>
@@ -556,7 +556,7 @@ export default async function TripPage({
                         </>
                       )}
                     </td>
-                    <td className="py-2 pr-2 align-top">
+                    <td className="whitespace-nowrap py-2 pr-4 text-right align-top">
                       <Money cents={w.price.totalCents} />
                     </td>
                     <td className="py-2 pr-2 align-top">
