@@ -41,6 +41,85 @@ export interface PromoRule {
   startDate?: CivilDate
 }
 
+/**
+ * A standing offer to move money onto this debt (PRD D61): a card's "0% on
+ * transfers for 18 months, 3% fee", or a line of credit's rate. A fact a
+ * person typed; what it would save is worked out on demand by
+ * `transferCheck` in `debt-transfer.ts` and never stored.
+ *
+ * An offer ends after `months` from the transfer or on `untilDate` (one or
+ * the other, never both), and then carries its own `rateBasisPoints`. An
+ * offer with neither never ends: it is a line of credit whose rate is the
+ * debt's own APR, so it has no rate of its own and a transfer onto it is
+ * never a deal (`PromoRule` always has an end).
+ */
+export interface TransferOffer {
+  /** The rate on what is moved, while the offer lasts. Absent exactly when the offer never ends. */
+  rateBasisPoints?: number
+  /** How long the rate lasts, counted from the day of the transfer. */
+  months?: number
+  /** Or the fixed day the rate ends. */
+  untilDate?: CivilDate
+  /** The fee, a share of what is moved: 300 is 3%. */
+  feeBasisPoints: number
+  /** "3% or $5, whichever is more": the least the fee can be. */
+  feeMinCents?: Cents
+  /** The last day a transfer gets the offer, when it says one. */
+  transferBy?: CivilDate
+  /** Whether interest is charged back to the transfer day if it is not cleared in time (D49 (9)). */
+  chargedBack?: boolean
+}
+
+/** Whether the offer's rate ends (a card's deal) rather than lasting (a line of credit's rate). */
+export function offerEnds(offer: Pick<TransferOffer, 'months' | 'untilDate'>): boolean {
+  return offer.months !== undefined || offer.untilDate !== undefined
+}
+
+/** The longest an offer's rate is taken to run, in months. */
+export const MAX_OFFER_MONTHS = 60
+/** The largest fee an offer is taken to charge: 20%. */
+export const MAX_OFFER_FEE_BASIS_POINTS = 2000
+
+/**
+ * Refuse an offer that cannot describe a real one (D61), wherever it is
+ * written from: the form checks the same things next to each box.
+ */
+export function validateTransferOffer(
+  offer: TransferOffer,
+  aprBasisPoints: number,
+  category: DebtCategory,
+): void {
+  if (category !== 'consumer') {
+    throw new DebtDataError('Only a credit card or a line of credit can carry a transfer offer.')
+  }
+  if (offer.months !== undefined && offer.untilDate !== undefined) {
+    throw new DebtDataError('An offer lasts a number of months or until a date, not both.')
+  }
+  if (offer.months !== undefined && !(Number.isInteger(offer.months) && offer.months >= 1 && offer.months <= MAX_OFFER_MONTHS)) {
+    throw new DebtDataError(`An offer lasts 1 to ${MAX_OFFER_MONTHS} months.`)
+  }
+  if (offerEnds(offer)) {
+    const rate = offer.rateBasisPoints
+    if (rate === undefined || !Number.isInteger(rate) || rate < 0) {
+      throw new DebtDataError('Enter the rate on what is moved, like 0.')
+    }
+    if (rate >= aprBasisPoints) {
+      throw new DebtDataError(
+        `An offer of ${(rate / 100).toFixed(2)}% is not lower than the card's rate of ` +
+          `${(aprBasisPoints / 100).toFixed(2)}%. Put the rate it goes back to in the interest rate field.`,
+      )
+    }
+  } else if (offer.rateBasisPoints !== undefined) {
+    throw new DebtDataError('An offer that does not end uses the interest rate above, so it has no rate of its own.')
+  }
+  if (!Number.isInteger(offer.feeBasisPoints) || offer.feeBasisPoints < 0 || offer.feeBasisPoints > MAX_OFFER_FEE_BASIS_POINTS) {
+    throw new DebtDataError('The fee is a percentage from 0 to 20.')
+  }
+  if (offer.feeMinCents !== undefined && (!Number.isInteger(offer.feeMinCents) || offer.feeMinCents < 0)) {
+    throw new DebtDataError('The least the fee can be cannot be negative.')
+  }
+}
+
 export interface Debt {
   id: Id
   householdId: Id
@@ -69,6 +148,8 @@ export interface Debt {
   enteredOn?: CivilDate
   /** The lender's page for this debt, to open it from Ballast (D60): an http(s) address, or null. */
   linkUrl?: string | null
+  /** A standing offer to move money onto this debt (D61), or null. */
+  transferOffer?: TransferOffer | null
   /**
    * The last balance a person stated, as of `balanceAsOf`, when the engine
    * read it. `balanceCents` is the likely balance today worked out from it
@@ -863,6 +944,28 @@ function simulateMonths(args: {
 }
 
 /**
+ * The interest a debt charges over the next `horizonMonths` on its payment
+ * plus `extraPerMonthCents`, through the same months as `projectPayoff`:
+ * what a comparison uses when a debt is never paid off on its payment, so
+ * "to payoff" has no end (D61 (3)).
+ */
+export function projectWithin(args: {
+  debt: Debt
+  today: CivilDate
+  extraPerMonthCents?: Cents
+  horizonMonths: number
+}): { interestCents: Cents } {
+  if (args.debt.balanceCents <= 0) return { interestCents: 0 }
+  const run = simulateMonths({
+    debt: args.debt,
+    today: args.today,
+    extraPerMonthCents: args.extraPerMonthCents ?? 0,
+    horizonMonths: args.horizonMonths,
+  })
+  return { interestCents: run.interestCents }
+}
+
+/**
  * The interest a deal will charge back when it ends unpaid (PRD D49 (9)), on
  * the payments set up now: the full rate on the deal balance month by month
  * from the deal's start (or the day the debt was entered) to its end. About,
@@ -1015,6 +1118,7 @@ const TERM_WORDS: Record<string, string> = {
   planned_payment_cents: 'monthly payment',
   asset_id: 'home or vehicle it is secured on',
   link_url: 'link',
+  transfer_offer: 'transfer offer',
 }
 
 /** Which terms a `debt_updated` event changed, in plain words. */
