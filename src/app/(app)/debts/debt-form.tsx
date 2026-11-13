@@ -396,6 +396,100 @@ export function DebtForm({
         </>
       ) : null}
 
+      {/* A standing offer to move money onto it (D61): a card's or a line of credit's. */}
+      {values.category === 'consumer' ? (
+        <>
+          <label className="flex min-h-11 items-center gap-4 text-sm font-medium">
+            <input
+              type="checkbox"
+              name="has_offer"
+              checked={values.has_offer}
+              onChange={(e) => set('has_offer', e.target.checked)}
+              className="h-5 w-5 shrink-0"
+            />
+            It has an offer for balance transfers
+          </label>
+          {problemFor('has_offer') ? (
+            <p className="-mt-2 text-xs text-[var(--color-behind)]">{problemFor('has_offer')}</p>
+          ) : null}
+        </>
+      ) : null}
+
+      {values.category === 'consumer' && values.has_offer ? (
+        <div className="space-y-4 rounded-lg border border-[var(--color-line)] p-3">
+          <Field
+            label="How long the offer's rate lasts"
+            problem={problemFor('offer_ends')}
+            hint="A line of credit's rate does not end: it is the interest rate above."
+          >
+            {(a) => (
+              <select {...a} name="offer_ends" value={values.offer_ends} onChange={(e) => set('offer_ends', e.target.value)}>
+                <option value="months">A number of months from the transfer</option>
+                <option value="until">Until a date</option>
+                <option value="never">It does not end (a line of credit)</option>
+              </select>
+            )}
+          </Field>
+          {values.offer_ends !== 'never' ? (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Field label="Rate on what is moved (%)" problem={problemFor('offer_rate')}>
+                {(a) => (
+                  <input {...a} name="offer_rate" inputMode="decimal" value={values.offer_rate} onChange={(e) => set('offer_rate', e.target.value)} placeholder="0" />
+                )}
+              </Field>
+              {values.offer_ends === 'months' ? (
+                <Field label="Months" problem={problemFor('offer_months')}>
+                  {(a) => (
+                    <input {...a} name="offer_months" inputMode="numeric" value={values.offer_months} onChange={(e) => set('offer_months', e.target.value)} placeholder="18" />
+                  )}
+                </Field>
+              ) : (
+                <Field label="Until" problem={problemFor('offer_until')}>
+                  {(a) => (
+                    <input {...a} name="offer_until" type="date" value={values.offer_until} onChange={(e) => set('offer_until', e.target.value)} />
+                  )}
+                </Field>
+              )}
+            </div>
+          ) : null}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Transfer fee (%)" problem={problemFor('offer_fee')} hint="0 if there is none.">
+              {(a) => (
+                <input {...a} name="offer_fee" inputMode="decimal" value={values.offer_fee} onChange={(e) => set('offer_fee', e.target.value)} placeholder="3" />
+              )}
+            </Field>
+            <Field label="Least the fee can be (optional)" problem={problemFor('offer_fee_min')} hint={'"3% or $5, whichever is more."'}>
+              {(a) => (
+                <input {...a} name="offer_fee_min" inputMode="decimal" value={values.offer_fee_min} onChange={(e) => set('offer_fee_min', e.target.value)} placeholder="5" />
+              )}
+            </Field>
+          </div>
+          <Field label="Last day to transfer (optional)" problem={problemFor('offer_by')}>
+            {(a) => (
+              <input {...a} name="offer_by" type="date" value={values.offer_by} onChange={(e) => set('offer_by', e.target.value)} />
+            )}
+          </Field>
+          {values.offer_ends !== 'never' ? (
+            <Field
+              label="If it is not paid off by the end, is the interest charged back?"
+              problem={problemFor('offer_charged_back')}
+              hint="Most balance transfers only charge interest on what is left."
+            >
+              {(a) => (
+                <select {...a} name="offer_charged_back" value={values.offer_charged_back} onChange={(e) => set('offer_charged_back', e.target.value)}>
+                  <option value="no">No, only on what is left</option>
+                  <option value="yes">Yes, back to the day of the transfer</option>
+                </select>
+              )}
+            </Field>
+          ) : null}
+          <p className="rounded-lg bg-[var(--color-surface)] p-3 text-xs text-[var(--color-ink-soft)]">
+            Ballast only works out whether a transfer is worth it when you ask, from this debt on Debts.
+            Nothing moves: you make the transfer at the bank and update both debts here.
+          </p>
+        </div>
+      ) : null}
+
       <button
         type="submit"
         disabled={pending}

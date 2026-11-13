@@ -42,7 +42,7 @@ principles, and they are non-negotiable.
 
 | Path | What lives there |
 | --- | --- |
-| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `ledger.ts` is the middle layer: `ledgerOf` puts the household's events in order once (counts, transfers, moves, spends, rounds, snoozes, instructions, debt payments and history) and every reader of those reads it, through `Engine.ledger()`. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `school-year.ts` is where each school year runs (D59): its first and last day of school, which days are school (`isSchoolDay` in trip-when reads it) and which the calendar shades (`outOfSchool`), and the first and last days a feed names. `trip-shape.ts` is the family's trip shape (D55): park days, the easy stretch, the split-drive rules and the "Plan this" layout. `explore.ts` ranks the best times to go in that shape, with no trip, and shades the year strip. `night-cost.ts` is what a night costs (D55 (5)): the trust ladder, a window's price, and the resortings.com parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
+| `src/domain/` | The engine's math. Pure, tested hardest, no imports from `server` or `db`. `position.ts` is the one position (D35, D40): money today, the run-forward, the level weekly amount and the one-time move, the status words, each part's tick and parts counted automatically, the surplus move between accounts, the derived to-dos, the plan chart. `ledger.ts` is the middle layer: `ledgerOf` puts the household's events in order once (counts, transfers, moves, spends, rounds, snoozes, instructions, debt payments and history) and every reader of those reads it, through `Engine.ledger()`. `rounds.ts` works out a part's open rounds (D53): which are past and still open, what each still needs after its spends, the round saving now, and the name suffix. `rollup.ts` only lists plans with their totals; `plan-order.ts` orders the plans list (D41). `trip.ts` is the first planner module: it prices a trip and emits a package through the intake contract. `trip-plan.ts` plans it: the day cut, the booking timeline and its merge, the week comparison, the day plan, reservation money, and the parsers for the crowd calendars and the geocoder. `trip-when.ts` proposes dates: federal holidays, long weekends, the candidate windows and their score, the iCal reader, the DVC listing parser. `school-year.ts` is where each school year runs (D59): its first and last day of school, which days are school (`isSchoolDay` in trip-when reads it) and which the calendar shades (`outOfSchool`), and the first and last days a feed names. `trip-shape.ts` is the family's trip shape (D55): park days, the easy stretch, the split-drive rules and the "Plan this" layout. `explore.ts` ranks the best times to go in that shape, with no trip, and shades the year strip. `night-cost.ts` is what a night costs (D55 (5)): the trust ladder, a window's price, and the resortings.com parser. `park-data.ts` is Ballast's own park data: the weather blend by horizon, the normals, `busynessFor`, the wait-history ranking, the calendar month, and the parsers for Open-Meteo, ThemeParks.wiki, the crowd outlook and Queue-Times. `park-day-plan.ts` proposes which park on which day: the fit score with its plain constants, the day-by-day choice under each-park-once, the diff "Use this plan" would write. `reader-shapes.ts` holds the zod shapes the reader may answer with. `debt-transfer.ts` is "Is a transfer worth it?" (D61): `transferCheck` and the offer's words. `recurring.ts` reads the Simplifi paste and links its rows; `income.ts` works a paystub down to take-home (D52) |
 | `src/db/` | Drizzle schema and the connection. Facts only |
 | `src/server/` | The service layer, session bridge, server actions, scheduled jobs. `market-rate.ts`, `trip-fetch.ts` and `park-fetch.ts` are the only outbound data calls (FRED CSVs, the OSRM router, Nominatim for the home address, two public crowd calendars, a district's iCal feed, a DVC broker's public page, Open-Meteo, ThemeParks.wiki, the RopeDrop outlook, Queue-Times; public, key-free, each switchable off by env, every request with the app's own User-Agent and **never an `origin` or `referer` header**, and never an endpoint a site's own front end uses privately). `self-update.ts` is the one call to the household's own Watchtower on the LAN ("Update now"), off unless `WATCHTOWER_URL` is set; `db-backup.ts` runs `pg_dump` for the bootstrap. `reader.ts` is the one place a language model is called, and it is off unless the environment says otherwise |
 | `src/app/` | Screens. They render; they do not calculate |
@@ -440,6 +440,29 @@ principles, and they are non-negotiable.
   ("chase.com ↗") beside the name and the debt's page "Open chase.com ↗",
   each in a new tab with `rel="noopener noreferrer"`; Ballast never fetches
   it.
+- **A debt can carry a standing transfer offer, worked out only when asked**
+  (PRD D61, design `docs/superpowers/specs/2026-11-12-transfer-offers-design.md`).
+  `debts.transfer_offer` (migration 0030, `TransferOffer` in `debt.ts`) is a
+  fact typed on the debt's form and recorded with the terms on `debt_added` /
+  `debt_updated` ("transfer offer" in the history): a rate for `months` or
+  until `untilDate`, or neither for a line of credit, whose rate is then its
+  own APR (no `rateBasisPoints`); `feeBasisPoints`, `feeMinCents`,
+  `transferBy`, `chargedBack`. Only `consumer` debts carry one
+  (`validateTransferOffer`, run by the form and the engine). `transferCheck`
+  in `src/domain/debt-transfer.ts` is the whole calculation, read by
+  `/debts/transfer` (`?debt=<id>`, or Try a card's boxes with `card=1`,
+  `parseTryCard`; `amount` and `limit` are tried, never stored). Its rules:
+  sources are `consumer`, not on a live deal, dearer than the offer, filled
+  highest rate first; a target whose offer ends must hold nothing (a 0% card
+  holds only 0% money); the fee rounds up; both sides run on each debt's own
+  payment, and what the moved debts stop paying goes to the target as a fixed
+  extra; the amount recommended is the one that saves the most after the fee
+  in steps of at least $100, never one that leaves a debt never paid off while
+  another clears everything, and every amount is compared over ten years when
+  none does. Nothing is suggested on its own: no to-do, no status, nothing on
+  This week. Debts lists every debt with an offer under "Transfer offers"
+  (an empty 0% card is under Paid off), with "Try a card" at the top. Ballast
+  records no transfer: a person makes it at the bank and updates both debts.
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
   picture. An `individual` account can only be renamed, funded, or
@@ -813,7 +836,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 1026 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 1054 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

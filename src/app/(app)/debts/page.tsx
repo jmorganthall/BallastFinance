@@ -20,6 +20,8 @@ import {
   debtStatusLabel,
   debtStatusLine,
   isPaidOff,
+  offerWords,
+  formatCents,
   parseAmountToCents,
   shareOfLargest,
 } from '@/domain'
@@ -56,6 +58,10 @@ export default async function DebtsPage({
   )
   // The debts the payoff order leaves out, so one can be brought back.
   const paidOff = debts.filter(isPaidOff).sort((a, b) => a.name.localeCompare(b.name))
+  // The debts with a standing transfer offer (D61), asked about only from here.
+  const offers = debts
+    .filter((d) => d.transferOffer && d.state === 'open')
+    .sort((a, b) => a.name.localeCompare(b.name))
   // Every debt's status, words and staleness come from the one place (D49 (4)-(5)).
   const viewOf = new Map(debtState.debts.map((view) => [view.debt.id, view]))
 
@@ -135,6 +141,10 @@ export default async function DebtsPage({
       <p className="-mt-4 mb-4 text-sm">
         <Link href="/debts/equity" className="text-[var(--color-accent)] underline underline-offset-4">
           What could we buy with our equity?
+        </Link>
+        {' · '}
+        <Link href="/debts/transfer" className="text-[var(--color-accent)] underline underline-offset-4">
+          Is a transfer worth it? Try a card
         </Link>
       </p>
 
@@ -293,6 +303,28 @@ export default async function DebtsPage({
           </Card>
         </div>
       )}
+
+      {/* Debts with a standing offer (D61), whatever their balance: an empty 0% card is "paid off" above. */}
+      {offers.length > 0 ? (
+        <Card className="mt-8">
+          <h2 className="font-semibold">Transfer offers</h2>
+          <ul className="mt-2 divide-y divide-[var(--color-line)]">
+            {offers.map((debt) => (
+              <li key={debt.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 text-sm last:pb-0">
+                <span>
+                  <Link href={`/debts/${debt.id}`} className="font-medium underline-offset-4 hover:underline">
+                    {debt.name}
+                  </Link>{' '}
+                  <span className="text-[var(--color-ink-soft)]">· {offerWords(debt.transferOffer!, debt.aprBasisPoints, formatCents, humanDate)}</span>
+                </span>
+                <Link href={`/debts/transfer?debt=${debt.id}`} className="text-[var(--color-accent)] underline underline-offset-4">
+                  Is a transfer worth it?
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       {paidOff.length > 0 ? (
         <Card className="mt-8">

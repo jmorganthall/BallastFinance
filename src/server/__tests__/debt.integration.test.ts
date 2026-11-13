@@ -139,6 +139,35 @@ describeDb('debts, the ladder and the optimizer', () => {
     await engine.removeDebt(created.id)
   })
 
+  it('keeps a standing transfer offer, records it with the terms, and refuses one that cannot be (D61)', async () => {
+    const offer = { rateBasisPoints: 0, months: 18, feeBasisPoints: 300, chargedBack: false }
+    const created = await engine.createDebt({
+      name: 'Citi Diamond',
+      category: 'consumer',
+      balanceCents: 0,
+      aprBasisPoints: 2499,
+      minPaymentRule: { type: 'fixed', amountCents: 2500 },
+      creditLimitCents: 1000000,
+      transferOffer: offer,
+    })
+    const row = async () => (await db.select().from(schema.debts).where(eq(schema.debts.id, created.id)))[0]!
+    expect((await row()).transferOffer).toEqual(offer)
+    expect(created.transferOffer).toEqual(offer)
+    await engine.updateDebt(created.id, { transferOffer: { ...offer, months: 21 } })
+    expect((await row()).transferOffer).toEqual({ ...offer, months: 21 })
+    await expect(engine.updateDebt(created.id, { transferOffer: { ...offer, rateBasisPoints: 2999 } })).rejects.toThrow(/not lower/)
+    await expect(engine.updateDebt(created.id, { category: 'auto' })).rejects.toThrow(/credit card or a line of credit/)
+    const history = await engine.debtHistory(created.id)
+    expect(history.filter((e) => e.kind === 'terms').map((e) => (e as { changed: string[] }).changed)).toEqual([['transfer offer']])
+    const added = (await db.select().from(schema.events).where(eq(schema.events.kind, 'debt_added'))).find(
+      (e) => (e.payload as { debt_id: string }).debt_id === created.id,
+    )!
+    expect((added.payload as { terms: { transfer_offer: unknown } }).terms.transfer_offer).toEqual(offer)
+    await engine.updateDebt(created.id, { transferOffer: null })
+    expect((await row()).transferOffer).toBeNull()
+    await engine.removeDebt(created.id)
+  })
+
   it('answers where a lump sum should go', async () => {
     const result = await engine.optimiseLumpSum(107500)
     expect(result.allocations[0]!.debtName).toBe('Store card')
