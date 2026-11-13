@@ -6,6 +6,7 @@ import {
   debtLinkSite,
   parseDebtForm,
   parseDebtLink,
+  parseTryCard,
   type DebtFormValues,
 } from '../debt-form'
 import { debtTermsChanged } from '../debt'
@@ -45,6 +46,7 @@ describe('the add-a-debt form, parsed', () => {
       plannedPaymentCents: null,
       paymentDay: null,
       linkUrl: null,
+      transferOffer: null,
     })
   })
 
@@ -133,6 +135,7 @@ describe('the add-a-debt form, parsed', () => {
       plannedPaymentCents: null,
       paymentDay: null,
       linkUrl: 'https://www.usbank.com/',
+      transferOffer: null,
     }
     const values = debtFormValuesOf(stored)
     expect(values).toMatchObject({
@@ -259,5 +262,86 @@ describe('a link to the lender (D60)', () => {
     const again = parseDebtForm(values)
     expect(again.ok && again.input.linkUrl).toBe('https://www.chase.com/')
     expect(debtTermsChanged({ link_url: null }, { link_url: 'https://www.chase.com/' })).toEqual(['link'])
+  })
+})
+
+describe('a transfer offer on the form (D61)', () => {
+  const offer = (over: Partial<DebtFormValues> = {}) =>
+    filled({ has_offer: true, offer_ends: 'months', offer_rate: '0', offer_months: '18', offer_fee: '3', ...over })
+  const fieldsOf = (values: DebtFormValues) => problemsOf(values).map((p) => p.field)
+
+  it('reads a card offer, and gives it back to the boxes', () => {
+    const result = parseDebtForm(offer({ offer_fee_min: '5', offer_by: '2026-12-31' }))
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.input.transferOffer).toEqual({
+      rateBasisPoints: 0,
+      months: 18,
+      feeBasisPoints: 300,
+      feeMinCents: 500,
+      transferBy: '2026-12-31',
+      chargedBack: false,
+    })
+    const back = debtFormValuesOf({ ...result.input })
+    expect(parseDebtForm(back)).toEqual(result)
+  })
+
+  it('reads a line of credit as its own rate, with no rate of its own', () => {
+    const result = parseDebtForm(offer({ apr: '8.99', offer_ends: 'never', offer_rate: '', offer_fee: '0' }))
+    expect(result.ok && result.input.transferOffer).toEqual({ feeBasisPoints: 0 })
+  })
+
+  it('puts each problem next to its box', () => {
+    expect(fieldsOf(offer({ offer_months: '0' }))).toEqual(['offer_months'])
+    expect(fieldsOf(offer({ offer_ends: 'until', offer_until: '' }))).toEqual(['offer_until'])
+    expect(fieldsOf(offer({ offer_rate: '21' }))).toEqual(['offer_rate'])
+    expect(fieldsOf(offer({ offer_fee: '' }))).toEqual(['offer_fee'])
+    expect(fieldsOf(offer({ offer_fee_min: 'lots' }))).toEqual(['offer_fee_min'])
+    expect(fieldsOf(offer({ category: 'auto' }))).toEqual(['has_offer'])
+  })
+
+  it('carries the boxes through a submitted form', () => {
+    const values = offer({ offer_charged_back: 'yes' })
+    expect(debtFormValuesFrom((name) => (typeof values[name as keyof DebtFormValues] === 'boolean' ? (values[name as keyof DebtFormValues] ? 'on' : null) : values[name as keyof DebtFormValues]))).toEqual(values)
+  })
+
+  it('says when the offer changed in the history', () => {
+    expect(debtTermsChanged({ transfer_offer: null }, { transfer_offer: { feeBasisPoints: 300 } })).toEqual(['transfer offer'])
+  })
+})
+
+describe('try a card (D61)', () => {
+  const query = (over: Record<string, string> = {}) => {
+    const q: Record<string, string> = {
+      apr: '24.99',
+      credit_limit: '10000',
+      min_type: 'fixed',
+      min_amount: '25',
+      offer_ends: 'months',
+      offer_rate: '0',
+      offer_months: '12',
+      offer_fee: '3',
+      ...over,
+    }
+    return (name: string) => q[name] ?? null
+  }
+
+  it('makes an empty card with the offer, named when no name is typed', () => {
+    const tried = parseTryCard(query(), '2026-11-13')
+    expect(tried.ok).toBe(true)
+    if (!tried.ok) return
+    expect(tried.card).toMatchObject({
+      name: 'The new card',
+      balanceCents: 0,
+      creditLimitCents: 1000000,
+      transferOffer: { rateBasisPoints: 0, months: 12, feeBasisPoints: 300 },
+    })
+  })
+
+  it('asks for a minimum payment and a credit limit', () => {
+    const noMinimum = parseTryCard(query({ min_amount: '' }), '2026-11-13')
+    expect(!noMinimum.ok && noMinimum.problems.map((p) => p.field)).toEqual(['min_amount'])
+    const noLimit = parseTryCard(query({ credit_limit: '' }), '2026-11-13')
+    expect(!noLimit.ok && noLimit.problems.map((p) => p.field)).toEqual(['credit_limit'])
   })
 })

@@ -453,6 +453,14 @@ export const debts = pgTable(
     simplifiNames: text('simplifi_names').array().notNull().default(sql`'{}'::text[]`),
     /** The lender's page for this debt, opened from Ballast (PRD D60). Only a web address is stored. */
     linkUrl: text('link_url'),
+    /**
+     * A standing offer to move money onto this debt (PRD D61): the rate for
+     * months or until a date (none for a line of credit's own rate), the fee
+     * share and its minimum, the last day to transfer, whether interest is
+     * charged back. A fact a person typed; what it would save is worked out
+     * on demand and never stored.
+     */
+    transferOffer: jsonb('transfer_offer'),
   },
   (t) => [
     index('debts_household_idx').on(t.householdId, t.state),

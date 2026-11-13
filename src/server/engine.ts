@@ -161,6 +161,8 @@ import {
   type MinPaymentRule,
   type OptimizerResult,
   type PromoRule,
+  type TransferOffer,
+  validateTransferOffer,
   type SheetImport,
   type SheetProblem,
   DEFAULT_HOME_BUYING,
@@ -2772,8 +2774,11 @@ export class Engine {
     paymentDay?: number | null
     /** The lender's page for this debt (D60). */
     linkUrl?: string | null
+    /** A standing offer to move money onto it (D61). */
+    transferOffer?: TransferOffer | null
   }): Promise<Debt> {
     const linkUrl = debtLinkOrRefuse(input.linkUrl)
+    if (input.transferOffer) validateTransferOffer(input.transferOffer, input.aprBasisPoints, input.category)
     validateDebtInputs({
       balanceCents: input.balanceCents,
       aprBasisPoints: input.aprBasisPoints,
@@ -2802,6 +2807,7 @@ export class Engine {
           plannedPaymentCents: input.plannedPaymentCents ?? null,
           paymentDay: input.paymentDay ?? null,
           linkUrl,
+          transferOffer: input.transferOffer ?? null,
           enteredOn: this.today(),
           state: 'open',
         })
@@ -2821,6 +2827,7 @@ export class Engine {
           payment_day: created.paymentDay ?? null,
           planned_payment_cents: created.plannedPaymentCents ?? null,
           link_url: created.linkUrl ?? null,
+          transfer_offer: created.transferOffer ?? null,
         },
       })
       return created
@@ -2849,6 +2856,7 @@ export class Engine {
         | 'plannedPaymentCents'
         | 'paymentDay'
         | 'linkUrl'
+        | 'transferOffer'
       >
     >,
   ): Promise<void> {
@@ -2870,8 +2878,10 @@ export class Engine {
           patch.plannedPaymentCents === undefined ? before.plannedPaymentCents : patch.plannedPaymentCents,
         paymentDay: patch.paymentDay === undefined ? before.paymentDay : patch.paymentDay,
         linkUrl: patch.linkUrl === undefined ? (before.linkUrl ?? null) : debtLinkOrRefuse(patch.linkUrl),
+        transferOffer: patch.transferOffer === undefined ? (before.transferOffer ?? null) : patch.transferOffer,
       }
       if (!after.name) throw new EngineError('A debt needs a name')
+      if (after.transferOffer) validateTransferOffer(after.transferOffer, after.aprBasisPoints, after.category)
 
       validateDebtInputs({
         balanceCents: after.balanceCents,
@@ -2894,6 +2904,7 @@ export class Engine {
           plannedPaymentCents: after.plannedPaymentCents ?? null,
           paymentDay: after.paymentDay ?? null,
           linkUrl: after.linkUrl ?? null,
+          transferOffer: after.transferOffer ?? null,
         })
         .where(eq(debtsTable.id, debtId))
 
@@ -2915,6 +2926,7 @@ export class Engine {
             payment_day: before.paymentDay ?? null,
             planned_payment_cents: before.plannedPaymentCents ?? null,
             link_url: before.linkUrl ?? null,
+            transfer_offer: before.transferOffer ?? null,
           },
           after: {
             name: after.name,
@@ -2926,6 +2938,7 @@ export class Engine {
             payment_day: after.paymentDay ?? null,
             planned_payment_cents: after.plannedPaymentCents ?? null,
             link_url: after.linkUrl ?? null,
+            transfer_offer: after.transferOffer ?? null,
           },
         },
       })
@@ -6296,6 +6309,7 @@ function toDebt(r: typeof debtsTable.$inferSelect): Debt {
     paymentDay: r.paymentDay,
     enteredOn: r.enteredOn as CivilDate,
     linkUrl: r.linkUrl,
+    transferOffer: (r.transferOffer as TransferOffer | null) ?? null,
     fixedPayment: r.fixedPayment,
     state: r.state,
     assetId: r.assetId,

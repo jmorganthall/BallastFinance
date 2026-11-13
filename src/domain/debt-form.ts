@@ -12,7 +12,16 @@
 
 import { assertCivilDate, type CivilDate } from './dates'
 import { parseAmountOrNull, parsePercentOrNull, type Cents } from './money'
-import type { DebtCategory, MinPaymentRule, PromoRule } from './debt'
+import {
+  DebtDataError,
+  MAX_OFFER_MONTHS,
+  validateTransferOffer,
+  type Debt,
+  type DebtCategory,
+  type MinPaymentRule,
+  type PromoRule,
+  type TransferOffer,
+} from './debt'
 
 /** Exactly what the form's boxes hold, as typed. */
 export interface DebtFormValues {
@@ -38,6 +47,21 @@ export interface DebtFormValues {
   promo_started: string
   /** Where to go to see or pay it: the lender's site, blank for none (D60). */
   link: string
+  /** A standing offer to move money onto it (D61). */
+  has_offer: boolean
+  /** 'months' from the transfer, 'until' a date, or 'never' (a line of credit's own rate). */
+  offer_ends: string
+  offer_rate: string
+  offer_months: string
+  offer_until: string
+  /** The fee, a percentage of what is moved. */
+  offer_fee: string
+  /** The least the fee can be, blank for none. */
+  offer_fee_min: string
+  /** The last day to transfer, blank for none said. */
+  offer_by: string
+  /** 'no' or 'yes': is interest charged back if it is not cleared in time. */
+  offer_charged_back: string
 }
 
 export type DebtFormField = keyof DebtFormValues
@@ -59,6 +83,8 @@ export interface DebtInput {
   paymentDay: number | null
   /** The lender's page for this debt, an http(s) address, or null (D60). */
   linkUrl: string | null
+  /** A standing offer to move money onto it, or null (D61). */
+  transferOffer: TransferOffer | null
 }
 
 export const EMPTY_DEBT_FORM: DebtFormValues = {
@@ -79,6 +105,15 @@ export const EMPTY_DEBT_FORM: DebtFormValues = {
   promo_charged_back: 'yes',
   promo_started: '',
   link: '',
+  has_offer: false,
+  offer_ends: 'months',
+  offer_rate: '',
+  offer_months: '',
+  offer_until: '',
+  offer_fee: '',
+  offer_fee_min: '',
+  offer_by: '',
+  offer_charged_back: 'no',
 }
 
 const CATEGORIES: readonly DebtCategory[] = ['consumer', 'auto', 'mortgage']
@@ -210,6 +245,8 @@ export function parseDebtForm(values: DebtFormValues): DebtFormResult {
     }
   }
 
+  const transferOffer = values.has_offer ? parseOffer(values, aprBasisPoints, category, problem) : null
+
   if (problems.length > 0) return { ok: false, problems }
 
   return {
@@ -226,6 +263,136 @@ export function parseDebtForm(values: DebtFormValues): DebtFormResult {
       plannedPaymentCents: plannedPaymentCents ? plannedPaymentCents : null,
       paymentDay,
       linkUrl: link.ok ? link.url : null,
+      transferOffer,
+    },
+  }
+}
+
+/** The offer's boxes (D61), each problem next to its box; null when any is wrong. */
+function parseOffer(
+  values: DebtFormValues,
+  aprBasisPoints: number | null,
+  category: DebtCategory | null,
+  problem: (field: DebtFormField, message: string) => void,
+): TransferOffer | null {
+  let ok = true
+  const fail = (field: DebtFormField, message: string) => {
+    ok = false
+    problem(field, message)
+  }
+  if (category !== null && category !== 'consumer') {
+    fail('has_offer', 'Only a credit card or a line of credit can carry a transfer offer.')
+  }
+  const offer: TransferOffer = { feeBasisPoints: 0 }
+  const ends = values.offer_ends
+  if (ends === 'months' || ends === 'until') {
+    const rate = parsePercentOrNull(values.offer_rate.trim() === '' ? '0' : values.offer_rate)
+    if (rate === null || rate < 0) fail('offer_rate', 'Enter the rate on what is moved, like 0 or 3.99.')
+    else if (aprBasisPoints !== null && rate >= aprBasisPoints) {
+      fail('offer_rate', 'The offer has to be lower than the interest rate above, the rate it goes back to.')
+    } else offer.rateBasisPoints = rate
+    if (ends === 'months') {
+      const raw = values.offer_months.trim()
+      const months = /^\d{1,3}$/.test(raw) ? Number(raw) : NaN
+      if (!(months >= 1 && months <= MAX_OFFER_MONTHS)) fail('offer_months', `Enter how many months it lasts, 1 to ${MAX_OFFER_MONTHS}.`)
+      else offer.months = months
+    } else {
+      const until = civilOrNull(values.offer_until)
+      if (!until) fail('offer_until', 'Enter the date the offer\'s rate ends.')
+      else offer.untilDate = until
+    }
+    offer.chargedBack = values.offer_charged_back === 'yes'
+  } else if (ends !== 'never') {
+    fail('offer_ends', 'Pick how long the offer lasts.')
+  }
+
+  const fee = parsePercentOrNull(values.offer_fee)
+  if (fee === null || fee < 0 || fee > 2000) fail('offer_fee', 'Enter the fee as a percentage, like 3, or 0 for none.')
+  else offer.feeBasisPoints = fee
+  const minRaw = values.offer_fee_min.trim()
+  if (minRaw !== '') {
+    const min = parseAmountOrNull(minRaw)
+    if (min === null || min < 0) fail('offer_fee_min', 'That did not look like an amount. Leave it blank if there is none.')
+    else if (min > 0) offer.feeMinCents = min
+  }
+  if (values.offer_by.trim() !== '') {
+    const by = civilOrNull(values.offer_by)
+    if (!by) fail('offer_by', 'That is not a real date.')
+    else offer.transferBy = by
+  }
+  if (!ok || aprBasisPoints === null || category === null) return null
+  try {
+    validateTransferOffer(offer, aprBasisPoints, category)
+  } catch (error) {
+    if (error instanceof DebtDataError) {
+      problem('has_offer', error.message)
+      return null
+    }
+    throw error
+  }
+  return offer
+}
+
+function civilOrNull(raw: string): CivilDate | null {
+  const typed = raw.trim()
+  if (!typed) return null
+  try {
+    assertCivilDate(typed)
+    return typed
+  } catch {
+    return null
+  }
+}
+
+/** The name an imagined card goes by when none is typed. */
+export const TRY_A_CARD_NAME = 'The new card'
+
+/**
+ * "Try a card" (D61): a card or line of credit that is not in Ballast, typed
+ * to see what moving money onto it would do. The same boxes and checks as the
+ * debt form, with no balance and an offer it must have; a credit limit is
+ * needed, since the room is what decides how much can move. Nothing is
+ * stored: the result is a debt for `transferCheck` alone.
+ */
+export function parseTryCard(
+  get: (name: string) => unknown,
+  today: CivilDate,
+): { ok: true; card: Debt; values: DebtFormValues } | { ok: false; problems: DebtFormProblem[]; values: DebtFormValues } {
+  const typed = debtFormValuesFrom(get)
+  const values: DebtFormValues = {
+    ...typed,
+    name: typed.name.trim() || TRY_A_CARD_NAME,
+    category: 'consumer',
+    balance: '0',
+    has_promo: false,
+    has_offer: true,
+    link: '',
+  }
+  const parsed = parseDebtForm(values)
+  const problems = parsed.ok ? [] : [...parsed.problems]
+  if (parsed.ok && parsed.input.creditLimitCents === null) {
+    problems.push({ field: 'credit_limit', message: 'Enter the credit limit: it decides how much can move.' })
+  }
+  if (!parsed.ok || problems.length > 0) return { ok: false, problems, values }
+  const input = parsed.input
+  return {
+    ok: true,
+    values,
+    card: {
+      id: 'try-a-card',
+      householdId: '',
+      name: input.name,
+      category: 'consumer',
+      balanceCents: 0,
+      balanceAsOf: today,
+      aprBasisPoints: input.aprBasisPoints,
+      promoRules: [],
+      minPaymentRule: input.minPaymentRule,
+      creditLimitCents: input.creditLimitCents,
+      plannedPaymentCents: input.plannedPaymentCents,
+      transferOffer: input.transferOffer,
+      fixedPayment: false,
+      state: 'open',
     },
   }
 }
@@ -273,6 +440,7 @@ export function debtFormValuesOf(debt: {
   plannedPaymentCents?: Cents | null
   paymentDay?: number | null
   linkUrl?: string | null
+  transferOffer?: TransferOffer | null
 }): DebtFormValues {
   const dollars = (cents: Cents) => (cents / 100).toFixed(2)
   const percent = (basisPoints: number) => (basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
@@ -296,6 +464,30 @@ export function debtFormValuesOf(debt: {
     promo_charged_back: promo?.chargedBack === true ? 'yes' : promo?.chargedBack === false ? 'no' : promo ? '' : 'yes',
     promo_started: promo?.startDate ?? '',
     link: debt.linkUrl ?? '',
+    ...offerValuesOf(debt.transferOffer ?? null),
+  }
+}
+
+function offerValuesOf(offer: TransferOffer | null): Pick<
+  DebtFormValues,
+  'has_offer' | 'offer_ends' | 'offer_rate' | 'offer_months' | 'offer_until' | 'offer_fee' | 'offer_fee_min' | 'offer_by' | 'offer_charged_back'
+> {
+  const percent = (basisPoints: number) => (basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')
+  if (!offer) {
+    const { has_offer, offer_ends, offer_rate, offer_months, offer_until, offer_fee, offer_fee_min, offer_by, offer_charged_back } =
+      EMPTY_DEBT_FORM
+    return { has_offer, offer_ends, offer_rate, offer_months, offer_until, offer_fee, offer_fee_min, offer_by, offer_charged_back }
+  }
+  return {
+    has_offer: true,
+    offer_ends: offer.months !== undefined ? 'months' : offer.untilDate !== undefined ? 'until' : 'never',
+    offer_rate: offer.rateBasisPoints !== undefined ? percent(offer.rateBasisPoints) : '',
+    offer_months: offer.months !== undefined ? String(offer.months) : '',
+    offer_until: offer.untilDate ?? '',
+    offer_fee: percent(offer.feeBasisPoints),
+    offer_fee_min: offer.feeMinCents ? (offer.feeMinCents / 100).toFixed(2) : '',
+    offer_by: offer.transferBy ?? '',
+    offer_charged_back: offer.chargedBack ? 'yes' : 'no',
   }
 }
 
@@ -324,5 +516,14 @@ export function debtFormValuesFrom(get: (name: string) => unknown): DebtFormValu
     promo_charged_back: text('promo_charged_back'),
     promo_started: text('promo_started'),
     link: text('link'),
+    has_offer: flag('has_offer'),
+    offer_ends: text('offer_ends') || 'months',
+    offer_rate: text('offer_rate'),
+    offer_months: text('offer_months'),
+    offer_until: text('offer_until'),
+    offer_fee: text('offer_fee'),
+    offer_fee_min: text('offer_fee_min'),
+    offer_by: text('offer_by'),
+    offer_charged_back: text('offer_charged_back') || 'no',
   }
 }
