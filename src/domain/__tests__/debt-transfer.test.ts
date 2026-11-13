@@ -6,7 +6,7 @@ import {
   type Debt,
   type TransferOffer,
 } from '../debt'
-import { monthsInWords, transferCheck, transferFeeCents } from '../debt-transfer'
+import { monthsInWords, offerWords, transferCheck, transferFeeCents } from '../debt-transfer'
 
 const TODAY = '2026-09-19'
 
@@ -280,5 +280,19 @@ describe('months in words', () => {
     expect(monthsInWords(5)).toBe('5 months')
     expect(monthsInWords(12)).toBe('1 year')
     expect(monthsInWords(27)).toBe('2 years 3 months')
+  })
+})
+
+describe('an offer in words', () => {
+  const cents = (c: number) => `$${(c / 100).toFixed(2)}`
+  const date = (d: string) => d
+  it('says a card deal and a line of credit plainly', () => {
+    expect(offerWords({ rateBasisPoints: 0, months: 18, feeBasisPoints: 300, feeMinCents: 500 }, 2624, cents, date)).toBe(
+      '0% for 18 months, 3% fee (at least $5.00)',
+    )
+    expect(offerWords({ rateBasisPoints: 399, untilDate: '2028-03-01', feeBasisPoints: 0 }, 2499, cents, date)).toBe(
+      '3.99% until 2028-03-01, no fee',
+    )
+    expect(offerWords({ feeBasisPoints: 200 }, 899, cents, date)).toBe('8.99% with no end, 2% fee')
   })
 })

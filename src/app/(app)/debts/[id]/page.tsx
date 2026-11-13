@@ -30,6 +30,7 @@ import {
   currentDeal,
   dealEndMark,
   isPaidOff,
+  offerWords,
   type DebtHistoryEntry,
 } from '@/domain'
 
@@ -117,6 +118,14 @@ export default async function DebtPage({
         title={debt.name}
         subtitle={`${KIND[debt.category] ?? debt.category}${rung ? ` · number ${rung.rank} in the payoff order` : ''}`}
       />
+      {debt.transferOffer && debt.state === 'open' ? (
+        <p className="-mt-2 mb-4 text-sm">
+          Transfer offer: {offerWords(debt.transferOffer, debt.aprBasisPoints, formatCents, humanDate)} ·{' '}
+          <Link href={`/debts/transfer?debt=${debt.id}`} className="text-[var(--color-accent)] underline underline-offset-4">
+            Is a transfer worth it?
+          </Link>
+        </p>
+      ) : null}
       {debt.linkUrl ? (
         <p className="-mt-2 mb-4 text-sm">
           <a href={debt.linkUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] underline underline-offset-4">

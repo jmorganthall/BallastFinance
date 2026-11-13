@@ -95,6 +95,8 @@ export interface TransferResult {
   moves: TransferMove[]
   interestWithoutCents: Cents
   interestWithCents: Cents
+  /** Interest without less interest with, before the fee. */
+  interestSavedCents: Cents
   /** Interest saved less the fee: interest without − (interest with + fee). */
   netSavingsCents: Cents
   /** Null: interest to payoff. A number: interest over that many months. */
@@ -359,6 +361,7 @@ function evaluate(context: Context, amountCents: Cents, horizon: number | null):
     moves,
     interestWithoutCents,
     interestWithCents,
+    interestSavedCents: interestWithoutCents - interestWithCents,
     netSavingsCents: interestWithoutCents - (interestWithCents + feeCents),
     horizonMonths: horizon,
     monthsWithout,
@@ -392,6 +395,37 @@ function dealAtEnd(context: Context, result: TransferResult): NonNullable<Transf
     leftAtEndCents,
     clearsAtPerMonthCents: payments > 0 ? Math.ceil(targetAfter.balanceCents / payments / dollar) * dollar : null,
   }
+}
+
+/** A rate in words: "0%", "3.99%". */
+export function rateWords(basisPoints: number): string {
+  return `${(basisPoints / 100).toFixed(2).replace(/\.?0+$/, '')}%`
+}
+
+/**
+ * An offer in words, as Debts and a debt's page say it: "0% for 18 months,
+ * 3% fee (at least $5.00)", "0% until Mar 1, 2028, no fee", or a line of
+ * credit's "8.99% with no end, 2% fee". `formatDate` and `formatCents` are
+ * the screen's formatters, passed in so the words and the page agree.
+ */
+export function offerWords(
+  offer: TransferOffer,
+  aprBasisPoints: number,
+  formatCents: (cents: Cents) => string,
+  formatDate: (date: CivilDate) => string,
+): string {
+  const rate = rateWords(offer.rateBasisPoints ?? aprBasisPoints)
+  const lasts =
+    offer.months !== undefined
+      ? `${rate} for ${offer.months} month${offer.months === 1 ? '' : 's'}`
+      : offer.untilDate !== undefined
+        ? `${rate} until ${formatDate(offer.untilDate)}`
+        : `${rate} with no end`
+  const fee =
+    offer.feeBasisPoints === 0 && !offer.feeMinCents
+      ? 'no fee'
+      : `${rateWords(offer.feeBasisPoints)} fee${offer.feeMinCents ? ` (at least ${formatCents(offer.feeMinCents)})` : ''}`
+  return `${lasts}, ${fee}`
 }
 
 /** "2 years 3 months", "5 months", "1 month": a count of months in words. */
