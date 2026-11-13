@@ -89,6 +89,27 @@ function Sentence({
   return <Parts parts={instructionSentenceParts(instruction, transferWeekday)} today={today} />
 }
 
+/**
+ * When an ask was made, in the card's top-right corner, so a stack of them
+ * says which is oldest. Said as a distance ("Created 3 weeks ago") with the
+ * date on hover or tap; amber once it has waited long enough to be stale.
+ */
+function CreatedOn({
+  instruction,
+  today,
+  stale = false,
+}: {
+  instruction: IssuedInstruction
+  today: CivilDate
+  stale?: boolean
+}) {
+  return (
+    <p className={`shrink-0 text-xs ${stale ? 'text-[var(--color-behind)]' : 'text-[var(--color-ink-soft)]'}`}>
+      Created <When date={instruction.issuedOn} today={today} />
+    </p>
+  )
+}
+
 const plain = (cents: number) => formatCents(cents).replace('$', '').replace(/,/g, '')
 
 /**
@@ -225,7 +246,12 @@ function AskCard({
 }) {
   return (
     <Card>
-      <Sentence instruction={instruction} transferWeekday={transferWeekday} today={today} />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <Sentence instruction={instruction} transferWeekday={transferWeekday} today={today} />
+        </div>
+        <CreatedOn instruction={instruction} today={today} stale={stale} />
+      </div>
       {instruction.note ? <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p> : null}
       <div className="mt-4 flex items-end gap-2">
         <form action={confirmInstructionAction} className="flex flex-1 items-end gap-2">
@@ -259,9 +285,6 @@ function AskCard({
           </button>
         </form>
       </div>
-      {stale ? (
-        <p className="mt-2 text-xs text-[var(--color-behind)]">Asked {instruction.ageInDays} days ago.</p>
-      ) : null}
     </Card>
   )
 }
@@ -503,7 +526,12 @@ export default async function ThisWeekPage({
             {comingUp.map((instruction) => (
               <li key={instruction.instructionId}>
                 <Card className="border-dashed">
-                  <Sentence instruction={instruction} transferWeekday={transferWeekday} today={today} />
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <Sentence instruction={instruction} transferWeekday={transferWeekday} today={today} />
+                    </div>
+                    <CreatedOn instruction={instruction} today={today} />
+                  </div>
                   {instruction.note ? (
                     <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
                   ) : null}

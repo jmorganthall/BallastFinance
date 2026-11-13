@@ -2,9 +2,9 @@
  * An account as the position sees it (D35): what it likely holds, what the
  * bank moves into it, what Ballast asks the transfer to be, and whether,
  * run forward, the money is there on every date something is due. This
- * week and the check-in both draw this one card, so the two screens can
- * never say different things about the same account. Every figure is the
- * domain's; this only lays them out.
+ * week draws it; Check in draws the compact `AccountCheckCard` from the same
+ * position, so the two screens can never say different things about the
+ * same account. Every figure is the domain's; this only lays them out.
  */
 
 import { Card, Hint, humanDate, Money, When } from '@/components/ui'
