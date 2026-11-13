@@ -3,9 +3,10 @@
  *
  * The user tells Ballast what each account actually holds. The count
  * replaces the likely balance as the account's money today, and the one
- * position runs forward again from it. What the screen says afterwards is
- * the same account card This week draws, so the two can never disagree:
- * On track, or Short with the first date and the fix. There is no drift
+ * position runs forward again from it. Each account is one card
+ * (`AccountCheckCard`): how it stands, what it likely holds, what the bank
+ * moves a week, and the box -- every figure the position's, the same ones
+ * This week reads, so the two can never disagree. There is no drift
  * figure and nothing to choose -- a gap becomes a changed weekly amount or a
  * one-time move, both as to-dos on This week.
  */
@@ -13,9 +14,8 @@
 import Link from 'next/link'
 import { requireEngine } from '@/server/session'
 import { Card, PageHeader } from '@/components/ui'
-import { MoneySince } from '@/components/money-since'
-import { BalancesRecorded, CountField, ItsForms } from '@/components/count-field'
-import { AccountPositionCard } from '@/components/account-position'
+import { BalancesRecorded, ItsForms } from '@/components/count-field'
+import { AccountCheckCard } from '@/components/account-check-card'
 import { confirmBalancesAction } from '@/server/actions'
 
 export const dynamic = 'force-dynamic'
@@ -50,18 +50,9 @@ export default async function CheckInPage({
       ) : (
         <>
           <form action={confirmBalancesAction} className="space-y-4">
-            {live.map((a) => {
-              return (
-                <Card key={a.account.id}>
-                  <h2 className="font-semibold">{a.account.name}</h2>
-                  {/* The position's own breakdown (D34, D35): the count, then
-                      every transfer, move and spend since. */}
-                  <MoneySince money={a.money} today={today} />
-                  <CountField accountId={a.account.id} likelyCents={a.money.totalCents} />
-                </Card>
-              )
-            })}
-
+            {live.map((a) => (
+              <AccountCheckCard key={a.account.id} account={a} today={today} />
+            ))}
             <button
               type="submit"
               className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]"
@@ -69,31 +60,13 @@ export default async function CheckInPage({
               Record these balances
             </button>
             <p className="text-center text-xs text-[var(--color-ink-soft)]">
-              Type what each account holds, or tap It&apos;s $X when the figure is right. Leave a box empty to skip that account.
-            </p>
-          </form>
-          <ItsForms accountIds={live.map((a) => a.account.id)} action={confirmBalancesAction} />
-
-          <section className="mt-8">
-            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
-              Where you stand
-            </h2>
-            <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
-              Each account is run forward on the transfer the bank has: is the money there on
-              every date something is due? A plan below its steady line is fine as long as its
-              account has it on the day.{' '}
-              <Link href="/" className="text-[var(--color-accent)] underline underline-offset-4">
+              Leave a box empty to skip that account.{' '}
+              <Link href="/" className="text-[var(--color-accent)] underline underline-offset-2">
                 What to do is on This week.
               </Link>
             </p>
-            <ul className="space-y-4">
-              {live.map((a) => (
-                <li key={a.account.id}>
-                  <AccountPositionCard account={a} today={today} />
-                </li>
-              ))}
-            </ul>
-          </section>
+          </form>
+          <ItsForms accountIds={live.map((a) => a.account.id)} action={confirmBalancesAction} />
         </>
       )}
     </>

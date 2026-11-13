@@ -19,11 +19,19 @@ import { balanceField, formatCents, ITS_FIELD, itsValue, type Cents, type Id } f
 const itsFormId = (accountId: Id) => `its-${accountId}`
 
 
-export function CountField({ accountId, likelyCents }: { accountId: Id; likelyCents: Cents }) {
+export function CountField({
+  accountId,
+  likelyCents,
+  label = 'What it actually holds',
+}: {
+  accountId: Id
+  likelyCents: Cents
+  label?: string
+}) {
   return (
     <div className="mt-4">
       <label htmlFor={balanceField(accountId)} className="block text-sm font-medium">
-        What it actually holds
+        {label}
       </label>
       <div className="mt-1 flex items-stretch gap-2">
         <input
