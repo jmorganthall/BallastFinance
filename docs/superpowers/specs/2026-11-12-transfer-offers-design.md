@@ -1,6 +1,6 @@
 # Is a transfer worth it? Standing transfer offers on debts
 
-Status: design, agreed in conversation on 2026-11-12. Not yet in the PRD:
+Status: design, agreed in conversation on 2026-11-12/13. Not yet in the PRD:
 the PRD (rev 116 when this was written) has no standing offers and no
 transfer math. Adding it as the next decision (D61) is step 0 of the
 build. The PRD stays the source of truth once it says so.
@@ -73,7 +73,15 @@ interest plus the share). No one pays more in the "with" case.
   `projectPayoff` / `simulateMonths`.
 - **With:** each source debt with its balance lowered by what it moves,
   same rules. The target holds what moved plus the fee, on a deal at the
-  offer's rate, paid at the target's own rule.
+  offer's rate, paid at the target's own rule **plus the payment the
+  sources stop making** (decided 2026-11-13, option (b)):
+  freed = Σ over sources of `monthlyPaymentCents(source, today)` −
+  `monthlyPaymentCents(source after the move, today)` (a source moved in
+  full pays 0). That fixed figure is the target's `extraPerMonthCents`
+  in `simulateMonths`, every month until the target is paid off. So the
+  total going out each month starts the same on both sides, and only the
+  interest and the fee differ. The screen says it: "The $330 a month
+  Chase stops asking for goes to the new card." 
 
 "Involved debts" means the target and every debt that moves money.
 
