@@ -24,11 +24,11 @@ export function TravelerFields({ initial = [] }: { initial?: Traveler[] }) {
 
   return (
     <fieldset>
-      <legend className="text-sm font-medium">Who is going</legend>
+      <legend className="text-base font-medium">Who is going</legend>
       <div className="mt-1 space-y-2">
         {rows.map((row, i) => (
           <div key={i} className="flex items-end gap-2">
-            <label className="min-w-0 flex-1 text-xs text-[var(--color-ink-soft)]">
+            <label className="min-w-0 flex-1 text-sm text-[var(--color-ink-soft)]">
               Name
               <input
                 name="traveler_name"
@@ -38,7 +38,7 @@ export function TravelerFields({ initial = [] }: { initial?: Traveler[] }) {
                 className={input}
               />
             </label>
-            <label className="text-xs text-[var(--color-ink-soft)]">
+            <label className="text-sm text-[var(--color-ink-soft)]">
               Age
               <select
                 name="traveler_band"
@@ -57,7 +57,7 @@ export function TravelerFields({ initial = [] }: { initial?: Traveler[] }) {
               type="button"
               aria-label="Take this person off"
               onClick={() => setRows(rows.filter((_, j) => j !== i))}
-              className="mb-1 rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm"
+              className="mb-1 rounded-lg border border-[var(--color-line)] px-3 py-2 text-base"
             >
               ×
             </button>
@@ -67,7 +67,7 @@ export function TravelerFields({ initial = [] }: { initial?: Traveler[] }) {
       <button
         type="button"
         onClick={() => setRows([...rows, { name: '', band: 'child' }])}
-        className="mt-2 text-sm text-[var(--color-accent)] underline underline-offset-4"
+        className="mt-2 text-base text-[var(--color-accent)] underline underline-offset-4"
       >
         Add someone
       </button>

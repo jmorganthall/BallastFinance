@@ -29,7 +29,7 @@ export function DeletePlan({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="block w-full text-center text-sm text-[var(--color-ink-soft)] underline"
+        className="block w-full text-center text-base text-[var(--color-ink-soft)] underline"
       >
         Delete this plan for good
       </button>
@@ -39,12 +39,12 @@ export function DeletePlan({
   return (
     <form action={action} className="rounded-xl bg-[var(--color-behind-soft)] p-3">
       <input type="hidden" name="package_id" value={packageId} />
-      <p className="text-sm font-medium text-[var(--color-behind)]">Delete {name} for good?</p>
-      <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+      <p className="text-base font-medium text-[var(--color-behind)]">Delete {name} for good?</p>
+      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
         It disappears from your plans and cannot be brought back. What was set aside and spent
         stays in the log, but no screen will show this plan again.
       </p>
-      <label htmlFor={inputId} className="mt-4 block text-xs font-medium">
+      <label htmlFor={inputId} className="mt-4 block text-sm font-medium">
         Type <span className="font-semibold">{name}</span> to confirm
       </label>
       <input
@@ -61,7 +61,7 @@ export function DeletePlan({
         <button
           type="submit"
           disabled={!matches}
-          className="w-full rounded-lg bg-[var(--color-behind)] px-3 py-2 text-sm font-medium text-[var(--color-on-fill)] disabled:cursor-not-allowed disabled:opacity-40"
+          className="w-full rounded-lg bg-[var(--color-behind)] px-3 py-2 text-base font-medium text-[var(--color-on-fill)] disabled:cursor-not-allowed disabled:opacity-40"
         >
           Yes, delete it for good
         </button>
@@ -71,7 +71,7 @@ export function DeletePlan({
             setOpen(false)
             setTyped('')
           }}
-          className="w-full rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium"
+          className="w-full rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium"
         >
           Keep it
         </button>

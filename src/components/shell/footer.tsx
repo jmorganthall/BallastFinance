@@ -38,11 +38,11 @@ export async function AppFooter() {
     .join(' ')
 
   return (
-    <footer className="mx-auto mt-10 w-full max-w-2xl px-4 pb-6 text-xs text-[var(--color-ink-soft)] group-has-[[data-wide]]/shell:max-w-[100rem] md:px-6">
+    <footer className="mx-auto mt-10 w-full max-w-2xl px-4 pb-6 text-sm text-[var(--color-ink-soft)] group-has-[[data-wide]]/shell:max-w-[100rem] md:px-6">
       {status.kind === 'behind' ? (
         <div
           role="status"
-          className="mb-4 rounded-2xl border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-4 text-sm text-[var(--color-ink)]"
+          className="mb-4 rounded-2xl border border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-4 text-base text-[var(--color-ink)]"
         >
           <p className="font-semibold">A newer version of Ballast is available.</p>
           <p className="mt-1">
@@ -72,7 +72,7 @@ export async function AppFooter() {
         <form
           action={dismissBackupNoticeAction}
           role="status"
-          className="mb-4 flex flex-col gap-2 rounded-2xl border border-[var(--color-caution)] bg-[var(--color-caution-soft)] p-3 text-sm text-[var(--color-ink)] sm:flex-row sm:items-center sm:justify-between"
+          className="mb-4 flex flex-col gap-2 rounded-2xl border border-[var(--color-caution)] bg-[var(--color-caution-soft)] p-3 text-base text-[var(--color-ink)] sm:flex-row sm:items-center sm:justify-between"
         >
           <input type="hidden" name="backup_id" value={backupNotice.id} />
           <p>The last update changed the database without a backup: {backupNotice.reason}.</p>

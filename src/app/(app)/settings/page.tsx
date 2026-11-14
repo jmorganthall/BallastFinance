@@ -58,20 +58,20 @@ export default async function SettingsPage({
 
       {saved ? (
         <Card className="mb-4 bg-[var(--color-ahead-soft)]">
-          <p className="text-sm font-medium text-[var(--color-ahead)]">Saved.</p>
+          <p className="text-base font-medium text-[var(--color-ahead)]">Saved.</p>
         </Card>
       ) : null}
       {error ? (
         <Problem className="mb-4">{error}</Problem>
       ) : null}
 
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-2 section-label">
         How spare money gets shared out
       </h2>
       <Card className="mb-6">
         <form action={saveAllocationRulesAction} className="space-y-4">
           {rules.map((rule) => (
-            <label key={rule.destination} className="flex items-center justify-between gap-4 text-sm">
+            <label key={rule.destination} className="flex items-center justify-between gap-4 text-base">
               <span className="font-medium">{rule.label}</span>
               <span className="flex items-center gap-1">
                 <input
@@ -87,11 +87,11 @@ export default async function SettingsPage({
             </label>
           ))}
 
-          <p className="text-xs text-[var(--color-ink-soft)]">
+          <p className="text-sm text-[var(--color-ink-soft)]">
             These have to add up to 100%.
           </p>
 
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             Cushion to keep back before sharing anything out
             <input
               name="buffer"
@@ -110,12 +110,12 @@ export default async function SettingsPage({
         </form>
       </Card>
 
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-2 section-label">
         The weekly transfer
       </h2>
       <Card className="mb-4">
         <form action={saveTransferWeekdayAction} className="space-y-4">
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             Our transfer runs on
             <select name="transfer_weekday" defaultValue={String(transferWeekday)} className={field}>
               {WEEKDAY_NAMES.map((name, day) => (
@@ -124,7 +124,7 @@ export default async function SettingsPage({
                 </option>
               ))}
             </select>
-            <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+            <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
               The weekly figures count how many transfers land before each due date, so this is
               the day Capital One moves the money.
             </span>
@@ -139,7 +139,7 @@ export default async function SettingsPage({
       </Card>
       <Card className="mb-6">
         <form action={saveTransferRoundingAction} className="space-y-4">
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             Round each account&apos;s weekly transfer up to the nearest
             <span className="mt-1 flex items-center gap-2">
               <span className="text-[var(--color-ink-soft)]">$</span>
@@ -150,7 +150,7 @@ export default async function SettingsPage({
                 className={field.replace('mt-1 ', '')}
               />
             </span>
-            <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+            <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
               So a plan that moves by a few cents does not mean editing Capital One every week.
               $291.26 becomes $300 at the nearest $10. The little extra it leaves behind shows up
               as the account's extra. Enter 0 for the exact figure.
@@ -165,12 +165,12 @@ export default async function SettingsPage({
         </form>
       </Card>
 
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-2 section-label">
         Reminders
       </h2>
       <Card className="mb-6">
         <form action={saveNudgeSettingsAction} className="space-y-4">
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             Nudge us if we have not checked balances for this many weeks
             <input
               name="check_in_nudge_weeks"
@@ -181,7 +181,7 @@ export default async function SettingsPage({
               className={field}
             />
           </label>
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             <Hint detail="How far ahead of a promotional rate ending Ballast starts treating that debt as urgent, so there is still time to clear the balance.">
               Start warning about an ending deal this many weeks early
             </Hint>
@@ -206,7 +206,7 @@ export default async function SettingsPage({
           action={saveNotificationPrefsAction}
           className="mt-4 border-t border-[var(--color-line)] pt-4"
         >
-          <label className="flex items-start gap-4 text-sm font-medium">
+          <label className="flex items-start gap-4 text-base font-medium">
             <input
               type="checkbox"
               name="muted"
@@ -215,44 +215,44 @@ export default async function SettingsPage({
             />
             <span>
               Send these to me
-              <span className="mt-0.5 block text-xs font-normal text-[var(--color-ink-soft)]">
+              <span className="mt-0.5 block text-sm font-normal text-[var(--color-ink-soft)]">
                 Turning this off only stops your own messages, not your spouse&apos;s.
               </span>
             </span>
           </label>
           <button
             type="submit"
-            className="mt-4 w-full rounded-xl border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+            className="mt-4 w-full rounded-xl border border-[var(--color-line)] px-4 py-2 text-base font-medium"
           >
             Save
           </button>
         </form>
       </Card>
 
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-2 section-label">
         Payoff order
       </h2>
       <Card className="mb-6">
-        <p className="text-sm">
+        <p className="text-base">
           Currently weighted {Math.round(weight * 100)}% toward paying the least interest and{' '}
           {Math.round((1 - weight) * 100)}% toward freeing up cash each month.
         </p>
-        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
           Change it with the slider on the Debts screen, then choose to make it the normal setting.
         </p>
       </Card>
 
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-2 section-label">
         Savings accounts
       </h2>
       <Card className="mb-6">
         {accounts.length > 0 ? (
-          <ul className="mb-4 space-y-2 text-sm">
+          <ul className="mb-4 space-y-2 text-base">
             {accounts.map((account) => (
               <li key={account.id} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 border-b border-[var(--color-line)] pb-3 last:border-0">
                 <span>
                   <span className="font-medium">{account.name}</span>
-                  <span className="block text-xs text-[var(--color-ink-soft)]">
+                  <span className="block text-sm text-[var(--color-ink-soft)]">
                     {account.institutionLabel}
                   </span>
                 </span>
@@ -267,16 +267,16 @@ export default async function SettingsPage({
                   <form action={setSimplifiNamesAction} className="flex w-full items-center gap-2">
                     <input type="hidden" name="target" value={`account:${account.id}`} />
                     <input type="hidden" name="back" value="/settings" />
-                    <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+                    <label className="flex-1 text-sm text-[var(--color-ink-soft)]">
                       Known in Simplifi as
                       <input
                         name="names"
                         defaultValue={(simplifiNames.get(account.id) ?? []).join(', ')}
                         placeholder="The transfer's name in Simplifi"
-                        className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]"
+                        className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-base text-[var(--color-ink)]"
                       />
                     </label>
-                    <button type="submit" className="mt-4 rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm">
+                    <button type="submit" className="mt-4 rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-base">
                       Save
                     </button>
                   </form>
@@ -285,27 +285,27 @@ export default async function SettingsPage({
             ))}
           </ul>
         ) : (
-          <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
+          <p className="mb-4 text-base text-[var(--color-ink-soft)]">
             None yet. Add the savings accounts you actually have at your bank.
           </p>
         )}
 
         <form action={createReserveAccountAction} className="space-y-4 border-t border-[var(--color-line)] pt-4">
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             Add an account
             <input name="name" required placeholder="Gifts &amp; Giving" className={field} />
           </label>
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             What it is called at the bank
             <input name="institution_label" placeholder="Capital One 360 — Gifts" className={field} />
           </label>
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             Who manages it
             <select name="scope" className={field} defaultValue="household">
               <option value="household">Both of us</option>
               <option value="individual">Just me</option>
             </select>
-            <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+            <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
               Either way you both see it and its balance, so the household totals stay right.
               &ldquo;Just me&rdquo; means only you can rename it, plan against it, or confirm what
               it holds.
@@ -320,22 +320,22 @@ export default async function SettingsPage({
         </form>
       </Card>
 
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-2 section-label">
         Bring in your spreadsheet
       </h2>
       <Card className="mb-6">
-        <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
+        <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
           A one-off way in from the old sheet, until everything lives here. The Expense and Loan
           tabs are both understood.
         </p>
         <SheetImport />
       </Card>
 
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-2 section-label">
         Your data
       </h2>
       <Card>
-        <p className="text-sm">
+        <p className="text-base">
           Everything Ballast knows about your household — accounts, plans, debts, trips, income,
           the recurring list, your settings, and the full history of every change — downloads as
           one file.
@@ -347,12 +347,12 @@ export default async function SettingsPage({
         >
           Download everything
         </a>
-        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
           It is your data. Nothing here is locked in, and Ballast never holds a bank login.
         </p>
       </Card>
 
-      <h2 className="mb-2 mt-6 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-2 mt-6 section-label">
         Updates
       </h2>
       <UpdateCard engine={engine} />
@@ -361,7 +361,7 @@ export default async function SettingsPage({
       <form action={signOutAction} className="mt-6">
         <button
           type="submit"
-          className="w-full rounded-xl border border-[var(--color-line)] px-4 py-3 text-sm font-medium text-[var(--color-ink-soft)]"
+          className="w-full rounded-xl border border-[var(--color-line)] px-4 py-3 text-base font-medium text-[var(--color-ink-soft)]"
         >
           Sign out
         </button>

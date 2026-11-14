@@ -59,7 +59,7 @@ export default async function CheckInPage({
             >
               Record these balances
             </button>
-            <p className="text-center text-xs text-[var(--color-ink-soft)]">
+            <p className="text-center text-sm text-[var(--color-ink-soft)]">
               Leave a box empty to skip that account.{' '}
               <Link href="/" className="text-[var(--color-accent)] underline underline-offset-2">
                 What to do is on This week.

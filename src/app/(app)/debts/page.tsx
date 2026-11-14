@@ -138,7 +138,7 @@ export default async function DebtsPage({
         subtitle="Which debt to clear next, and where a lump sum should go."
       />
 
-      <p className="-mt-4 mb-4 text-sm">
+      <p className="-mt-4 mb-4 text-base">
         <Link href="/debts/equity" className="text-[var(--color-accent)] underline underline-offset-4">
           What could we buy with our equity?
         </Link>
@@ -149,23 +149,23 @@ export default async function DebtsPage({
       </p>
 
       {error ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]">
+        <p className="mb-4 rounded-xl bg-[var(--color-behind-soft)] p-3 text-base text-[var(--color-behind)]">
           {error}
         </p>
       ) : null}
 
       {stale.length > 0 ? (
         <Card className="mb-4 bg-[var(--color-accent-soft)]">
-          <h2 className="font-semibold">
+          <h2 className="card-title">
             {stale.length === 1 ? 'One balance' : `${stale.length} balances`} could do with a fresh
             look
           </h2>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+          <p className="mt-1 text-base text-[var(--color-ink-soft)]">
             The payoff order is only as good as the balances it starts from. When you have a
             statement handy, type the current balance in below and Ballast will note today as the
             date it was last checked.
           </p>
-          <ul className="mt-2 space-y-1 text-sm">
+          <ul className="mt-2 space-y-1 text-base">
             {stale.map((view) => (
               <li key={view.debt.id}>
                 <strong>{view.debt.name}</strong> — last checked {humanDate(view.debt.balanceAsOf)},{' '}
@@ -179,14 +179,14 @@ export default async function DebtsPage({
 
       {totals.count > 0 ? (
         <Card className="mb-4">
-          <p className="text-sm text-[var(--color-ink-soft)]">You owe, as of {humanDate(today)}</p>
+          <p className="text-base text-[var(--color-ink-soft)]">You owe, as of {humanDate(today)}</p>
           <p className="mt-1">
-            <Money cents={totals.balanceCents} className="text-4xl font-bold tracking-tight" />{' '}
+            <Money cents={totals.balanceCents} className="figure-hero" />{' '}
             <span className="text-[var(--color-ink-soft)]">
               across {totals.count === 1 ? 'one debt' : `${totals.count} debts`}
             </span>
           </p>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+          <p className="mt-1 text-base text-[var(--color-ink-soft)]">
             <Money cents={totals.perMonthCents} /> a month goes to them.{' '}
             {totals.lastPayoffDate
               ? `On these payments the last one is paid off by ${humanDate(totals.lastPayoffDate)}.`
@@ -209,7 +209,7 @@ export default async function DebtsPage({
         <div className="xl:grid xl:grid-cols-2 xl:items-start xl:gap-x-4">
           <Card className="mb-4 xl:col-start-1 xl:row-start-1">
             <form method="GET" className="space-y-2">
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 What matters more right now?
                 <input
                   type="range"
@@ -221,14 +221,14 @@ export default async function DebtsPage({
                   className="mt-2 w-full"
                 />
               </label>
-              <div className="flex justify-between text-xs text-[var(--color-ink-soft)]">
+              <div className="flex justify-between text-sm text-[var(--color-ink-soft)]">
                 <span>Free up cash now</span>
                 <span>Pay the least interest</span>
               </div>
               {amount ? <input type="hidden" name="amount" value={amount} /> : null}
               <button
                 type="submit"
-                className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+                className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium"
               >
                 Re-sort ({Math.round(weight * 100)}% interest / {Math.round((1 - weight) * 100)}% cash flow)
               </button>
@@ -239,7 +239,7 @@ export default async function DebtsPage({
                 <input type="hidden" name="weight" value={weight} />
                 <button
                   type="submit"
-                  className="w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
+                  className="w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-base font-medium text-[var(--color-on-fill)]"
                 >
                   Make this the normal setting
                 </button>
@@ -252,10 +252,10 @@ export default async function DebtsPage({
           </div>
 
           <Card className="mt-8 xl:col-start-2 xl:row-start-1 xl:mt-0 xl:mb-4">
-            <h2 className="mb-4 text-sm font-medium">Where should a lump sum go?</h2>
+            <h2 className="mb-4 text-base font-medium">Where should a lump sum go?</h2>
             <form method="GET" className="space-y-4">
               <input type="hidden" name="w" value={weight} />
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 If you had this much to put at debt
                 <input
                   name="amount"
@@ -267,7 +267,7 @@ export default async function DebtsPage({
               </label>
               <button
                 type="submit"
-                className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+                className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium"
               >
                 Work out where it goes
               </button>
@@ -275,14 +275,14 @@ export default async function DebtsPage({
 
             {optimisation ? (
               <div className="mt-4 border-t border-[var(--color-line)] pt-4">
-                <p className="text-sm">{optimisation.why}</p>
+                <p className="text-base">{optimisation.why}</p>
                 <div className="mt-4">
                   <PayoffImpact result={optimisation} />
                 </div>
 
                 <ul className="mt-4 divide-y divide-[var(--color-line)]">
                   {optimisation.allocations.map((allocation) => (
-                    <li key={allocation.debtId} className="py-3 text-sm last:pb-0">
+                    <li key={allocation.debtId} className="py-3 text-base last:pb-0">
                       <div className="flex items-baseline justify-between gap-4">
                         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                           <span className="font-medium">{allocation.debtName}</span>
@@ -292,7 +292,7 @@ export default async function DebtsPage({
                           <Money cents={allocation.amountCents} />
                         </span>
                       </div>
-                      <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
+                      <p className="mt-1 text-sm leading-snug text-[var(--color-ink-soft)]">
                         {allocation.reason}
                       </p>
                     </li>
@@ -307,10 +307,10 @@ export default async function DebtsPage({
       {/* Debts with a standing offer (D61), whatever their balance: an empty 0% card is "paid off" above. */}
       {offers.length > 0 ? (
         <Card className="mt-8">
-          <h2 className="font-semibold">Transfer offers</h2>
+          <h2 className="card-title">Transfer offers</h2>
           <ul className="mt-2 divide-y divide-[var(--color-line)]">
             {offers.map((debt) => (
-              <li key={debt.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 text-sm last:pb-0">
+              <li key={debt.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 text-base last:pb-0">
                 <span>
                   <Link href={`/debts/${debt.id}`} className="font-medium underline-offset-4 hover:underline">
                     {debt.name}
@@ -332,18 +332,18 @@ export default async function DebtsPage({
             <summary className="cursor-pointer font-semibold">
               Paid off ({paidOff.length})
             </summary>
-            <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+            <p className="mt-2 text-base text-[var(--color-ink-soft)]">
               These are off the payoff order. If one has a balance again, type it in and it goes back
               on.
             </p>
             <ul className="mt-4 divide-y divide-[var(--color-line)]">
               {paidOff.map((debt) => (
-                <li key={debt.id} className="py-3 text-sm last:pb-0">
+                <li key={debt.id} className="py-3 text-base last:pb-0">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-4">
                     <Link href={`/debts/${debt.id}`} className="font-medium underline-offset-4 hover:underline">
                       {debt.name}
                     </Link>
-                    <span className="text-xs text-[var(--color-ink-soft)]">
+                    <span className="text-sm text-[var(--color-ink-soft)]">
                       {KIND[debt.category] ?? debt.category} ·{' '}
                       {debt.state === 'paid_off'
                         ? `paid off ${humanDate(debt.balanceAsOf)}`
@@ -352,7 +352,7 @@ export default async function DebtsPage({
                   </div>
                   <form action={updateDebtBalanceAction} className="mt-2 flex items-end gap-2">
                     <input type="hidden" name="debt_id" value={debt.id} />
-                    <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+                    <label className="flex-1 text-sm text-[var(--color-ink-soft)]">
                       The statement says it is
                       <input
                         name="balance"
@@ -363,7 +363,7 @@ export default async function DebtsPage({
                     </label>
                     <button
                       type="submit"
-                      className="min-h-11 rounded-lg border border-[var(--color-line)] px-3 text-sm"
+                      className="min-h-11 rounded-lg border border-[var(--color-line)] px-3 text-base"
                     >
                       Bring it back
                     </button>

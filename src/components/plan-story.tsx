@@ -62,7 +62,7 @@ function Stretch({ phase, n, first, today }: { phase: StoryPhase; n: number; fir
     <li className="flex gap-4">
       <StretchBadge n={n} waiting={waiting} />
       <div className="min-w-0">
-        <p className="text-xs text-[var(--color-ink-soft)]">
+        <p className="text-sm text-[var(--color-ink-soft)]">
           {/* The first stretch starts with the next transfer: it is now, until the next change. */}
           {first ? (
             `Now${until}`
@@ -103,9 +103,9 @@ function Stretch({ phase, n, first, today }: { phase: StoryPhase; n: number; fir
 export function PlanStory({ story, today }: { story: Story; today: CivilDate }) {
   const { now, phases, full, due } = story
   return (
-    <div className="mt-6 space-y-6 text-sm">
+    <div className="mt-6 space-y-6 text-base">
       <section>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+        <h3 className="section-label">
           Where the money is today
         </h3>
         <p className="mt-1">
@@ -148,7 +148,7 @@ export function PlanStory({ story, today }: { story: Story; today: CivilDate }) 
 
       {phases.length > 0 ? (
         <section>
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h3 className="section-label">
             What happens next
           </h3>
           <ol className="mt-2 space-y-4">

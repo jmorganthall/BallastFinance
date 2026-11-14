@@ -38,10 +38,10 @@ export const dynamic = 'force-dynamic'
 const field =
   'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]'
 const small =
-  'w-full min-w-0 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]'
-const heading = 'mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
+  'w-full min-w-0 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-base text-[var(--color-ink)]'
+const heading = 'mb-2 section-label'
 // A visible name above each small box: a grey example inside the box is not a label (it goes when you type).
-const fieldName = 'block text-xs font-medium text-[var(--color-ink-soft)]'
+const fieldName = 'block text-sm font-medium text-[var(--color-ink-soft)]'
 
 function figureWords(f: { amountCents: number; frequency: keyof typeof FREQUENCY_WORDS }) {
   return `${formatCents(f.amountCents)} ${FREQUENCY_WORDS[f.frequency]}`
@@ -108,7 +108,7 @@ export default async function RecurringPage({
 
       {saved ? (
         <Card className="mb-4 bg-[var(--color-ahead-soft)]">
-          <p className="text-sm font-medium text-[var(--color-ahead)]">{saved === '1' ? 'Saved.' : saved}</p>
+          <p className="text-base font-medium text-[var(--color-ahead)]">{saved === '1' ? 'Saved.' : saved}</p>
         </Card>
       ) : null}
       {error ? (
@@ -122,8 +122,8 @@ export default async function RecurringPage({
         <div className="xl:columns-2 xl:gap-6 [&>*]:break-inside-avoid">
           {view.rows.length > 0 ? (
             <Card className="mb-6">
-              <p className="text-sm text-[var(--color-ink-soft)]">Going out, a month</p>
-              <p className="text-3xl font-semibold tracking-tight">
+              <p className="text-base text-[var(--color-ink-soft)]">Going out, a month</p>
+              <p className="figure-hero">
                 <Hint detail="Every live item going out, at a month: Ballast's own figure for one linked to an account or debt (the confirmed bank transfer, the monthly payment), Simplifi's for the rest. Weekly money is x52 / 12, rounded up.">
                   <Money cents={view.outPerMonthCents} />
                 </Hint>
@@ -134,7 +134,7 @@ export default async function RecurringPage({
           {differing.length > 0 || view.notInSimplifi.length > 0 ? (
             <section>
               <h2 className={heading}>Where Simplifi and Ballast differ</h2>
-              <Card className="mb-6 space-y-2 text-sm">
+              <Card className="mb-6 space-y-2 text-base">
                 {differing.map((c) => (
                   <p key={`${c.target.kind}:${c.target.id}`}>
                     <span className="font-medium">{c.target.name}</span>: Simplifi has{' '}
@@ -156,7 +156,7 @@ export default async function RecurringPage({
           <h2 className={heading}>From Simplifi</h2>
           <Card className="mb-6">
             {out.length === 0 ? (
-              <p className="text-sm text-[var(--color-ink-soft)]">Nothing yet. Paste the list below.</p>
+              <p className="text-base text-[var(--color-ink-soft)]">Nothing yet. Paste the list below.</p>
             ) : (
               <ul className="divide-y divide-[var(--color-line)]">
                 {out.map((row) => (
@@ -171,7 +171,7 @@ export default async function RecurringPage({
             <section>
               <h2 className={heading}>Coming in, per Simplifi</h2>
               <Card className="mb-6">
-                <p className="mb-2 text-xs text-[var(--color-ink-soft)]">
+                <p className="mb-2 text-sm text-[var(--color-ink-soft)]">
                   A cross-check only: what comes in is worked out on Income, from the paystubs.
                 </p>
                 <ul className="divide-y divide-[var(--color-line)]">
@@ -191,14 +191,14 @@ export default async function RecurringPage({
                 {manual.map((row) => (
                   <li key={row.item.id} className="py-2">
                     <details>
-                      <summary className="flex cursor-pointer items-start justify-between gap-4 text-sm">
+                      <summary className="flex cursor-pointer items-start justify-between gap-4 text-base">
                         <span>
                           <span className="font-medium">{row.item.name}</span>{' '}
                           <Pill tone="neutral">Not in Simplifi</Pill>
                         </span>
                         <span className="text-right">
                           {figureWords(row.item)}
-                          <span className="block text-xs text-[var(--color-ink-soft)]">
+                          <span className="block text-sm text-[var(--color-ink-soft)]">
                             {formatCents(row.perMonthCents)} a month
                           </span>
                         </span>
@@ -223,13 +223,13 @@ export default async function RecurringPage({
                             ))}
                           </select>
                         </label>
-                        <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm font-medium">
+                        <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-base font-medium">
                           Save
                         </button>
                       </form>
                       <form action={endRecurringAction} className="mt-2">
                         <input type="hidden" name="id" value={row.item.id} />
-                        <button type="submit" className="text-sm text-[var(--color-behind)] underline">
+                        <button type="submit" className="text-base text-[var(--color-behind)] underline">
                           It has stopped
                         </button>
                       </form>
@@ -238,7 +238,7 @@ export default async function RecurringPage({
                 ))}
               </ul>
             ) : (
-              <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
+              <p className="mb-4 text-base text-[var(--color-ink-soft)]">
                 Anything Simplifi does not catch, such as cash.
               </p>
             )}
@@ -261,7 +261,7 @@ export default async function RecurringPage({
                   ))}
                 </select>
               </label>
-              <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm font-medium">
+              <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-base font-medium">
                 Add
               </button>
             </form>
@@ -272,15 +272,15 @@ export default async function RecurringPage({
           <h2 className={heading}>Paste from Simplifi</h2>
           <Card className="mb-6">
             <form action={pasteSimplifiAction} className="space-y-4">
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 Simplifi&apos;s recurring list
                 <textarea
                   name="paste"
                   rows={8}
                   placeholder={'Streaming Co\nNext: $15.49 on Oct 26, 2026\nChecking (Joint)\nChecking\n…'}
-                  className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 font-mono text-xs text-[var(--color-ink)]"
+                  className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-[var(--color-ink)]"
                 />
-                <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+                <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
                   Select the whole list on Simplifi&apos;s Recurring page, copy, and paste it here. You see
                   what changes before anything is kept. Simplifi&apos;s Yearly column is not used: every
                   figure is the amount times how often.
@@ -312,10 +312,10 @@ function RowLine({
   const { item, link } = row
   return (
     <li className="py-2">
-      <div className="flex items-start justify-between gap-4 text-sm">
+      <div className="flex items-start justify-between gap-4 text-base">
         <span className="min-w-0">
           <span className="font-medium">{item.name}</span>
-          <span className="block text-xs text-[var(--color-ink-soft)]">
+          <span className="block text-sm text-[var(--color-ink-soft)]">
             {[item.category, item.kind, item.accountType === 'Checking' ? null : item.account].filter(Boolean).join(' · ')}
             {item.nextDate ? (
               <>
@@ -328,7 +328,7 @@ function RowLine({
         </span>
         <span className="shrink-0 text-right">
           {figureWords(item)}
-          <span className="block text-xs text-[var(--color-ink-soft)]">{formatCents(row.perMonthCents)} a month</span>
+          <span className="block text-sm text-[var(--color-ink-soft)]">{formatCents(row.perMonthCents)} a month</span>
         </span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -340,7 +340,7 @@ function RowLine({
             </Pill>
             <input type="hidden" name="link_name" value={item.name} />
             <input type="hidden" name="link_target" value={`${link.kind}:${link.id}`} />
-            <button type="submit" className="text-xs text-[var(--color-ink-soft)] underline">
+            <button type="submit" className="text-sm text-[var(--color-ink-soft)] underline">
               Unlink
             </button>
           </form>
@@ -348,7 +348,7 @@ function RowLine({
           <form action={linkSimplifiRowAction} className="flex items-center gap-2">
             <input type="hidden" name="link_name" value={item.name} />
             <TargetPicker targets={targets} selected={row.suggestion} />
-            <button type="submit" className="text-xs underline">
+            <button type="submit" className="text-sm underline">
               Link
             </button>
           </form>
@@ -371,7 +371,7 @@ function PastePreview({
     <>
       <h2 className={heading}>What this paste changes</h2>
       <Card className="mb-6">
-        <form action={keepSimplifiPasteAction} className="space-y-6 text-sm">
+        <form action={keepSimplifiPasteAction} className="space-y-6 text-base">
           <p>
             {paste.rows.length} rows read: {diff.added.length} new, {diff.changed.length} changed,{' '}
             {diff.unchanged.length} the same, {diff.gone.length} no longer in Simplifi.
@@ -419,7 +419,7 @@ function PastePreview({
                   )
                 })}
               </ul>
-              <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+              <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
                 Link a row that is one of Ballast&apos;s own: a weekly transfer to a reserve account, a debt payment,
                 a paycheck. Its figure then comes from Ballast.
               </p>
@@ -455,7 +455,7 @@ function PastePreview({
                   </li>
                 ))}
               </ul>
-              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+              <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                 Ticked ones are ended today; the rest stay until you say. Renamed in Simplifi? Leave the old one, and
                 link the new name to the same account.
               </p>

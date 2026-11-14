@@ -61,7 +61,7 @@ export const dynamic = 'force-dynamic'
  */
 function Parts({ parts, today }: { parts: SentencePart[]; today: CivilDate }) {
   return (
-    <p className="text-sm">
+    <p className="text-base">
       {parts.map((part, i) =>
         part.target ? (
           <strong key={i} className="font-semibold text-[var(--color-accent)]">
@@ -104,7 +104,7 @@ function CreatedOn({
   stale?: boolean
 }) {
   return (
-    <p className={`shrink-0 text-xs ${stale ? 'text-[var(--color-behind)]' : 'text-[var(--color-ink-soft)]'}`}>
+    <p className={`shrink-0 text-sm ${stale ? 'text-[var(--color-behind)]' : 'text-[var(--color-ink-soft)]'}`}>
       Created <When date={instruction.issuedOn} today={today} />
     </p>
   )
@@ -136,7 +136,7 @@ function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate 
         {todo.kind === 'move_between' ? (
           <input type="hidden" name="from_account_id" value={todo.fromAccountId} />
         ) : null}
-        <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+        <label className="flex-1 text-sm text-[var(--color-ink-soft)]">
           {todo.kind === 'set_transfer' ? 'What the transfer is now, per week' : 'How much you moved'}
           <input
             name="amount"
@@ -147,13 +147,13 @@ function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate 
         </label>
         <button
           type="submit"
-          className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+          className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium"
         >
           {todo.kind === 'set_transfer' && todo.reason === 'confirm' ? "That's it" : 'Done'}
         </button>
       </form>
       {!todo.blocking ? (
-        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
           Optional: leaving it as it is only saves a little more.
         </p>
       ) : null}
@@ -171,7 +171,7 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
     return (
       <Card className="border-dashed">
         <Parts parts={debtTodoSentenceParts(todo)} today={today} />
-        <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+        <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
           Most store cards and some balance transfers do this. Until you say, Ballast assumes it is.
         </p>
         <form action={setDealChargedBackAction} className="mt-4 flex gap-2">
@@ -180,7 +180,7 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
             type="submit"
             name="charged_back"
             value="yes"
-            className="flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+            className="flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium"
           >
             Yes, it is charged back
           </button>
@@ -188,7 +188,7 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
             type="submit"
             name="charged_back"
             value="no"
-            className="flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+            className="flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium"
           >
             No, only what is left
           </button>
@@ -203,7 +203,7 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
       <form action={raise ? raiseDebtPaymentAction : updateDebtBalanceAction} className="mt-4 flex items-end gap-2">
         <input type="hidden" name="debt_id" value={todo.debtId} />
         {raise ? null : <input type="hidden" name="back" value="home" />}
-        <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+        <label className="flex-1 text-sm text-[var(--color-ink-soft)]">
           {raise ? 'What you pay each month now' : 'What the statement says it is'}
           <input
             name={raise ? 'amount' : 'balance'}
@@ -214,13 +214,13 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
         </label>
         <button
           type="submit"
-          className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+          className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium"
         >
           Done
         </button>
       </form>
       {!todo.blocking ? (
-        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
           Housekeeping: the payoff order is only as good as the balances it starts from.
         </p>
       ) : null}
@@ -252,14 +252,14 @@ function AskCard({
         </div>
         <CreatedOn instruction={instruction} today={today} stale={stale} />
       </div>
-      {instruction.note ? <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p> : null}
+      {instruction.note ? <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{instruction.note}</p> : null}
       <div className="mt-4 flex items-end gap-2">
         <form action={confirmInstructionAction} className="flex flex-1 items-end gap-2">
           <input type="hidden" name="instruction_id" value={instruction.instructionId} />
           {/* A payment toward a debt comes off its balance at what
               was actually paid (D49 (1)). */}
           {instruction.type === 'debt_payment' && instruction.targetId !== 'debt' ? (
-            <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+            <label className="flex-1 text-sm text-[var(--color-ink-soft)]">
               How much you paid
               <input
                 name="amount"
@@ -271,7 +271,7 @@ function AskCard({
           ) : null}
           <button
             type="submit"
-            className="w-full flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+            className="w-full flex-1 rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium"
           >
             Done
           </button>
@@ -280,7 +280,7 @@ function AskCard({
             counting as on the way. Nothing in the bank changes. */}
         <form action={endInstructionAction}>
           <input type="hidden" name="instruction_id" value={instruction.instructionId} />
-          <button type="submit" className="rounded-lg px-3 py-2 text-sm text-[var(--color-ink-soft)] underline">
+          <button type="submit" className="rounded-lg px-3 py-2 text-base text-[var(--color-ink-soft)] underline">
             Not doing this
           </button>
         </form>
@@ -379,7 +379,7 @@ export default async function ThisWeekPage({
         caughtUp ? (
           <Card className="mb-6 bg-[var(--color-ahead-soft)]">
             <p className="font-semibold text-[var(--color-ahead)]">All caught up.</p>
-            <p className="mt-1 text-sm">
+            <p className="mt-1 text-base">
               On autopilot, every account covers everything due
               {position.coveredThrough ? (
                 <>
@@ -393,7 +393,7 @@ export default async function ThisWeekPage({
               bank moves <Money cents={position.bankPerWeekCents} /> a week in all.
             </p>
             {household.optionalCount > 0 ? (
-              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+              <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                 {household.optionalCount === 1
                   ? 'There is an optional to-do below; nothing depends on it.'
                   : 'There are optional to-dos below; nothing depends on them.'}
@@ -403,7 +403,7 @@ export default async function ThisWeekPage({
         ) : (
           <Card className="mb-6 bg-[var(--color-caution-soft)]">
             <p className="font-semibold">{household.headline} this week.</p>
-            <p className="mt-1 text-sm">
+            <p className="mt-1 text-base">
               The to-dos below are what it takes. Once they are done, every account has the money
               for everything on its date, and every deal is cleared before it ends, without anyone
               lifting a finger.
@@ -419,7 +419,7 @@ export default async function ThisWeekPage({
         */}
       {justSnoozed?.snoozedUntil ? (
         <Card className="mb-6 flex items-center justify-between gap-4 border-dashed">
-          <p className="text-sm">
+          <p className="text-base">
             <Zzz className="mr-1 text-[var(--color-accent)]" />
             {justSnoozed.label} is snoozed: it asks again{' '}
             <When date={justSnoozed.snoozedUntil} today={today} />. The money stays held.
@@ -427,7 +427,7 @@ export default async function ThisWeekPage({
           <form action={wakeCloseOutAction}>
             <input type="hidden" name="line_item_id" value={justSnoozed.lineItemId} />
             <input type="hidden" name="round_due" value={justSnoozed.dueDate} />
-            <button type="submit" className="shrink-0 rounded-lg px-3 py-2 text-sm text-[var(--color-ink-soft)] underline">
+            <button type="submit" className="shrink-0 rounded-lg px-3 py-2 text-base text-[var(--color-ink-soft)] underline">
               Undo
             </button>
           </form>
@@ -436,7 +436,7 @@ export default async function ThisWeekPage({
 
       {closeOuts.length > 0 ? (
         <section className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-2 section-label">
             Did this get spent?
           </h2>
           <ul className="space-y-4">
@@ -457,7 +457,7 @@ export default async function ThisWeekPage({
 
       {anythingToDo ? (
         <section className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-2 section-label">
             To do
           </h2>
           <ul className="space-y-4">
@@ -474,7 +474,7 @@ export default async function ThisWeekPage({
             ))}
           </ul>
           {toCount.length > 0 ? (
-            <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+            <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
               When these are done, update what{' '}
               {toCount.map((a) => a.account.name).join(' and ')} {toCount.length === 1 ? 'holds' : 'hold'}.
             </p>
@@ -491,7 +491,7 @@ export default async function ThisWeekPage({
         */}
       {!moneyToDo && toCount.length > 0 ? (
         <section className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-2 section-label">
             Update what these accounts hold
           </h2>
           <form action={confirmBalancesAction} className="space-y-4">
@@ -509,7 +509,7 @@ export default async function ThisWeekPage({
             >
               Record these balances
             </button>
-            <p className="text-center text-xs text-[var(--color-ink-soft)]">
+            <p className="text-center text-sm text-[var(--color-ink-soft)]">
               Check each figure in Capital One first. Type what it holds, or tap It&apos;s $X when the figure is right; an empty box records nothing.
             </p>
           </form>
@@ -519,7 +519,7 @@ export default async function ThisWeekPage({
 
       {comingUp.length > 0 ? (
         <section className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-2 section-label">
             Coming up
           </h2>
           <ul className="space-y-4">
@@ -533,7 +533,7 @@ export default async function ThisWeekPage({
                     <CreatedOn instruction={instruction} today={today} />
                   </div>
                   {instruction.note ? (
-                    <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{instruction.note}</p>
+                    <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{instruction.note}</p>
                   ) : null}
                   <div className="mt-4 flex gap-2">
                     <form action={confirmInstructionAction} className="flex-1">
@@ -544,7 +544,7 @@ export default async function ThisWeekPage({
                       />
                       <button
                         type="submit"
-                        className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium text-[var(--color-ink-soft)]"
+                        className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium text-[var(--color-ink-soft)]"
                       >
                         Done early
                       </button>
@@ -557,7 +557,7 @@ export default async function ThisWeekPage({
                       />
                       <button
                         type="submit"
-                        className="rounded-lg px-3 py-2 text-sm text-[var(--color-ink-soft)] underline"
+                        className="rounded-lg px-3 py-2 text-base text-[var(--color-ink-soft)] underline"
                       >
                         Not doing this
                       </button>
@@ -577,7 +577,7 @@ export default async function ThisWeekPage({
         */}
       {tripToDos.length > 0 ? (
         <section className="mb-6">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-2 section-label">
             Coming up for trips
           </h2>
           <Card>
@@ -585,8 +585,8 @@ export default async function ThisWeekPage({
               {tripToDos.map((task) => (
                 <li key={task.id} className="flex items-center justify-between gap-4 py-2 first:pt-0 last:pb-0">
                   <div className="min-w-0">
-                    <p className="text-sm">{task.label}</p>
-                    <p className="text-xs text-[var(--color-ink-soft)]">
+                    <p className="text-base">{task.label}</p>
+                    <p className="text-sm text-[var(--color-ink-soft)]">
                       {taskBucket(task, today) === 'overdue' ? 'Was due ' : 'By '}
                       {humanDate(task.dueOn)} ·{' '}
                       <Link href={`/trips/${task.tripId}#to-do`} className="text-[var(--color-accent)] underline underline-offset-4">
@@ -599,7 +599,7 @@ export default async function ThisWeekPage({
                     <input type="hidden" name="task_id" value={task.id} />
                     <input type="hidden" name="done" value="0" />
                     <input type="hidden" name="back" value="home" />
-                    <button type="submit" className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium">
+                    <button type="submit" className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium">
                       Done
                     </button>
                   </form>
@@ -621,7 +621,7 @@ export default async function ThisWeekPage({
         </Empty>
       ) : (
         <section>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-2 section-label">
             Your accounts
           </h2>
           <ul className="space-y-4">
@@ -630,14 +630,14 @@ export default async function ThisWeekPage({
                 <AccountPositionCard account={a} today={today} />
                 {(running.get(a.account.id) ?? []).length > 0 ? (
                   <Card className="mt-2">
-                    <ul className="space-y-2 text-sm">
+                    <ul className="space-y-2 text-base">
                       {(running.get(a.account.id) ?? []).map((r) => (
                         <li key={r.instructionId} className="flex items-center justify-between gap-4">
                           <span>
                             {r.perWeekCents > 0
                               ? `A catch-up from before: ${formatCents(r.perWeekCents)} a week extra`
                               : `An ease-off from before: ${formatCents(-r.perWeekCents)} a week less`}
-                            <span className="block text-xs text-[var(--color-ink-soft)]">
+                            <span className="block text-sm text-[var(--color-ink-soft)]">
                               It runs <When date={r.endDate} today={today} as="until" />. Setting the transfer to what Ballast
                               asks replaces it; so does stopping it here.
                             </span>
@@ -646,7 +646,7 @@ export default async function ThisWeekPage({
                             <input type="hidden" name="instruction_id" value={r.instructionId} />
                             <button
                               type="submit"
-                              className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium"
+                              className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium"
                             >
                               Stop this
                             </button>

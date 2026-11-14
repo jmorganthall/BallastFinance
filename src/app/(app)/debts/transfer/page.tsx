@@ -97,7 +97,7 @@ export default async function TransferPage({ searchParams }: { searchParams: Pro
 
   return (
     <div>
-      <p className="mb-2 text-sm">
+      <p className="mb-2 text-base">
         <Link href={debtId ? `/debts/${debtId}` : '/debts'} className={linkClass}>
           ← {debtId && target ? target.name : 'Payoff order'}
         </Link>
@@ -112,7 +112,7 @@ export default async function TransferPage({ searchParams }: { searchParams: Pro
       />
 
       {debtId && target?.transferOffer?.transferBy && compareDates(target.transferOffer.transferBy, today) < 0 ? (
-        <p className="-mt-4 mb-4 text-sm text-[var(--color-ink-soft)]">
+        <p className="-mt-4 mb-4 text-base text-[var(--color-ink-soft)]">
           The offer said transfers by {humanDate(target.transferOffer.transferBy)}. Check it is still open.
         </p>
       ) : null}
@@ -123,7 +123,7 @@ export default async function TransferPage({ searchParams }: { searchParams: Pro
         <TryACard values={cardValues ?? { ...EMPTY_DEBT_FORM, min_type: 'percent_with_floor' }} problems={cardProblems} />
       ) : null}
 
-      <p className="mt-6 text-xs text-[var(--color-ink-soft)]">
+      <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
         Both sides run on today&rsquo;s payments: each debt&rsquo;s monthly payment as Debts has it, and what the
         old debts stop paying goes to the new one. Nothing is stored and nothing moves: you make the transfer at the
         bank, then update both debts here.
@@ -184,7 +184,7 @@ function Headline({ check, r, target }: { check: TransferCheck; r: TransferResul
     return (
       <>
         <p className="text-lg font-semibold">Not worth it at today&rsquo;s payments.</p>
-        <p className="mt-1 text-sm">
+        <p className="mt-1 text-base">
           Moving the most that fits, <Money cents={r.amountCents} />, saves <Money cents={r.interestSavedCents} /> in
           interest and costs <Money cents={r.feeCents} /> in fees.
         </p>
@@ -201,18 +201,18 @@ function Headline({ check, r, target }: { check: TransferCheck; r: TransferResul
         {sooner ? ` ${sooner}` : ''}
       </p>
       {asked && check.recommendedCents !== null && check.recommendedCents !== r.amountCents ? (
-        <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+        <p className="mt-1 text-base text-[var(--color-ink-soft)]">
           Ballast would move <Money cents={check.recommendedCents} />, the amount that saves the most.
         </p>
       ) : null}
       {check.typed?.problem === 'over_most' ? (
-        <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+        <p className="mt-1 text-base text-[var(--color-ink-soft)]">
           <Money cents={check.typed.cents} /> does not fit with its fee: these are the figures for the most that does,{' '}
           <Money cents={check.mostCents} />.
         </p>
       ) : null}
       {r.horizonMonths !== null ? (
-        <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+        <p className="mt-1 text-base text-[var(--color-ink-soft)]">
           At today&rsquo;s payments a debt here is never paid off, so the interest is compared over the next{' '}
           {monthsInWords(r.horizonMonths)}.
         </p>
@@ -235,8 +235,8 @@ function Figures({ r, target }: { r: TransferResult; target: Debt }) {
   const freedFrom = r.moves.filter((m) => m.paymentBeforeCents > m.paymentAfterCents)
   return (
     <Card className="mb-4">
-      <h2 className="mb-2 text-sm font-medium">The figures</h2>
-      <dl className="divide-y divide-[var(--color-line)] text-sm">
+      <h2 className="mb-2 text-base font-medium">The figures</h2>
+      <dl className="divide-y divide-[var(--color-line)] text-base">
         {row(r.horizonMonths === null ? 'Interest without the move' : `Interest without, next ${monthsInWords(r.horizonMonths)}`, <Money cents={r.interestWithoutCents} />)}
         {row(r.horizonMonths === null ? 'Interest with the move' : `Interest with, next ${monthsInWords(r.horizonMonths)}`, <Money cents={r.interestWithCents} />)}
         {r.interestSavedCents >= 0
@@ -245,7 +245,7 @@ function Figures({ r, target }: { r: TransferResult; target: Debt }) {
         {row('Transfer fee', <Money cents={r.feeCents} />)}
         {row(r.netSavingsCents >= 0 ? 'Saves after the fee' : 'Costs after the fee', <Money cents={Math.abs(r.netSavingsCents)} />, true)}
       </dl>
-      <p className="mt-3 text-sm">
+      <p className="mt-3 text-base">
         {r.freedPerMonthCents > 0 ? (
           <>
             The <Money cents={r.freedPerMonthCents} /> a month{' '}
@@ -259,10 +259,10 @@ function Figures({ r, target }: { r: TransferResult; target: Debt }) {
           </>
         )}
       </p>
-      <h3 className="mt-4 text-sm font-medium">Paid off in</h3>
-      <table className="mt-1 w-full text-sm">
+      <h3 className="mt-4 text-base font-medium">Paid off in</h3>
+      <table className="mt-1 w-full text-base">
         <thead>
-          <tr className="text-left text-xs text-[var(--color-ink-soft)]">
+          <tr className="text-left text-sm text-[var(--color-ink-soft)]">
             <th className="py-1 font-normal">Debt</th>
             <th className="py-1 text-right font-normal">Without</th>
             <th className="py-1 text-right font-normal">With</th>
@@ -286,11 +286,11 @@ function DealCard({ r, target }: { r: TransferResult; target: Debt }) {
   const deal = r.deal!
   return (
     <Card className="mb-4">
-      <h2 className="mb-1 text-sm font-medium">Paid off before the {rateWords(deal.rateBasisPoints)} ends?</h2>
+      <h2 className="mb-1 text-base font-medium">Paid off before the {rateWords(deal.rateBasisPoints)} ends?</h2>
       {deal.leftAtEndCents <= 0 ? (
-        <p className="text-sm">Yes: on these payments it is gone before {humanDate(deal.endsOn)}.</p>
+        <p className="text-base">Yes: on these payments it is gone before {humanDate(deal.endsOn)}.</p>
       ) : (
-        <p className="text-sm">
+        <p className="text-base">
           No: about <Money cents={deal.leftAtEndCents} /> would be left on {humanDate(deal.endsOn)}, when the rate goes to{' '}
           {rateWords(target.aprBasisPoints)}
           {target.transferOffer?.chargedBack ? ', and the interest is charged back to the day of the transfer' : ''}.
@@ -318,8 +318,8 @@ function LeftOut({ check }: { check: TransferCheck }) {
   }
   return (
     <Card className="mb-4">
-      <h2 className="mb-2 text-sm font-medium">Left where they are</h2>
-      <ul className="divide-y divide-[var(--color-line)] text-sm">
+      <h2 className="mb-2 text-base font-medium">Left where they are</h2>
+      <ul className="divide-y divide-[var(--color-line)] text-base">
         {check.leftOut.map(({ debt, reason }) => (
           <li key={debt.id} className="py-2">
             <strong>{debt.name}</strong> — {words(reason)}
@@ -345,7 +345,7 @@ function AmountForm({ check, keep }: { check: TransferCheck; keep: Record<string
     <Card className="mb-4">
       <form method="GET" className="space-y-2">
         <Hidden keep={keep} />
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Try a different amount
           <input
             name="amount"
@@ -355,13 +355,13 @@ function AmountForm({ check, keep }: { check: TransferCheck; keep: Record<string
             className={boxClass}
           />
         </label>
-        <p className="text-xs text-[var(--color-ink-soft)]">
+        <p className="text-sm text-[var(--color-ink-soft)]">
           The most that fits with its fee is {formatCents(check.mostCents)}.
         </p>
         {check.typed?.problem === 'not_positive' ? (
-          <p className="text-xs text-[var(--color-behind)]">Enter an amount above zero.</p>
+          <p className="text-sm text-[var(--color-behind)]">Enter an amount above zero.</p>
         ) : null}
-        <button type="submit" className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium">
+        <button type="submit" className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium">
           Work it out
         </button>
       </form>
@@ -373,12 +373,12 @@ function LimitForm({ keep }: { keep: Record<string, string> }) {
   return (
     <form method="GET" className="mt-3 space-y-2">
       <Hidden keep={Object.fromEntries(Object.entries(keep).filter(([name]) => name !== 'limit'))} />
-      <label className="block text-sm font-medium">
+      <label className="block text-base font-medium">
         Its credit limit
         <input name="limit" inputMode="decimal" placeholder="10000" className={boxClass} />
       </label>
-      <p className="text-xs text-[var(--color-ink-soft)]">Used for this one answer and not saved. To keep it, edit the debt.</p>
-      <button type="submit" className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium">
+      <p className="text-sm text-[var(--color-ink-soft)]">Used for this one answer and not saved. To keep it, edit the debt.</p>
+      <button type="submit" className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium">
         Work it out
       </button>
     </form>
@@ -407,7 +407,7 @@ function refusalWords(refused: TransferRefusal, target: Debt): string {
 function TryACard({ values, problems }: { values: DebtFormValues; problems: DebtFormProblem[] }) {
   const problemFor = (field: string) => problems.find((p) => p.field === field)?.message
   const box = (name: keyof DebtFormValues, label: string, opts: { placeholder?: string; hint?: string; type?: string } = {}) => (
-    <label className="block text-sm font-medium">
+    <label className="block text-base font-medium">
       {label}
       <input
         name={name}
@@ -419,14 +419,14 @@ function TryACard({ values, problems }: { values: DebtFormValues; problems: Debt
         className={boxClass}
       />
       {problemFor(name) ? (
-        <span className="mt-1 block text-xs font-normal text-[var(--color-behind)]">{problemFor(name)}</span>
+        <span className="mt-1 block text-sm font-normal text-[var(--color-behind)]">{problemFor(name)}</span>
       ) : opts.hint ? (
-        <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">{opts.hint}</span>
+        <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">{opts.hint}</span>
       ) : null}
     </label>
   )
   const select = (name: keyof DebtFormValues, label: string, options: [string, string][]) => (
-    <label className="block text-sm font-medium">
+    <label className="block text-base font-medium">
       {label}
       <select name={name} defaultValue={String(values[name] ?? '')} className={boxClass}>
         {options.map(([value, words]) => (
@@ -436,14 +436,14 @@ function TryACard({ values, problems }: { values: DebtFormValues; problems: Debt
         ))}
       </select>
       {problemFor(name) ? (
-        <span className="mt-1 block text-xs font-normal text-[var(--color-behind)]">{problemFor(name)}</span>
+        <span className="mt-1 block text-sm font-normal text-[var(--color-behind)]">{problemFor(name)}</span>
       ) : null}
     </label>
   )
   const other = problems.filter((p) => !['apr', 'credit_limit', 'monthly_payment', 'min_type', 'min_amount', 'min_percent', 'min_floor', 'offer_ends', 'offer_rate', 'offer_months', 'offer_until', 'offer_fee', 'offer_fee_min'].includes(p.field))
   return (
     <Card className="mb-4">
-      <h2 className="mb-3 font-semibold">Try a card</h2>
+      <h2 className="mb-3 card-title">Try a card</h2>
       {other.length > 0 ? (
         <Problem className="mb-3">
           {other.map((p) => (

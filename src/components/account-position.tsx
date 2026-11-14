@@ -27,11 +27,11 @@ export function AccountPositionCard({
   return (
     <Card>
       <div className="flex items-start justify-between gap-4">
-        <h3 className="font-semibold">{a.account.name}</h3>
+        <h3 className="card-title">{a.account.name}</h3>
         <AccountStatusPill status={a.status} />
       </div>
 
-      <p className="mt-1 text-sm">
+      <p className="mt-1 text-base">
         <Hint detail={moneyDetail}>
           Likely holds <Money cents={money.totalCents} /> today
         </Hint>
@@ -46,14 +46,14 @@ export function AccountPositionCard({
       </p>
 
       {a.status === 'short' && a.short ? (
-        <p className="mt-2 text-sm font-medium text-[var(--color-behind)]">
+        <p className="mt-2 text-base font-medium text-[var(--color-behind)]">
           On the transfer set up now it runs short <When date={a.short.on} today={today} />, by{' '}
           <Money cents={a.short.byCents} />.
         </p>
       ) : a.status === 'running_down' && a.short && a.bank ? (
         // Every bill now is paid; the money already there is what is being
         // spent (D39). Plain words, the two weekly figures side by side.
-        <p className="mt-2 text-sm text-[var(--color-caution)]">
+        <p className="mt-2 text-base text-[var(--color-caution)]">
           {a.bank.perWeekCents < a.runRatePerWeekCents ? (
             <>
               Covers every bill this time round, but{' '}
@@ -67,12 +67,12 @@ export function AccountPositionCard({
           On this transfer the money runs out <When date={a.short.on} today={today} />.
         </p>
       ) : a.parts.length > 0 && a.horizon && a.status === 'on_track' ? (
-        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+        <p className="mt-2 text-base text-[var(--color-ink-soft)]">
           Covers everything due <When date={a.horizon} today={today} as="until" /> on the transfer set up now.
         </p>
       ) : null}
 
-      <div className="mt-4 rounded-xl bg-[var(--color-surface)] p-3 text-sm">
+      <div className="mt-4 rounded-xl bg-[var(--color-surface)] p-3 text-base">
         {a.bank ? (
           <p>
             The bank moves <Money cents={a.bank.perWeekCents} /> a week
@@ -117,7 +117,7 @@ export function AccountPositionCard({
           </p>
         ) : null}
         {a.parts.length > 0 ? (
-          <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+          <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
             <Hint
               detail={`The smallest steady transfer that has the money there on every date, looking ahead to ${a.horizon ? humanDate(a.horizon) : 'the last date'}: ${formatCents(a.neededExactPerWeekCents)} exactly${a.neededPerWeekCents !== a.neededExactPerWeekCents ? `, ${formatCents(a.neededPerWeekCents)} as the bank figure` : ''}. Each part saving steadily on its own would come to ${formatCents(a.steadyPerWeekCents)}.`}
             >

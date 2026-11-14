@@ -56,21 +56,21 @@ export function PayoffImpact({ result }: { result: OptimizerResult }) {
   return (
     <dl className="grid grid-cols-2 gap-4">
       <div className="rounded-xl bg-[var(--color-surface)] p-3 sm:p-4">
-        <dt className="text-xs text-[var(--color-ink-soft)]">Freed up each month</dt>
+        <dt className="text-sm text-[var(--color-ink-soft)]">Freed up each month</dt>
         <dd className="mt-1 text-2xl font-semibold tracking-tight text-[var(--color-ink)]">
           {formatCents(result.monthlyFreedCents)}
         </dd>
-        <dd className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
+        <dd className="mt-1 text-sm leading-snug text-[var(--color-ink-soft)]">
           {freedSentence(cleared, eased)}
         </dd>
       </div>
 
       <div className="rounded-xl bg-[var(--color-surface)] p-3 sm:p-4">
-        <dt className="text-xs text-[var(--color-ink-soft)]">Interest you never pay</dt>
+        <dt className="text-sm text-[var(--color-ink-soft)]">Interest you never pay</dt>
         <dd className="mt-1 text-2xl font-semibold tracking-tight text-[var(--color-ink)]">
           {formatCents(lifetime ?? result.interestAvoidedCents)}
         </dd>
-        <dd className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
+        <dd className="mt-1 text-sm leading-snug text-[var(--color-ink-soft)]">
           {lifetime !== null
             ? `over the remaining life of ${joinNames(touched)}, paying only ${touched.length === 1 ? 'its minimum' : 'their minimums'}`
             : `in the next year alone: at ${endless.length === 1 ? 'its' : 'their'} minimum payment ${joinNames(endless)} never ${endless.length === 1 ? 'gets' : 'get'} smaller, so the interest never stops`}

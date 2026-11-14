@@ -31,7 +31,7 @@ export function AccountCheckCard({
     <Card>
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <h2 className="font-semibold">{a.account.name}</h2>
+          <h2 className="card-title">{a.account.name}</h2>
           <StatusLine account={a} today={today} />
         </div>
         <AccountStatusPill status={a.status} />
@@ -86,7 +86,7 @@ function StatusLine({
 }) {
   if (a.status === "short" && a.short) {
     return (
-      <p className="mt-0.5 text-sm font-medium text-[var(--color-behind)]">
+      <p className="mt-0.5 text-base font-medium text-[var(--color-behind)]">
         <Money cents={a.short.byCents} /> short{" "}
         <When date={a.short.on} today={today} />
       </p>
@@ -98,7 +98,7 @@ function StatusLine({
         ? `Every bill this time round is covered, but ${formatCents(a.bank.perWeekCents)} a week is less than these bills cost (${formatCents(a.runRatePerWeekCents)} a week), so it is using up what is already set aside.`
         : "Every bill it is saving for now is covered, but not the time after.";
     return (
-      <p className="mt-0.5 text-sm text-[var(--color-caution)]">
+      <p className="mt-0.5 text-base text-[var(--color-caution)]">
         <Hint detail={why}>Runs out</Hint>{" "}
         <When date={a.short.on} today={today} />
       </p>
@@ -106,7 +106,7 @@ function StatusLine({
   }
   if (a.status === "on_track" && a.horizon && a.parts.length > 0) {
     return (
-      <p className="mt-0.5 text-sm text-[var(--color-ink-soft)]">
+      <p className="mt-0.5 text-base text-[var(--color-ink-soft)]">
         Covered <When date={a.horizon} today={today} as="until" />
       </p>
     );
@@ -188,7 +188,7 @@ function Stat({
 }) {
   return (
     <div className="bg-[var(--color-surface)] px-3 py-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <p className="section-label">
         <Hint detail={detail}>{label}</Hint>
       </p>
       <div className="mt-1 text-xl font-semibold tabular-nums">{children}</div>
@@ -198,7 +198,7 @@ function Stat({
 
 function Caption({ children }: { children: ReactNode }) {
   return (
-    <p className="mt-1 text-xs font-normal text-[var(--color-ink-soft)]">
+    <p className="mt-1 text-sm font-normal text-[var(--color-ink-soft)]">
       {children}
     </p>
   );

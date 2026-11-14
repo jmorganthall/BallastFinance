@@ -104,11 +104,11 @@ export const dynamic = 'force-dynamic'
 
 const input =
   'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]'
-const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]'
-const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium'
-const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium'
-const quietButton = 'text-sm text-[var(--color-behind)] underline underline-offset-4'
-const subTitle = 'text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
+const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-base font-medium text-[var(--color-on-fill)]'
+const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium'
+const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium'
+const quietButton = 'text-base text-[var(--color-behind)] underline underline-offset-4'
+const subTitle = 'section-label'
 
 const CHOICE_WORDS = {
   travel: { drive: 'Drive', fly: 'Fly' },
@@ -134,14 +134,14 @@ function listingSourceName(source: string): string {
 /** A listing, as a dated fact: resort, room, dates, points and price, and when a broker had it. */
 function ListingRow({ listing }: { listing: Omit<DvcListing, 'source' | 'sourceUrl' | 'seenOn'> & Partial<Pick<DvcListing, 'source' | 'seenOn'>> }) {
   return (
-    <li className="py-1.5 text-sm">
+    <li className="py-1.5 text-base">
       <span className="flex items-baseline justify-between gap-4">
         <span className="min-w-0">
           {listing.resort}, {listing.room}
         </span>
         <span className="shrink-0 font-medium">{listing.priceCents === null ? 'price not shown' : <Money cents={listing.priceCents} />}</span>
       </span>
-      <span className="block text-xs text-[var(--color-ink-soft)]">
+      <span className="block text-sm text-[var(--color-ink-soft)]">
         {shortDate(listing.checkIn)}, {listing.nights} {listing.nights === 1 ? 'night' : 'nights'}
         {listing.points !== null ? ` · ${listing.points} points` : ''}
         {listing.seenOn && listing.source ? ` · what a broker had on ${humanDate(listing.seenOn)} (${listingSourceName(listing.source)})` : ''}
@@ -210,7 +210,7 @@ export default async function TripPage({
         subtitle={`${humanDate(trip.startDate)} to ${humanDate(trip.endDate)} · ${nights} ${nights === 1 ? 'night' : 'nights'} · ${heads.everyone} going`}
       />
 
-      <p className="-mt-4 mb-4 text-sm">
+      <p className="-mt-4 mb-4 text-base">
         <Link href="/trips" className="text-[var(--color-accent)] underline underline-offset-4">
           All trips
         </Link>
@@ -219,19 +219,19 @@ export default async function TripPage({
       {error ? (
         <Problem className="mb-4">{error}</Problem>
       ) : saved ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">Saved.</p>
+        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-base text-[var(--color-ahead)]">Saved.</p>
       ) : null}
 
       <div className="grid items-start gap-x-4 xl:grid-cols-2">
         {trip.packageId ? (
           <Card className="mb-4 bg-[var(--color-ahead-soft)]">
-            <h2 className="font-semibold text-[var(--color-ahead)]">This is a plan now</h2>
-            <p className="mt-1 text-sm">
+            <h2 className="card-title text-[var(--color-ahead)]">This is a plan now</h2>
+            <p className="mt-1 text-base">
               {chosen ? `"${chosen.name}"` : 'One way of doing it'} went to Plans
               {trip.sentOn ? ` on ${humanDate(trip.sentOn)}` : ''}. Money changes are made on the plan from here; the
               days, reservations and to-dos below still go on.
             </p>
-            <p className="mt-2 text-sm">
+            <p className="mt-2 text-base">
               <Link href={`/packages/${trip.packageId}`} className="font-medium text-[var(--color-accent)] underline underline-offset-4">
                 Open the plan
               </Link>
@@ -239,14 +239,14 @@ export default async function TripPage({
           </Card>
         ) : trip.retiredAt ? (
           <Card className="mb-4">
-            <p className="text-sm">Put away on {humanDate(trip.retiredAt)}. Nothing here changes any more.</p>
+            <p className="text-base">Put away on {humanDate(trip.retiredAt)}. Nothing here changes any more.</p>
           </Card>
         ) : null}
 
         {pending.drive && editable ? (
           <Card className="mb-4 bg-[var(--color-accent-soft)]">
-            <h2 className="font-semibold">The drive, as the route service sees it</h2>
-            <p className="mt-1 text-sm">
+            <h2 className="card-title">The drive, as the route service sees it</h2>
+            <p className="mt-1 text-base">
               About <strong>{pending.drive[0].toLocaleString('en-US')} miles</strong> and{' '}
               <strong>{hoursAndMinutes(pending.drive[1])}</strong> each way from {trip.home?.label ?? 'home'}. Use it?
               {pending.drive[1] > view.maxDriveMinutes ? ' That is more than a day at the wheel, so a hotel on the way will be added.' : ''}
@@ -267,8 +267,8 @@ export default async function TripPage({
 
         {pending.gas && editable ? (
           <Card className="mb-4 bg-[var(--color-accent-soft)]">
-            <h2 className="font-semibold">Gas this week</h2>
-            <p className="mt-1 text-sm">
+            <h2 className="card-title">Gas this week</h2>
+            <p className="mt-1 text-base">
               The US average for regular is <strong><Money cents={pending.gas.centsPerGallon} /></strong> a gallon for the week of{' '}
               {humanDate(pending.gas.observationDate)}. Use it?
             </p>
@@ -288,12 +288,12 @@ export default async function TripPage({
 
         {plan.pendingPull && planning ? (
           <Card className="mb-4 bg-[var(--color-accent-soft)]">
-            <h2 className="font-semibold">How busy, as {plan.pendingPull.label} sees it</h2>
-            <p className="mt-1 text-sm">
+            <h2 className="card-title">How busy, as {plan.pendingPull.label} sees it</h2>
+            <p className="mt-1 text-base">
               {plan.pendingPull.levels.length} park-days read for {plan.pendingPull.months.join(', ')}, fetched{' '}
               {humanDate(plan.pendingPull.fetchedOn)}. Keep them? A level you typed yourself is always shown over these.
             </p>
-            <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
+            <ul className="mt-2 text-sm text-[var(--color-ink-soft)]">
               {crowdPullSummary(plan.pendingPull.levels).map((s) => (
                 <li key={s.park}>
                   {s.label}: {s.days} days, {shortDate(s.from)} to {shortDate(s.to)}, how busy {s.lowest} to {s.highest}
@@ -322,8 +322,8 @@ export default async function TripPage({
 
         {plan.pendingDvcPull && planning ? (
           <Card className="mb-4 bg-[var(--color-accent-soft)]">
-            <h2 className="font-semibold">What {plan.pendingDvcPull.label} had on {humanDate(plan.pendingDvcPull.seenOn)}</h2>
-            <p className="mt-1 text-sm">
+            <h2 className="card-title">What {plan.pendingDvcPull.label} had on {humanDate(plan.pendingDvcPull.seenOn)}</h2>
+            <p className="mt-1 text-base">
               {plan.pendingDvcPull.listings.length} {plan.pendingDvcPull.listings.length === 1 ? 'room' : 'rooms'} with a check-in from{' '}
               {shortDate(plan.pendingDvcPull.from)} to {shortDate(plan.pendingDvcPull.to)}. Keep them as a note beside where you stay? The
               lodging figure in the price tag stays what you typed.
@@ -334,7 +334,7 @@ export default async function TripPage({
                 <ListingRow key={`${l.resort}|${l.room}|${l.checkIn}|${l.nights}`} listing={l} />
               ))}
             </ul>
-            <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
+            <ul className="mt-2 text-sm text-[var(--color-ink-soft)]">
               {plan.pendingDvcPull.notes.map((n) => (
                 <li key={n}>{n}</li>
               ))}
@@ -357,7 +357,7 @@ export default async function TripPage({
         ) : null}
 
         <Card className="mb-4">
-          <p className="text-sm">
+          <p className="text-base">
             <strong>{trip.travelers.map((t) => t.name).join(', ')}</strong>
             {heads.children > 0 || heads.infants > 0 ? (
               <span className="text-[var(--color-ink-soft)]">
@@ -368,7 +368,7 @@ export default async function TripPage({
               </span>
             ) : null}
           </p>
-          <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
             {trip.car ? `Car: ${trip.car.mpg} mpg, ${trip.car.seats} seats.` : 'No car on this trip.'}{' '}
             {trip.home
               ? homeIsLocated(trip.home)
@@ -378,35 +378,35 @@ export default async function TripPage({
           </p>
           {editable ? (
             <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-medium">Change the trip</summary>
+              <summary className="cursor-pointer text-base font-medium">Change the trip</summary>
               <form action={updateTripAction} className="mt-4 space-y-4">
                 <input type="hidden" name="trip_id" value={trip.id} />
-                <label className="block text-sm font-medium">
+                <label className="block text-base font-medium">
                   What to call it
                   <input name="name" required defaultValue={trip.name} className={input} />
                 </label>
                 <div className="grid grid-cols-2 gap-4">
-                  <label className="block text-sm font-medium">
+                  <label className="block text-base font-medium">
                     First day
                     <input name="start_date" type="date" required defaultValue={trip.startDate} className={input} />
                   </label>
-                  <label className="block text-sm font-medium">
+                  <label className="block text-base font-medium">
                     Last day
                     <input name="end_date" type="date" required defaultValue={trip.endDate} className={input} />
                   </label>
                 </div>
                 <TravelerFields initial={trip.travelers} />
                 <div className="grid grid-cols-2 gap-4">
-                  <label className="block text-sm font-medium">
+                  <label className="block text-base font-medium">
                     Car, miles per gallon
                     <input name="car_mpg" inputMode="numeric" defaultValue={trip.car?.mpg ?? ''} className={input} />
                   </label>
-                  <label className="block text-sm font-medium">
+                  <label className="block text-base font-medium">
                     Seats
                     <input name="car_seats" inputMode="numeric" defaultValue={trip.car?.seats ?? ''} className={input} />
                   </label>
                 </div>
-                <p className="text-xs text-[var(--color-ink-soft)]">
+                <p className="text-sm text-[var(--color-ink-soft)]">
                   Changing who is going or the dates re-counts every part. Figures you typed stay as you typed them; days
                   that are still in the trip keep their plans.
                 </p>
@@ -438,8 +438,8 @@ export default async function TripPage({
               : 'No crowd calendar yet for these dates'
           }
         >
-          {refreshed ? <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
-          <h3 className="font-semibold">Look at the year</h3>
+          {refreshed ? <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-base text-[var(--color-ahead)]">{refreshed}</p> : null}
+          <h3 className="card-title">Look at the year</h3>
           <ParkCalendar
             calendar={calendar}
             year={year}
@@ -465,14 +465,14 @@ export default async function TripPage({
                 <button type="submit" className={smallButton}>
                   Use these dates
                 </button>
-                <span className="text-xs text-[var(--color-ink-soft)]">
+                <span className="text-sm text-[var(--color-ink-soft)]">
                   {shortDate(tappedDay)} – {shortDate(addDays(tappedDay, nights))}, {nights} {nights === 1 ? 'night' : 'nights'}
                 </span>
               </form>
             ) : null}
           </ParkCalendar>
-          <h3 className="mt-4 font-semibold">Best weeks</h3>
-          <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+          <h3 className="mt-4 card-title">Best weeks</h3>
+          <p className="mb-2 text-sm leading-snug text-[var(--color-ink-soft)]">
             The ten best dates from {shortDate(plan.bestWeeks.horizonFrom)} to {shortDate(plan.bestWeeks.horizonTo)},{' '}
             {plan.bestWeeks.horizonTo.slice(0, 4)}: every {nights}-night window, and every long weekend a holiday or a day
             off school makes. {weightsSentence(plan.weekWeights)}
@@ -480,12 +480,12 @@ export default async function TripPage({
             {plan.bestWeeks.daysOffKnown ? '' : ' No school calendar yet, so every weekday counts as school; add one under Trips.'}
           </p>
           {plan.bestWeeks.top.length === 0 ? (
-            <p className="mb-4 text-sm text-[var(--color-ink-soft)]">Every window ahead runs into a week you cannot go.</p>
+            <p className="mb-4 text-base text-[var(--color-ink-soft)]">Every window ahead runs into a week you cannot go.</p>
           ) : (
             <ol className="mb-4 divide-y divide-[var(--color-line)]">
               {plan.bestWeeks.top.map((c, i) => (
                 <li key={`${c.startDate}|${c.endDate}`} className={`flex items-start justify-between gap-4 py-2 ${c.current ? 'bg-[var(--color-accent-soft)]' : ''}`}>
-                  <div className="min-w-0 text-sm">
+                  <div className="min-w-0 text-base">
                     <span className="font-medium">
                       {i + 1}. {shortDate(c.startDate)} – {shortDate(c.endDate)}, {c.endDate.slice(0, 4)}
                     </span>
@@ -493,10 +493,10 @@ export default async function TripPage({
                       {' '}
                       · {weekdayName(c.startDate)}, {c.nights} {c.nights === 1 ? 'night' : 'nights'}
                     </span>
-                    <span className="block text-xs text-[var(--color-ink-soft)]">{c.reasons.join(' · ')}</span>
+                    <span className="block text-sm text-[var(--color-ink-soft)]">{c.reasons.join(' · ')}</span>
                   </div>
                   <div className="shrink-0 text-right">
-                    <Money cents={c.priceCents} className="block text-sm" />
+                    <Money cents={c.priceCents} className="block text-base" />
                     {editable && !c.current ? (
                       <form action={useDatesAction} className="mt-1">
                         <input type="hidden" name="trip_id" value={trip.id} />
@@ -507,23 +507,23 @@ export default async function TripPage({
                         </button>
                       </form>
                     ) : c.current ? (
-                      <span className="text-xs text-[var(--color-ink-soft)]">this trip</span>
+                      <span className="text-sm text-[var(--color-ink-soft)]">this trip</span>
                     ) : null}
                   </div>
                 </li>
               ))}
             </ol>
           )}
-          <h3 className="font-semibold">A few weeks either side</h3>
-          <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+          <h3 className="card-title">A few weeks either side</h3>
+          <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
             The same trip a few weeks either side: how busy the parks are on{' '}
             {parkDays > 0 ? 'the park days' : 'each day'}, what it costs, and what it runs into. How busy is 1 (quiet)
             to 10 (packed).
           </p>
           <div className="-mx-4 overflow-x-auto px-4">
-            <table className="w-full min-w-[36rem] text-sm">
+            <table className="w-full min-w-[36rem] text-base">
               <thead>
-                <tr className="text-left text-xs text-[var(--color-ink-soft)]">
+                <tr className="text-left text-sm text-[var(--color-ink-soft)]">
                   <th className="py-1 pr-2 font-medium">Week</th>
                   <th className="py-1 pr-2 font-medium">How busy</th>
                   <th className="py-1 pr-4 text-right font-medium">Price</th>
@@ -537,7 +537,7 @@ export default async function TripPage({
                   <tr key={w.startDate} className={w.current ? 'bg-[var(--color-accent-soft)]' : ''}>
                     <td className="py-2 pr-2 align-top">
                       {shortDate(w.startDate)} – {shortDate(w.endDate)}
-                      <span className="block text-xs text-[var(--color-ink-soft)]">
+                      <span className="block text-sm text-[var(--color-ink-soft)]">
                         {weekdayName(w.startDate)}s{w.current ? ' · this trip' : w.past ? ' · already gone' : ''}
                       </span>
                     </td>
@@ -546,10 +546,10 @@ export default async function TripPage({
                         <span className="text-[var(--color-ink-soft)]">no data</span>
                       ) : (
                         <>
-                          <strong>{w.crowd.average}</strong> <span className="text-xs text-[var(--color-ink-soft)]">avg</span>, {w.crowd.worst}{' '}
-                          <span className="text-xs text-[var(--color-ink-soft)]">worst</span>
+                          <strong>{w.crowd.average}</strong> <span className="text-sm text-[var(--color-ink-soft)]">avg</span>, {w.crowd.worst}{' '}
+                          <span className="text-sm text-[var(--color-ink-soft)]">worst</span>
                           {w.crowd.daysWithData < w.crowd.parkDays ? (
-                            <span className="block text-xs text-[var(--color-caution)]">
+                            <span className="block text-sm text-[var(--color-caution)]">
                               {w.crowd.daysWithData} of {w.crowd.parkDays} days known
                             </span>
                           ) : null}
@@ -581,7 +581,7 @@ export default async function TripPage({
               </tbody>
             </table>
           </div>
-          <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+          <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
             &ldquo;Use this week&rdquo; and &ldquo;Use these dates&rdquo; move the whole trip, days and unconfirmed reservations
             with it; a long weekend of another length sets the first and last day afresh. Weeks you cannot go, the school
             calendar and how the best weeks are picked are set under Trips.
@@ -599,7 +599,7 @@ export default async function TripPage({
           }
         >
           {view.variants.length === 0 ? (
-            <p className="text-sm text-[var(--color-ink-soft)]">
+            <p className="text-base text-[var(--color-ink-soft)]">
               None yet. Add one below: drive or fly, where to stay, how many park days. Each gets its own price tag under Money.
             </p>
           ) : (
@@ -611,8 +611,8 @@ export default async function TripPage({
                   <li key={variant.id} className="py-3 first:pt-0 last:pb-0">
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <h3 className="font-semibold">{variant.name}</h3>
-                        <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
+                        <h3 className="card-title">{variant.name}</h3>
+                        <p className="mt-0.5 text-sm text-[var(--color-ink-soft)]">
                           {CHOICE_WORDS.travel[c.travel]} · {CHOICE_WORDS.lodging[c.lodging]} · {CHOICE_WORDS.lightningLane[c.lightningLane]} ·{' '}
                           {CHOICE_WORDS.dining[c.dining]} · {c.parkDays} park {c.parkDays === 1 ? 'day' : 'days'}
                           {c.promotion ? ` · ${c.promotion.name}` : ''}
@@ -629,12 +629,12 @@ export default async function TripPage({
                     </div>
                     {editable ? (
                       <details className="mt-2">
-                        <summary className="cursor-pointer text-xs text-[var(--color-accent)]">Change the choices</summary>
+                        <summary className="cursor-pointer text-sm text-[var(--color-accent)]">Change the choices</summary>
                         <form action={updateVariantAction} className="mt-2 space-y-2">
                           <input type="hidden" name="trip_id" value={trip.id} />
                           <input type="hidden" name="variant_id" value={variant.id} />
                           <ChoiceFields choices={c} name={variant.name} maxParkDays={nights + 1} />
-                          <p className="text-xs text-[var(--color-ink-soft)]">
+                          <p className="text-sm text-[var(--color-ink-soft)]">
                             The parts are re-listed for the new choices. Figures you typed stay; parts you added stay.
                           </p>
                           <button type="submit" className={secondaryButton}>
@@ -657,7 +657,7 @@ export default async function TripPage({
           )}
           {editable ? (
             <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-medium">Another way to do it</summary>
+              <summary className="cursor-pointer text-base font-medium">Another way to do it</summary>
               <form action={addVariantAction} className="mt-2 space-y-2">
                 <input type="hidden" name="trip_id" value={trip.id} />
                 <ChoiceFields maxParkDays={nights + 1} />
@@ -687,7 +687,7 @@ export default async function TripPage({
                   .join(', ')
           }
         >
-          <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+          <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
             When Disney opens each thing, and when the money is due, for the way the plan follows
             {followed ? ` ("${followed.name}")` : ''}. Edit a to-do and it is yours; a rebuild leaves it alone.
           </p>
@@ -709,15 +709,15 @@ export default async function TripPage({
           {planning ? (
             <div className="mt-4 space-y-4">
               <details>
-                <summary className="cursor-pointer text-sm font-medium">Add a to-do</summary>
+                <summary className="cursor-pointer text-base font-medium">Add a to-do</summary>
                 <form action={addTaskAction} className="mt-2 space-y-2">
                   <input type="hidden" name="trip_id" value={trip.id} />
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     What
                     <input name="label" required placeholder="Book the airport parking" className={input} />
                   </label>
                   <div className="grid grid-cols-2 gap-2">
-                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                    <label className="block text-sm text-[var(--color-ink-soft)]">
                       Kind
                       <select name="kind" defaultValue="do" className={input}>
                         {TASK_KINDS.map((k) => (
@@ -727,15 +727,15 @@ export default async function TripPage({
                         ))}
                       </select>
                     </label>
-                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                    <label className="block text-sm text-[var(--color-ink-soft)]">
                       By
                       <input name="due_on" type="date" required defaultValue={trip.startDate} className={input} />
                     </label>
-                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                    <label className="block text-sm text-[var(--color-ink-soft)]">
                       Link (optional)
                       <input name="link" type="url" placeholder="https://" className={input} />
                     </label>
-                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                    <label className="block text-sm text-[var(--color-ink-soft)]">
                       Part of the trip
                       <select name="line_id" defaultValue="" className={input}>
                         <option value="">None</option>
@@ -757,7 +757,7 @@ export default async function TripPage({
                 <button type="submit" className={secondaryButton}>
                   Rebuild the timeline
                 </button>
-                <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                   Re-dates the to-dos the app made from the trip&apos;s dates and choices.
                   Anything you edited or ticked stays as it is.
                 </p>
@@ -773,7 +773,7 @@ export default async function TripPage({
           headline={`${plan.dayViews.length} ${plan.dayViews.length === 1 ? 'day' : 'days'}, ${parkDays} in the parks`}
         >
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-            <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="text-sm leading-snug text-[var(--color-ink-soft)]">
               Which park, rope drop or a lie-in, and what is booked that day. How busy comes from a public crowd calendar
               (1 quiet to 10 packed), fetched only when you ask, shown before it is kept, and never over a level you typed.
               A level over {CROWD_STALE_AFTER_DAYS} days old is marked.
@@ -815,7 +815,7 @@ export default async function TripPage({
           }
         >
           {plan.reservations.length === 0 ? (
-            <p className="text-sm text-[var(--color-ink-soft)]">Tables, Lightning Lanes, flights, the room: each with its confirmation number, by date.</p>
+            <p className="text-base text-[var(--color-ink-soft)]">Tables, Lightning Lanes, flights, the room: each with its confirmation number, by date.</p>
           ) : (
             <ul className="divide-y divide-[var(--color-line)]">
               {plan.reservations.map((r) => (
@@ -824,7 +824,7 @@ export default async function TripPage({
             </ul>
           )}
           {plan.money.countedIn.length > 0 || plan.money.uncountedCents > 0 ? (
-            <p className="mt-4 text-xs text-[var(--color-ink-soft)]">
+            <p className="mt-4 text-sm text-[var(--color-ink-soft)]">
               {plan.money.countedIn.map((c) => (
                 <span key={c.lineId} className="block">
                   <Money cents={c.cents} /> counted in {lineName(c.lineId) ?? 'a part of the trip'}.
@@ -840,7 +840,7 @@ export default async function TripPage({
           ) : null}
           {planning ? (
             <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-medium">Add a reservation</summary>
+              <summary className="cursor-pointer text-base font-medium">Add a reservation</summary>
               <form action={addReservationAction} className="mt-2 space-y-2">
                 <input type="hidden" name="trip_id" value={trip.id} />
                 <ReservationFields tripStart={trip.startDate} lines={followed?.lines ?? []} />
@@ -861,14 +861,14 @@ export default async function TripPage({
         >
           {editable ? (
             <div className="mb-4 rounded-xl bg-[var(--color-surface)] p-3">
-              <h3 className="font-semibold">Looking things up</h3>
-              <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
+              <h3 className="card-title">Looking things up</h3>
+              <p className="mt-1 text-sm leading-snug text-[var(--color-ink-soft)]">
                 The two money figures the app can fetch, from public services with no account: the drive, and this
                 week&apos;s gas price. Nothing Disney sells can be looked up. A figure you type yourself is never overwritten.
               </p>
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
-                  <p className="text-sm">
+                  <p className="text-base">
                     <strong>The drive.</strong>{' '}
                     {view.drive
                       ? `${view.drive.miles.toLocaleString('en-US')} miles, ${hoursAndMinutes(view.drive.minutes)} each way (looked up ${humanDate(view.drive.fetchedOn)}).`
@@ -882,7 +882,7 @@ export default async function TripPage({
                   </form>
                 </div>
                 <div>
-                  <p className="text-sm">
+                  <p className="text-base">
                     <strong>Gas.</strong>{' '}
                     {view.gasPrice ? (
                       <>
@@ -900,7 +900,7 @@ export default async function TripPage({
                   </form>
                   <form action={useGasPriceAction} className="mt-2 flex items-end gap-2">
                     <input type="hidden" name="trip_id" value={trip.id} />
-                    <label className="min-w-0 flex-1 text-xs text-[var(--color-ink-soft)]">
+                    <label className="min-w-0 flex-1 text-sm text-[var(--color-ink-soft)]">
                       Or type a price a gallon
                       <input name="dollars_per_gallon" inputMode="decimal" placeholder="3.05" className={input} />
                     </label>
@@ -914,7 +914,7 @@ export default async function TripPage({
           ) : null}
 
           {view.variants.length === 0 ? (
-            <p className="text-sm text-[var(--color-ink-soft)]">Price a way of doing it under How, and its price tag appears here.</p>
+            <p className="text-base text-[var(--color-ink-soft)]">Price a way of doing it under How, and its price tag appears here.</p>
           ) : null}
           <div className="grid gap-4 md:grid-cols-2">
             {view.variants.map((variant) => {
@@ -927,14 +927,14 @@ export default async function TripPage({
               return (
                 <Card key={variant.id} className={isChosen ? 'border-[var(--color-ahead)]' : ''}>
                   <div className="flex items-start justify-between gap-4">
-                    <h3 className="font-semibold">{variant.name}</h3>
+                    <h3 className="card-title">{variant.name}</h3>
                     {isChosen ? <Pill tone="ahead">This is the plan</Pill> : null}
                   </div>
 
                   <p className="mt-4 text-3xl font-semibold tracking-tight">
                     <Money cents={variant.price.totalCents} />
                   </p>
-                  <p className="text-xs text-[var(--color-ink-soft)]">
+                  <p className="text-sm text-[var(--color-ink-soft)]">
                     <Money cents={variant.price.partsCents} /> of parts
                     {variant.price.promotionCents < 0 ? (
                       <>
@@ -945,7 +945,7 @@ export default async function TripPage({
                     <Money cents={variant.price.cushionCents} />.
                     {unpriced > 0 ? ` ${unpriced} ${unpriced === 1 ? 'part still needs' : 'parts still need'} a figure.` : ''}
                   </p>
-                  <p className="mt-2 text-sm">
+                  <p className="mt-2 text-base">
                     <Hint detail="The earliest due date among parts worth more than the cushion you keep back before sharing anything out (under Settings). Small parts and deals do not set it.">
                       First money due
                     </Hint>
@@ -956,7 +956,7 @@ export default async function TripPage({
                     <form action={sendToPlansAction} className="mt-4 space-y-2">
                       <input type="hidden" name="trip_id" value={trip.id} />
                       <input type="hidden" name="variant_id" value={variant.id} />
-                      <label className="block text-xs text-[var(--color-ink-soft)]">
+                      <label className="block text-sm text-[var(--color-ink-soft)]">
                         Saves into
                         <select name="reserve_account" required className={input} defaultValue="">
                           <option value="" disabled>
@@ -974,14 +974,14 @@ export default async function TripPage({
                       <button type="submit" className={primaryButton}>
                         Add to Plans
                       </button>
-                      <p className="text-xs text-[var(--color-ink-soft)]">
+                      <p className="text-sm text-[var(--color-ink-soft)]">
                         Makes a draft plan you can look over and start saving for. A part with its own account keeps it.
                       </p>
                     </form>
                   ) : null}
 
                   <details className="mt-4" open={view.variants.length === 1}>
-                    <summary className="cursor-pointer text-sm font-medium">What&apos;s in it</summary>
+                    <summary className="cursor-pointer text-base font-medium">What&apos;s in it</summary>
                     <div className="mt-2 space-y-4">
                       {grouped.map((group) => (
                         <div key={group.category}>
@@ -993,7 +993,7 @@ export default async function TripPage({
                           </ul>
                           {group.category === 'lodging' && variant.choices.lodging === 'dvc_rental' && planning ? (
                             <div className="mt-2 rounded-xl bg-[var(--color-surface)] p-3">
-                              <p className="text-xs leading-snug text-[var(--color-ink-soft)]">
+                              <p className="text-sm leading-snug text-[var(--color-ink-soft)]">
                                 What a DVC broker had for these dates, two days either side: a note beside the figure above, never
                                 the figure itself. Read from the broker&apos;s public page when you press the button.
                               </p>
@@ -1004,7 +1004,7 @@ export default async function TripPage({
                                   ))}
                                 </ul>
                               ) : (
-                                <p className="mt-2 text-sm text-[var(--color-ink-soft)]">Nothing read yet.</p>
+                                <p className="mt-2 text-base text-[var(--color-ink-soft)]">Nothing read yet.</p>
                               )}
                               <form action={checkDvcListingsAction} className="mt-2">
                                 <input type="hidden" name="trip_id" value={trip.id} />
@@ -1018,16 +1018,16 @@ export default async function TripPage({
                       ))}
                       {editable ? (
                         <details>
-                          <summary className="cursor-pointer text-sm font-medium">Add a part</summary>
+                          <summary className="cursor-pointer text-base font-medium">Add a part</summary>
                           <form action={addTripLineAction} className="mt-2 space-y-2">
                             <input type="hidden" name="trip_id" value={trip.id} />
                             <input type="hidden" name="variant_id" value={variant.id} />
-                            <label className="block text-xs text-[var(--color-ink-soft)]">
+                            <label className="block text-sm text-[var(--color-ink-soft)]">
                               What
                               <input name="label" required placeholder="Stroller rental" className={input} />
                             </label>
                             <div className="grid grid-cols-2 gap-2">
-                              <label className="block text-xs text-[var(--color-ink-soft)]">
+                              <label className="block text-sm text-[var(--color-ink-soft)]">
                                 Part of
                                 <select name="category" className={input} defaultValue="souvenirs">
                                   {TRIP_LINE_CATEGORIES.map((category) => (
@@ -1037,15 +1037,15 @@ export default async function TripPage({
                                   ))}
                                 </select>
                               </label>
-                              <label className="block text-xs text-[var(--color-ink-soft)]">
+                              <label className="block text-sm text-[var(--color-ink-soft)]">
                                 Due
                                 <input name="due_date" type="date" required defaultValue={trip.startDate} className={input} />
                               </label>
-                              <label className="block text-xs text-[var(--color-ink-soft)]">
+                              <label className="block text-sm text-[var(--color-ink-soft)]">
                                 Each
                                 <input name="unit_amount" required inputMode="decimal" placeholder="60" className={input} />
                               </label>
-                              <label className="block text-xs text-[var(--color-ink-soft)]">
+                              <label className="block text-sm text-[var(--color-ink-soft)]">
                                 How many
                                 <input name="quantity" inputMode="numeric" defaultValue={1} className={input} />
                               </label>
@@ -1074,8 +1074,8 @@ function Section({ id, title, headline, wide, children }: { id: string; title: s
     <details id={id} open className={`mb-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] ${wide ? 'xl:col-span-2' : ''}`}>
       <summary className="cursor-pointer list-none p-4 [&::-webkit-details-marker]:hidden">
         <div className="flex items-baseline justify-between gap-4">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <span className="min-w-0 truncate text-right text-sm text-[var(--color-ink-soft)]">{headline}</span>
+          <h2 className="card-title">{title}</h2>
+          <span className="min-w-0 truncate text-right text-base text-[var(--color-ink-soft)]">{headline}</span>
         </div>
       </summary>
       <div className="border-t border-[var(--color-line)] px-4 pb-4 pt-3">{children}</div>
@@ -1114,7 +1114,7 @@ function TaskRow({
             >
               <span
                 aria-hidden="true"
-                className={`flex h-6 w-6 items-center justify-center rounded-md border text-xs ${task.doneOn ? 'border-[var(--color-ahead)] bg-[var(--color-ahead-soft)] text-[var(--color-ahead)]' : 'border-[var(--color-line)]'}`}
+                className={`flex h-6 w-6 items-center justify-center rounded-md border text-sm ${task.doneOn ? 'border-[var(--color-ahead)] bg-[var(--color-ahead-soft)] text-[var(--color-ahead)]' : 'border-[var(--color-line)]'}`}
               >
                 {task.doneOn ? '✓' : ''}
               </span>
@@ -1122,11 +1122,11 @@ function TaskRow({
           </form>
         ) : null}
         <div className="min-w-0 flex-1">
-          <p className={`text-sm ${task.doneOn ? 'text-[var(--color-ink-soft)] line-through' : ''}`}>
-            <span className="mr-1.5 text-xs text-[var(--color-ink-soft)]">{TASK_KIND_LABELS[task.kind]}</span>
+          <p className={`text-base ${task.doneOn ? 'text-[var(--color-ink-soft)] line-through' : ''}`}>
+            <span className="mr-1.5 text-sm text-[var(--color-ink-soft)]">{TASK_KIND_LABELS[task.kind]}</span>
             {task.label}
           </p>
-          <p className="text-xs text-[var(--color-ink-soft)]">
+          <p className="text-sm text-[var(--color-ink-soft)]">
             {task.doneOn ? `Done ${humanDate(task.doneOn)} · was due ` : overdue ? 'Was due ' : 'By '}
             <span className={overdue && !task.doneOn ? 'text-[var(--color-behind)]' : ''}>{humanDate(task.dueOn)}</span>
             {lineName ? ` · ${lineName}` : ''}
@@ -1143,16 +1143,16 @@ function TaskRow({
           </p>
           {editable ? (
             <details className="mt-1">
-              <summary className="cursor-pointer text-xs text-[var(--color-accent)]">Change</summary>
+              <summary className="cursor-pointer text-sm text-[var(--color-accent)]">Change</summary>
               <form action={updateTaskAction} className="mt-2 space-y-2">
                 <input type="hidden" name="trip_id" value={tripId} />
                 <input type="hidden" name="task_id" value={task.id} />
-                <label className="block text-xs text-[var(--color-ink-soft)]">
+                <label className="block text-sm text-[var(--color-ink-soft)]">
                   What
                   <input name="label" required defaultValue={task.label} className={input} />
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     Kind
                     <select name="kind" defaultValue={task.kind} className={input}>
                       {TASK_KINDS.map((k) => (
@@ -1162,15 +1162,15 @@ function TaskRow({
                       ))}
                     </select>
                   </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     By
                     <input name="due_on" type="date" defaultValue={task.dueOn} className={input} />
                   </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     Link
                     <input name="link" type="url" defaultValue={task.link ?? ''} className={input} />
                   </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     Part of the trip
                     <select name="line_id" defaultValue={task.lineId ?? ''} className={input}>
                       <option value="">None</option>
@@ -1191,7 +1191,7 @@ function TaskRow({
               <form action={removeTaskAction} className="mt-2">
                 <input type="hidden" name="trip_id" value={tripId} />
                 <input type="hidden" name="task_id" value={task.id} />
-                <button type="submit" className="text-xs text-[var(--color-behind)] underline underline-offset-4">
+                <button type="submit" className="text-sm text-[var(--color-behind)] underline underline-offset-4">
                   Take this off
                 </button>
               </form>
@@ -1206,7 +1206,7 @@ function TaskRow({
 function CrowdMark({ level, today }: { level: Busyness; today: string }) {
   const fresh = level.fetchedOn ? crowdFreshness({ fetchedOn: level.fetchedOn }, today) : { stale: false }
   return (
-    <span className="text-xs text-[var(--color-ink-soft)]">
+    <span className="text-sm text-[var(--color-ink-soft)]">
       {level.source === 'crowd_level' ? crowdSourceName(level.detail) : BUSYNESS_SOURCE_WORDS[level.source]}
       {level.fetchedOn && level.source !== 'typed' ? `, ${humanDate(level.fetchedOn)}` : ''}
       {fresh.stale ? (
@@ -1242,16 +1242,16 @@ function ParkDayPlanCard({ plan, tripId, editable }: { plan: ParkDayPlan; tripId
   return (
     <Card className="mb-4 bg-[var(--color-surface)]">
       <div className="flex items-baseline justify-between gap-4">
-        <h3 className="font-semibold">Which park, which day</h3>
-        <span className="text-xs text-[var(--color-ink-soft)]">{plan.summary}</span>
+        <h3 className="card-title">Which park, which day</h3>
+        <span className="text-sm text-[var(--color-ink-soft)]">{plan.summary}</span>
       </div>
-      <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
+      <p className="mt-1 text-sm leading-snug text-[var(--color-ink-soft)]">
         From how busy each park is, the weather and the park hours: the quietest park first, a wet day to the parks with the most under cover, a hot
         day to the one that opens earliest, a late close for the evening, and each of the four parks once before any repeats. A day you set yourself is
         kept and planned around. Nothing changes until you press &ldquo;Use this plan&rdquo;.
       </p>
       {plan.assignments.length > 0 ? (
-        <ul className="mt-2 divide-y divide-[var(--color-line)] text-sm">
+        <ul className="mt-2 divide-y divide-[var(--color-line)] text-base">
           {plan.assignments.map((a) => (
             <li key={a.dayId} className="flex items-baseline gap-2 py-1.5">
               <span className="w-20 shrink-0 text-[var(--color-ink-soft)]">
@@ -1259,25 +1259,25 @@ function ParkDayPlanCard({ plan, tripId, editable }: { plan: ParkDayPlan; tripId
               </span>
               <span className="min-w-0 flex-1">
                 <BusyChip level={a.busyness} /> <Hint detail={`Fit ${a.score}: lower is a better fit`}>{PARK_LABELS[a.park]}</Hint>
-                {a.current !== a.park ? <span className="text-xs text-[var(--color-ink-soft)]"> (now {PARK_LABELS[a.current].toLowerCase()})</span> : null}
-                <span className="block text-xs text-[var(--color-ink-soft)]">{a.reasons.join(', ')}</span>
+                {a.current !== a.park ? <span className="text-sm text-[var(--color-ink-soft)]"> (now {PARK_LABELS[a.current].toLowerCase()})</span> : null}
+                <span className="block text-sm text-[var(--color-ink-soft)]">{a.reasons.join(', ')}</span>
               </span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">Every day is your pick, a travel day, or already gone, so there is nothing for the plan to choose.</p>
+        <p className="mt-2 text-base text-[var(--color-ink-soft)]">Every day is your pick, a travel day, or already gone, so there is nothing for the plan to choose.</p>
       )}
       {plan.unchanged.length > 0 ? (
-        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
           Your pick: {plan.unchanged.map((u) => `${weekdayName(u.date).slice(0, 3)} ${shortDate(u.date)} ${PARK_LABELS[u.park].toLowerCase()}`).join(', ')}.
         </p>
       ) : null}
       {plan.unplanned.length > 0 ? (
-        <p className="mt-2 text-xs text-[var(--color-behind)]">{plan.unplanned.map((u) => `${weekdayName(u.date).slice(0, 3)} ${shortDate(u.date)}: ${u.reason}`).join('; ')}.</p>
+        <p className="mt-2 text-sm text-[var(--color-behind)]">{plan.unplanned.map((u) => `${weekdayName(u.date).slice(0, 3)} ${shortDate(u.date)}: ${u.reason}`).join('; ')}.</p>
       ) : null}
       {missing.map((m) => (
-        <p key={m} className="mt-2 text-xs text-[var(--color-ink-soft)]">
+        <p key={m} className="mt-2 text-sm text-[var(--color-ink-soft)]">
           {m}
         </p>
       ))}
@@ -1290,12 +1290,12 @@ function ParkDayPlanCard({ plan, tripId, editable }: { plan: ParkDayPlan; tripId
           <button type="submit" className={smallButton}>
             Use this plan
           </button>
-          <span className="text-xs text-[var(--color-ink-soft)]">
+          <span className="text-sm text-[var(--color-ink-soft)]">
             Sets {changes.length} {changes.length === 1 ? 'day' : 'days'}; the rest already match.
           </span>
         </form>
       ) : editable && plan.assignments.length > 0 ? (
-        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">The days already match this plan.</p>
+        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">The days already match this plan.</p>
       ) : null}
     </Card>
   )
@@ -1308,16 +1308,16 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
   return (
     <Card>
       <div id={`day-${day.day?.id ?? day.date}`} className="flex items-baseline justify-between gap-4">
-        <h3 className="font-semibold">
+        <h3 className="card-title">
           {weekdayName(day.date)} <span className="font-normal text-[var(--color-ink-soft)]">{shortDate(day.date)}</span>
         </h3>
-        <span className="text-sm">
+        <span className="text-base">
           {PARK_LABELS[day.park]}
-          {yourPick ? <span className="ml-1 text-xs text-[var(--color-ink-soft)]">(your pick)</span> : null}
+          {yourPick ? <span className="ml-1 text-sm text-[var(--color-ink-soft)]">(your pick)</span> : null}
         </span>
       </div>
       {proposal ? (
-        <details className="mt-1 text-xs text-[var(--color-ink-soft)]">
+        <details className="mt-1 text-sm text-[var(--color-ink-soft)]">
           <summary className="cursor-pointer">
             {proposal.park === day.park ? 'The plan agrees: ' : 'The plan would make this '}
             <BusyChip level={proposal.busyness} /> {PARK_LABELS[proposal.park]}
@@ -1329,13 +1329,13 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
         <form action={letPlanChooseDayAction} className="mt-1">
           <input type="hidden" name="trip_id" value={tripId} />
           <input type="hidden" name="day_id" value={day.day.id} />
-          <button type="submit" className="text-xs text-[var(--color-accent)] underline underline-offset-4">
+          <button type="submit" className="text-sm text-[var(--color-accent)] underline underline-offset-4">
             Let the plan choose this day
           </button>
         </form>
       ) : null}
 
-      <p className="mt-2 text-sm">
+      <p className="mt-2 text-base">
         {day.level ? (
           <>
             <strong>How busy: {day.level.level}</strong> <span className="text-[var(--color-ink-soft)]">({crowdWord(day.level.level)})</span>{' '}
@@ -1350,18 +1350,18 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
           <span className="text-[var(--color-ink-soft)]">How busy: not known yet.</span>
         )}
         {day.quietest && (!inPark || day.quietest.park !== day.park) ? (
-          <span className="block text-xs text-[var(--color-ink-soft)]">
+          <span className="block text-sm text-[var(--color-ink-soft)]">
             Quietest that day: {PARK_LABELS[day.quietest.park]} ({day.quietest.level}).
           </span>
         ) : null}
       </p>
 
       {day.reservations.length > 0 ? (
-        <ul className="mt-2 text-sm">
+        <ul className="mt-2 text-base">
           {day.reservations.map((r) => (
             <li key={r.id}>
               <span className="text-[var(--color-ink-soft)]">{r.time ?? 'any time'}</span> · {r.name}
-              {r.confirmation ? <span className="text-xs text-[var(--color-ink-soft)]"> · #{r.confirmation}</span> : null}
+              {r.confirmation ? <span className="text-sm text-[var(--color-ink-soft)]"> · #{r.confirmation}</span> : null}
             </li>
           ))}
         </ul>
@@ -1369,12 +1369,12 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
 
       {editable && day.day ? (
         <details className="mt-4">
-          <summary className="cursor-pointer text-xs text-[var(--color-accent)]">Plan this day</summary>
+          <summary className="cursor-pointer text-sm text-[var(--color-accent)]">Plan this day</summary>
           <form action={updateTripDayAction} className="mt-2 space-y-2">
             <input type="hidden" name="trip_id" value={tripId} />
             <input type="hidden" name="day_id" value={day.day.id} />
             <input type="hidden" name="park_was" value={day.day.park} />
-            <label className="block text-xs text-[var(--color-ink-soft)]">
+            <label className="block text-sm text-[var(--color-ink-soft)]">
               Where (a change here is your pick, and the plan keeps it)
               <select name="park" defaultValue={day.day.park} className={input}>
                 {TRIP_PARKS.map((p) => (
@@ -1385,11 +1385,11 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
                 {yourPick ? <option value="plan">Let the plan choose</option> : null}
               </select>
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex items-center gap-2 text-base">
               <input type="checkbox" name="rope_drop" defaultChecked={day.day.plan.ropeDrop} />
               Rope drop (be at the gate before it opens)
             </label>
-            <label className="block text-xs text-[var(--color-ink-soft)]">
+            <label className="block text-sm text-[var(--color-ink-soft)]">
               Notes
               <textarea name="notes" rows={2} defaultValue={day.day.plan.notes} placeholder="Fireworks at 9. Nap after lunch." className={input} />
             </label>
@@ -1401,7 +1401,7 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
             <input type="hidden" name="trip_id" value={tripId} />
             <input type="hidden" name="date" value={day.date} />
             <input type="hidden" name="park" value={levelPark} />
-            <label className="min-w-0 flex-1 text-xs text-[var(--color-ink-soft)]">
+            <label className="min-w-0 flex-1 text-sm text-[var(--color-ink-soft)]">
               Or type how busy {inPark ? PARK_LABELS[day.park] : 'the parks are'} (1 quiet to 10 packed)
               <input name="level" inputMode="numeric" placeholder="6" className={input} />
             </label>
@@ -1418,12 +1418,12 @@ function DayCard({ day, tripId, today, editable, proposal }: { day: DayView; tri
 function ReservationFields({ reservation, tripStart, lines }: { reservation?: TripReservation; tripStart: string; lines: TripLine[] }) {
   return (
     <>
-      <label className="block text-xs text-[var(--color-ink-soft)]">
+      <label className="block text-sm text-[var(--color-ink-soft)]">
         What
         <input name="name" required defaultValue={reservation?.name ?? ''} placeholder="Chef Mickey's" className={input} />
       </label>
       <div className="grid grid-cols-2 gap-2">
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Kind
           <select name="kind" defaultValue={reservation?.kind ?? 'dining'} className={input}>
             {RESERVATION_KINDS.map((k) => (
@@ -1433,7 +1433,7 @@ function ReservationFields({ reservation, tripStart, lines }: { reservation?: Tr
             ))}
           </select>
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Where
           <select name="park" defaultValue={reservation?.park ?? ''} className={input}>
             <option value="">Not in a park</option>
@@ -1444,27 +1444,27 @@ function ReservationFields({ reservation, tripStart, lines }: { reservation?: Tr
             ))}
           </select>
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Date
           <input name="date" type="date" required defaultValue={reservation?.date ?? tripStart} className={input} />
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Time
           <input name="time" type="time" defaultValue={reservation?.time ?? ''} className={input} />
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Confirmation number
           <input name="confirmation" defaultValue={reservation?.confirmation ?? ''} className={input} />
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           How many people
           <input name="party" inputMode="numeric" defaultValue={reservation?.party ?? 1} className={input} />
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Cost each (optional)
           <input name="per_person" inputMode="decimal" defaultValue={reservation?.perPersonCents != null ? dollarsForInput(reservation.perPersonCents) : ''} placeholder="65" className={input} />
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Counted in
           <select name="line_id" defaultValue={reservation?.lineId ?? ''} className={input}>
             <option value="">No part of the trip yet</option>
@@ -1476,7 +1476,7 @@ function ReservationFields({ reservation, tripStart, lines }: { reservation?: Tr
           </select>
         </label>
       </div>
-      <label className="block text-xs text-[var(--color-ink-soft)]">
+      <label className="block text-sm text-[var(--color-ink-soft)]">
         Note
         <input name="note" defaultValue={reservation?.note ?? ''} placeholder="Ask for a window table" className={input} />
       </label>
@@ -1500,7 +1500,7 @@ function ReservationRow({
   const cost = reservationCostCents(r)
   return (
     <li className="py-2 first:pt-0 last:pb-0">
-      <div className="flex items-baseline justify-between gap-4 text-sm">
+      <div className="flex items-baseline justify-between gap-4 text-base">
         <span className="min-w-0">
           <span className="text-[var(--color-ink-soft)]">
             {shortDate(r.date)}
@@ -1511,11 +1511,11 @@ function ReservationRow({
         {cost > 0 ? (
           <span className="shrink-0 text-right">
             <Money cents={cost} className="font-medium" />
-            <span className="block text-xs text-[var(--color-ink-soft)]">{lineName ? `counted in ${lineName}` : 'not counted anywhere'}</span>
+            <span className="block text-sm text-[var(--color-ink-soft)]">{lineName ? `counted in ${lineName}` : 'not counted anywhere'}</span>
           </span>
         ) : null}
       </div>
-      <p className="text-xs text-[var(--color-ink-soft)]">
+      <p className="text-sm text-[var(--color-ink-soft)]">
         {RESERVATION_KIND_LABELS[r.kind]}
         {r.park ? ` · ${PARK_LABELS[r.park]}` : ''}
         {r.party !== 1 ? ` · ${r.party} people` : ''}
@@ -1524,7 +1524,7 @@ function ReservationRow({
       </p>
       {editable ? (
         <details className="mt-1">
-          <summary className="cursor-pointer text-xs text-[var(--color-accent)]">Change</summary>
+          <summary className="cursor-pointer text-sm text-[var(--color-accent)]">Change</summary>
           <form action={updateReservationAction} className="mt-2 space-y-2">
             <input type="hidden" name="trip_id" value={tripId} />
             <input type="hidden" name="reservation_id" value={r.id} />
@@ -1538,7 +1538,7 @@ function ReservationRow({
           <form action={removeReservationAction} className="mt-2">
             <input type="hidden" name="trip_id" value={tripId} />
             <input type="hidden" name="reservation_id" value={r.id} />
-            <button type="submit" className="text-xs text-[var(--color-behind)] underline underline-offset-4">
+            <button type="submit" className="text-sm text-[var(--color-behind)] underline underline-offset-4">
               Take this off
             </button>
           </form>
@@ -1566,7 +1566,7 @@ function LineRow({
   const account = line.reserveAccountId ? accounts.find((a) => a.id === line.reserveAccountId) : null
   return (
     <li className="py-2 first:pt-0 last:pb-0">
-      <div className="flex items-baseline justify-between gap-4 text-sm">
+      <div className="flex items-baseline justify-between gap-4 text-base">
         <span className="min-w-0">
           {line.label}
           {line.quantity !== 1 ? (
@@ -1580,7 +1580,7 @@ function LineRow({
           {total === 0 && line.category !== 'promotion' ? <span className="text-[var(--color-caution)]">needs a figure</span> : <Money cents={total} />}
         </span>
       </div>
-      <p className="text-xs text-[var(--color-ink-soft)]">
+      <p className="text-sm text-[var(--color-ink-soft)]">
         {line.quantity !== 1 ? (
           <>
             <Money cents={line.unitAmountCents} /> each,{' '}
@@ -1598,25 +1598,25 @@ function LineRow({
       </p>
       {editable ? (
         <details className="mt-1">
-          <summary className="cursor-pointer text-xs text-[var(--color-accent)]">Change</summary>
+          <summary className="cursor-pointer text-sm text-[var(--color-accent)]">Change</summary>
           <form action={updateTripLineAction} className="mt-2 space-y-2">
             <input type="hidden" name="trip_id" value={tripId} />
             <input type="hidden" name="line_id" value={line.id} />
             <input type="hidden" name="category" value={line.category} />
             <div className="grid grid-cols-2 gap-2">
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 {line.category === 'promotion' ? 'Off' : 'Each'}
                 <input name="unit_amount" inputMode="decimal" defaultValue={dollarsForInput(Math.abs(line.unitAmountCents))} className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 How many
                 <input name="quantity" inputMode="numeric" defaultValue={line.quantity} className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Due
                 <input name="due_date" type="date" defaultValue={line.dueDate} className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 From
                 <select name="reserve_account" defaultValue={line.reserveAccountId ?? ''} className={input}>
                   <option value="">The trip&apos;s account</option>
@@ -1629,7 +1629,7 @@ function LineRow({
               </label>
             </div>
             {line.category !== 'promotion' ? (
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Note
                 <input name="note" defaultValue={line.note ?? ''} placeholder="Where the figure came from" className={input} />
               </label>
@@ -1643,7 +1643,7 @@ function LineRow({
           <form action={removeTripLineAction} className="mt-2">
             <input type="hidden" name="trip_id" value={tripId} />
             <input type="hidden" name="line_id" value={line.id} />
-            <button type="submit" className="text-xs text-[var(--color-behind)] underline underline-offset-4">
+            <button type="submit" className="text-sm text-[var(--color-behind)] underline underline-offset-4">
               Take this part off
             </button>
           </form>
@@ -1658,19 +1658,19 @@ function ChoiceFields({ choices, name, maxParkDays }: { choices?: VariantChoices
   const promo = choices?.promotion
   return (
     <>
-      <label className="block text-sm font-medium">
+      <label className="block text-base font-medium">
         What to call this way
         <input name="name" required defaultValue={name ?? ''} placeholder="Drive and stay at Pop" className={input} />
       </label>
       <div className="grid grid-cols-2 gap-2">
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Getting there
           <select name="travel" defaultValue={choices?.travel ?? 'drive'} className={input}>
             <option value="drive">Drive</option>
             <option value="fly">Fly</option>
           </select>
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Where we stay
           <select name="lodging" defaultValue={choices?.lodging ?? 'disney_resort'} className={input}>
             <option value="disney_resort">Disney resort</option>
@@ -1678,7 +1678,7 @@ function ChoiceFields({ choices, name, maxParkDays }: { choices?: VariantChoices
             <option value="rental">House or condo rental</option>
           </select>
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Lightning Lane
           <select name="lightning_lane" defaultValue={choices?.lightningLane ?? 'none'} className={input}>
             <option value="none">None</option>
@@ -1686,34 +1686,34 @@ function ChoiceFields({ choices, name, maxParkDays }: { choices?: VariantChoices
             <option value="premier">Premier Pass</option>
           </select>
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Food
           <select name="dining" defaultValue={choices?.dining ?? 'out_of_pocket'} className={input}>
             <option value="out_of_pocket">Out of pocket</option>
             <option value="plan">Dining plan (Disney resort only)</option>
           </select>
         </label>
-        <label className="block text-xs text-[var(--color-ink-soft)]">
+        <label className="block text-sm text-[var(--color-ink-soft)]">
           Park days
           <input name="park_days" type="number" min={0} max={maxParkDays} defaultValue={choices?.parkDays ?? Math.min(4, maxParkDays)} className={input} />
         </label>
       </div>
       <details open={Boolean(promo)}>
-        <summary className="cursor-pointer text-xs text-[var(--color-ink-soft)]">A deal (optional)</summary>
+        <summary className="cursor-pointer text-sm text-[var(--color-ink-soft)]">A deal (optional)</summary>
         <div className="mt-2 grid grid-cols-2 gap-2">
-          <label className="col-span-2 block text-xs text-[var(--color-ink-soft)]">
+          <label className="col-span-2 block text-sm text-[var(--color-ink-soft)]">
             Name
             <input name="promo_name" defaultValue={promo?.name ?? ''} placeholder="Summer room offer" className={input} />
           </label>
-          <label className="block text-xs text-[var(--color-ink-soft)]">
+          <label className="block text-sm text-[var(--color-ink-soft)]">
             Percent off
             <input name="promo_percent" inputMode="decimal" defaultValue={promo?.percentOffBasisPoints !== undefined ? promo.percentOffBasisPoints / 100 : ''} placeholder="25" className={input} />
           </label>
-          <label className="block text-xs text-[var(--color-ink-soft)]">
+          <label className="block text-sm text-[var(--color-ink-soft)]">
             Or amount off
             <input name="promo_amount" inputMode="decimal" defaultValue={promo?.amountOffCents !== undefined ? dollarsForInput(promo.amountOffCents) : ''} placeholder="500" className={input} />
           </label>
-          <label className="block text-xs text-[var(--color-ink-soft)]">
+          <label className="block text-sm text-[var(--color-ink-soft)]">
             Applies to
             <select name="promo_category" defaultValue={promo?.appliesToCategory ?? 'lodging'} className={input}>
               {TRIP_LINE_CATEGORIES.filter((c) => c !== 'promotion' && c !== 'contingency').map((category: TripLineCategory) => (
@@ -1723,7 +1723,7 @@ function ChoiceFields({ choices, name, maxParkDays }: { choices?: VariantChoices
               ))}
             </select>
           </label>
-          <label className="block text-xs text-[var(--color-ink-soft)]">
+          <label className="block text-sm text-[var(--color-ink-soft)]">
             Book by
             <input name="promo_book_by" type="date" defaultValue={promo?.bookBy ?? ''} className={input} />
           </label>

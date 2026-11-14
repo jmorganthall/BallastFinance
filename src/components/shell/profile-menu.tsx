@@ -26,7 +26,7 @@ function initialsOf(name: string | null, email: string): string {
 
 function Avatar({ viewer, size }: { viewer: ProfileViewer; size: 'sm' | 'lg' }) {
   const [broken, setBroken] = useState(false)
-  const dimension = size === 'sm' ? 'h-8 w-8 text-xs' : 'h-12 w-12 text-base'
+  const dimension = size === 'sm' ? 'h-8 w-8 text-sm' : 'h-12 w-12 text-base'
   if (viewer.image && !broken) {
     return (
       // A plain img: the picture lives on Google's CDN, which is not a host
@@ -89,7 +89,7 @@ export function ProfileMenu({ viewer }: { viewer: ProfileViewer }) {
       >
         <Avatar viewer={viewer} size="sm" />
         {firstName ? (
-          <span className="hidden max-w-[8rem] truncate text-sm font-medium sm:block">
+          <span className="hidden max-w-[8rem] truncate text-base font-medium sm:block">
             {firstName}
           </span>
         ) : null}
@@ -117,7 +117,7 @@ export function ProfileMenu({ viewer }: { viewer: ProfileViewer }) {
             <Avatar viewer={viewer} size="lg" />
             <div className="min-w-0">
               <p className="truncate font-medium">{viewer.name ?? 'Signed in'}</p>
-              <p className="truncate text-xs text-[var(--color-ink-soft)]">{viewer.email}</p>
+              <p className="truncate text-sm text-[var(--color-ink-soft)]">{viewer.email}</p>
             </div>
           </div>
           <div className="my-1 border-t border-[var(--color-line)]" />
@@ -125,7 +125,7 @@ export function ProfileMenu({ viewer }: { viewer: ProfileViewer }) {
             href="/settings"
             role="menuitem"
             onClick={() => setOpen(false)}
-            className="flex min-h-11 items-center rounded-xl px-3 text-sm font-medium hover:bg-[var(--color-surface)]"
+            className="flex min-h-11 items-center rounded-xl px-3 text-base font-medium hover:bg-[var(--color-surface)]"
           >
             Settings
           </Link>
@@ -133,7 +133,7 @@ export function ProfileMenu({ viewer }: { viewer: ProfileViewer }) {
             <button
               type="submit"
               role="menuitem"
-              className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-sm font-medium text-[var(--color-ink-soft)] hover:bg-[var(--color-surface)]"
+              className="flex min-h-11 w-full items-center rounded-xl px-3 text-left text-base font-medium text-[var(--color-ink-soft)] hover:bg-[var(--color-surface)]"
             >
               Sign out
             </button>

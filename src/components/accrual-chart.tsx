@@ -322,7 +322,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
       {pins.map((p) => (
         <span
           key={p.mark.n}
-          className="absolute z-0 -translate-x-1/2 -translate-y-1/2 text-xs hover:z-20 focus-within:z-20"
+          className="absolute z-0 -translate-x-1/2 -translate-y-1/2 text-sm hover:z-20 focus-within:z-20"
           style={{ left: `${(p.x / WIDTH) * 100}%`, top: `${(p.y / HEIGHT) * 100}%` }}
         >
           <Tip detail={pinWords(p.mark)} above plain>
@@ -334,7 +334,7 @@ export function AccrualChart({ chart, today }: { chart: PlanChart; today: string
       </div>
 
       {/* Direct labels rather than a legend box, so identity is never colour alone. */}
-      <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-ink-soft)]">
+      <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-ink-soft)]">
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-ink)]" />
           This plan, on the transfer set up now

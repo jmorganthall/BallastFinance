@@ -15,7 +15,7 @@ export interface LineValue {
 }
 
 const input =
-  'w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]'
+  'w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-base text-[var(--color-ink)]'
 
 export function PaystubLines({
   prefix,
@@ -34,7 +34,7 @@ export function PaystubLines({
   return (
     <div className="mt-1 space-y-1">
       {/* A visible name over each column: the grey examples go once you type. */}
-      <div aria-hidden="true" className="grid grid-cols-[1fr_8rem_auto] gap-2 text-xs font-medium text-[var(--color-ink-soft)]">
+      <div aria-hidden="true" className="grid grid-cols-[1fr_8rem_auto] gap-2 text-sm font-medium text-[var(--color-ink-soft)]">
         <span>What</span>
         <span>Amount ($ or %)</span>
         <span className="invisible">Remove</span>
@@ -46,7 +46,7 @@ export function PaystubLines({
           <button
             type="button"
             onClick={() => setRows((rs) => (rs.length === 1 ? [{ label: '', amount: '', key: next }] : rs.filter((r) => r.key !== row.key)))}
-            className="px-2 text-xs text-[var(--color-ink-soft)] underline"
+            className="px-2 text-sm text-[var(--color-ink-soft)] underline"
             aria-label="Remove this line"
           >
             Remove
@@ -59,7 +59,7 @@ export function PaystubLines({
           setRows((rs) => [...rs, { label: '', amount: '', key: next + 1 }])
           setNext((n) => n + 2)
         }}
-        className="text-sm underline"
+        className="text-base underline"
       >
         Add a line
       </button>

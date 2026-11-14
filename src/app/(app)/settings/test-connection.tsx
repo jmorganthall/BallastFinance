@@ -31,7 +31,7 @@ export function TestConnection() {
       {result ? (
         <div
           role="status"
-          className={`mt-4 space-y-1 rounded-xl p-3 text-sm ${
+          className={`mt-4 space-y-1 rounded-xl p-3 text-base ${
             result.ok
               ? 'bg-[var(--color-ahead-soft)] text-[var(--color-ahead)]'
               : 'bg-[var(--color-caution-soft)] text-[var(--color-ink)]'

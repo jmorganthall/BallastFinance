@@ -29,9 +29,9 @@ const dollarsBox = dollarsForInput
 
 const input =
   'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]'
-const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium'
-const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]'
-const sectionTitle = 'mb-4 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
+const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium'
+const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-base font-medium text-[var(--color-on-fill)]'
+const sectionTitle = 'mb-4 mt-8 section-label'
 
 export default async function EquityPage({
   searchParams,
@@ -64,7 +64,7 @@ export default async function EquityPage({
         subtitle="What selling would leave you, and the house that buys at the payment you make now."
       />
 
-      <p className="-mt-4 mb-4 text-sm">
+      <p className="-mt-4 mb-4 text-base">
         <Link href="/debts" className="text-[var(--color-accent)] underline underline-offset-4">
           Back to payoff order
         </Link>
@@ -73,19 +73,19 @@ export default async function EquityPage({
       {error ? (
         <Problem className="mb-4">{error}</Problem>
       ) : saved ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">Saved.</p>
+        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-base text-[var(--color-ahead)]">Saved.</p>
       ) : null}
 
       {position.unlinkedSecuredDebts.length > 0 ? (
         <Card className="mb-4 bg-[var(--color-behind-soft)]">
-          <h2 className="font-semibold text-[var(--color-behind)]">
+          <h2 className="card-title text-[var(--color-behind)]">
             {position.unlinkedSecuredDebts.length === 1 ? 'A loan is' : 'Some loans are'} not tied to a home or car
           </h2>
-          <p className="mt-1 text-sm">
+          <p className="mt-1 text-base">
             Until each one is, what you&apos;d walk away with could be too high by as much as its balance. Pick
             what it&apos;s on under <strong>Loans</strong> below.
           </p>
-          <ul className="mt-2 space-y-1 text-sm">
+          <ul className="mt-2 space-y-1 text-base">
             {position.unlinkedSecuredDebts.map((d) => (
               <li key={d.id}>
                 <strong>{d.name}</strong> — <Money cents={d.balanceCents} />
@@ -98,13 +98,13 @@ export default async function EquityPage({
       {/* What you have, and what it buys: side by side on a wide screen. */}
       <div className="lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-4">
       <Card className="mb-4">
-        <p className="text-sm text-[var(--color-ink-soft)]">
+        <p className="text-base text-[var(--color-ink-soft)]">
           <Hint detail="Equity: value, less the cost of selling, less every loan on it. Only homes and cars with something left count; one worth less than its loan is shown but not taken off the others.">
             What you&apos;d walk away with
           </Hint>{' '}
           if you sold
         </p>
-        <p className="mt-1 text-3xl font-semibold tracking-tight">
+        <p className="mt-1 figure-hero">
           <Money cents={position.countedCents} />
         </p>
 
@@ -117,7 +117,7 @@ export default async function EquityPage({
             at <strong><Money cents={view.targetPaymentCents} /></strong> a month, at {rateWords}.
           </p>
         ) : (
-          <p className="mt-4 text-sm text-[var(--color-ink-soft)]">
+          <p className="mt-4 text-base text-[var(--color-ink-soft)]">
             {!rateUsed
               ? "There's no mortgage rate yet. The weekly average arrives on its own once the app can reach FRED; until then, type a rate under Your numbers."
               : view.targetPaymentCents <= 0
@@ -128,7 +128,7 @@ export default async function EquityPage({
 
         {mostHouse ? <CostParts cost={mostHouse} /> : null}
 
-        <p className="mt-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+        <p className="mt-4 text-sm leading-snug text-[var(--color-ink-soft)]">
           A planning figure, not a loan approval: a lender also looks at income and your other debts.
           {rateUsed?.source === 'weekly_average' && rateUsed.observedOn
             ? ` The rate is Freddie Mac's national average for the week of ${humanDate(rateUsed.observedOn)}; your own quote may differ.`
@@ -143,7 +143,7 @@ export default async function EquityPage({
 
       <Card className="mb-4">
         <form method="GET" className="space-y-4">
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             What would a house at this price cost a month?
             <input name="price" inputMode="decimal" defaultValue={price ?? ''} placeholder="450000" className={input} />
           </label>
@@ -152,7 +152,7 @@ export default async function EquityPage({
           </button>
         </form>
         {price && priceCents === null ? (
-          <p className="mt-4 text-sm text-[var(--color-behind)]">Enter a price like 450,000.</p>
+          <p className="mt-4 text-base text-[var(--color-behind)]">Enter a price like 450,000.</p>
         ) : null}
         {atPrice ? (
           <div className="mt-4 border-t border-[var(--color-line)] pt-4">
@@ -170,17 +170,17 @@ export default async function EquityPage({
             <CostParts cost={atPrice} />
           </div>
         ) : price && priceCents !== null && !rateUsed ? (
-          <p className="mt-4 text-sm text-[var(--color-ink-soft)]">Needs a mortgage rate first.</p>
+          <p className="mt-4 text-base text-[var(--color-ink-soft)]">Needs a mortgage rate first.</p>
         ) : null}
       </Card>
       </div>
 
       {staleValues.length > 0 ? (
         <Card className="mb-4 bg-[var(--color-accent-soft)]">
-          <h2 className="font-semibold">
+          <h2 className="card-title">
             {staleValues.length === 1 ? 'A value' : `${staleValues.length} values`} could do with a fresh look
           </h2>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+          <p className="mt-1 text-base text-[var(--color-ink-soft)]">
             Check Zillow or KBB and type the new figure in below; today becomes the date it was checked.
           </p>
         </Card>
@@ -202,7 +202,7 @@ export default async function EquityPage({
                   <Money cents={row.walkAwayCents} />
                 </span>
               </div>
-              <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
+              <p className="mt-1 text-sm leading-snug text-[var(--color-ink-soft)]">
                 Worth <Money cents={row.asset.valueCents} /> (checked {humanDate(row.asset.valueAsOf)}
                 {freshness.stale ? `, ${freshness.ageDays} days ago` : ''}), less{' '}
                 <Money cents={row.sellingCostCents} /> to sell, less <Money cents={row.owedCents} /> owed
@@ -226,27 +226,27 @@ export default async function EquityPage({
 
         <Card>
           <details open={view.assets.length === 0}>
-            <summary className="cursor-pointer text-sm font-medium">Add a home or vehicle</summary>
+            <summary className="cursor-pointer text-base font-medium">Add a home or vehicle</summary>
             <form action={createAssetAction} className="mt-4 space-y-4">
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 Name
                 <input name="name" required placeholder="Our house" className={input} />
               </label>
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 Kind
                 <select name="kind" className={input}>
                   <option value="home">Home</option>
                   <option value="vehicle">Vehicle</option>
                 </select>
               </label>
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 What it would sell for (from Zillow, KBB or an appraisal)
                 <input name="value" required inputMode="decimal" placeholder="425000" className={input} />
               </label>
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 Cost of selling, %
                 <input name="selling_cost" inputMode="decimal" placeholder="7 for a home, 0 for a car" className={input} />
-                <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+                <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
                   Agent and closing costs. Leave blank for 7% on a home and 0% on a vehicle.
                 </span>
               </label>
@@ -269,7 +269,7 @@ export default async function EquityPage({
                 <li key={d.id} className="py-3 first:pt-0 last:pb-0">
                   <form action={linkDebtToAssetAction} className="flex flex-wrap items-end gap-2">
                     <input type="hidden" name="debt_id" value={d.id} />
-                    <label className="min-w-0 flex-1 text-sm font-medium">
+                    <label className="min-w-0 flex-1 text-base font-medium">
                       {d.name} (<Money cents={d.balanceCents} />) is on
                       <select name="asset_id" defaultValue={d.assetId ?? ''} className={input}>
                         <option value="">Nothing I own</option>
@@ -280,7 +280,7 @@ export default async function EquityPage({
                         ))}
                       </select>
                     </label>
-                    <button type="submit" className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium">
+                    <button type="submit" className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium">
                       Save
                     </button>
                   </form>
@@ -294,45 +294,45 @@ export default async function EquityPage({
       <section>
       <h2 className={sectionTitle}>Your numbers</h2>
       <Card>
-        <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+        <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
           Starting figures are estimates. Property tax varies most from place to place and moves the answer
           most, so put in your county&apos;s rate.
         </p>
         <form action={saveHomeBuyingAction} className="space-y-4">
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             What you pay for housing each month now
             <input name="current_payment" inputMode="decimal" defaultValue={form.currentHousingPayment} placeholder={dollarsBox(view.mortgagePaymentsCents)} className={input} />
-            <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+            <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
               Include property tax and insurance. Leave blank to use your mortgage payments on the Debts page (
               <Money cents={view.mortgagePaymentsCents} />) — only right if those already include them.
             </span>
           </label>
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             Mortgage rate, %
             <input name="typed_rate" inputMode="decimal" defaultValue={rateUsed?.source === 'typed' ? percentBox(rateUsed.rateBasisPoints) : ''} placeholder="Blank = this week's average" className={input} />
           </label>
           <div className="grid grid-cols-2 gap-4">
-            <label className="block text-sm font-medium">
+            <label className="block text-base font-medium">
               Property tax, % a year
               <input name="property_tax" inputMode="decimal" defaultValue={form.propertyTaxPercent} className={input} />
             </label>
-            <label className="block text-sm font-medium">
+            <label className="block text-base font-medium">
               Home insurance, $ a year
               <input name="insurance" inputMode="decimal" defaultValue={form.insurancePerYear} className={input} />
             </label>
-            <label className="block text-sm font-medium">
+            <label className="block text-base font-medium">
               <Hint detail="PMI: charged while you put down less than 20%.">Mortgage insurance</Hint>, % a year
               <input name="mortgage_insurance" inputMode="decimal" defaultValue={form.mortgageInsurancePercent} className={input} />
             </label>
-            <label className="block text-sm font-medium">
+            <label className="block text-base font-medium">
               HOA, $ a month
               <input name="hoa" inputMode="decimal" defaultValue={form.hoaPerMonth} className={input} />
             </label>
-            <label className="block text-sm font-medium">
+            <label className="block text-base font-medium">
               Buying costs, % of price
               <input name="buying_cost" inputMode="decimal" defaultValue={form.buyingCostPercent} className={input} />
             </label>
-            <label className="block text-sm font-medium">
+            <label className="block text-base font-medium">
               Loan length, years
               <input name="term_years" inputMode="numeric" defaultValue={form.termYears} className={input} />
             </label>
@@ -358,7 +358,7 @@ function CostParts({ cost }: { cost: HomeCost }) {
     ...(cost.hoaCents > 0 ? ([['HOA', cost.hoaCents]] as [string, number][]) : []),
   ]
   return (
-    <div className="mt-4 text-sm">
+    <div className="mt-4 text-base">
       <ul className="divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
         {rows.map(([label, cents]) => (
           <li key={label} className="flex justify-between px-3 py-2">
@@ -371,7 +371,7 @@ function CostParts({ cost }: { cost: HomeCost }) {
           <Money cents={cost.totalCents} />
         </li>
       </ul>
-      <p className="mt-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+      <p className="mt-2 text-sm leading-snug text-[var(--color-ink-soft)]">
         <Money cents={cost.buyingCostsCents} /> of buying costs come out first, leaving{' '}
         <Money cents={cost.downPaymentCents} /> down ({(cost.downPaymentBasisPoints / 100).toFixed(1)}%) and a{' '}
         <Money cents={cost.loanCents} /> loan.
@@ -401,22 +401,22 @@ function AssetEditor({
 }) {
   return (
     <details className="mt-2">
-      <summary className="cursor-pointer text-xs font-medium text-[var(--color-accent)]">Change</summary>
+      <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">Change</summary>
       <form action={updateAssetAction} className="mt-4 space-y-4">
         <input type="hidden" name="asset_id" value={asset.id} />
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Name
           <input name="name" defaultValue={asset.name} className={input} />
         </label>
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           What it would sell for
           <input name="value" inputMode="decimal" defaultValue={valueBox} className={input} />
         </label>
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Cost of selling, %
           <input name="selling_cost" inputMode="decimal" defaultValue={sellingBox} className={input} />
         </label>
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2 text-base">
           <input type="checkbox" name="sold" defaultChecked={asset.state === 'sold'} /> We&apos;ve sold it
         </label>
         <button type="submit" className={secondaryButton}>
@@ -425,7 +425,7 @@ function AssetEditor({
       </form>
       <form action={removeAssetAction} className="mt-2">
         <input type="hidden" name="asset_id" value={asset.id} />
-        <button type="submit" className="w-full rounded-lg px-4 py-2 text-sm text-[var(--color-behind)]">
+        <button type="submit" className="w-full rounded-lg px-4 py-2 text-base text-[var(--color-behind)]">
           Remove — it was added by mistake
         </button>
       </form>

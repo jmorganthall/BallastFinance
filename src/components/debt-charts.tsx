@@ -156,7 +156,7 @@ export function BalanceChart({
           {shortDate(end)}
         </text>
       </svg>
-      <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-ink-soft)]">
+      <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-ink-soft)]">
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="inline-block h-0.5 w-4 rounded-full bg-[var(--color-ink-soft)]" />
           On the payment set up now
@@ -249,7 +249,7 @@ export function PaymentSplitChart({ splits }: { splits: readonly PaymentSplit[] 
           {bars.at(-1)!.label}
         </text>
       </svg>
-      <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--color-ink-soft)]">
+      <figcaption className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-ink-soft)]">
         <span className="flex items-center gap-1.5">
           <span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm bg-[var(--color-chart-paydown)]" />
           Pays the balance down

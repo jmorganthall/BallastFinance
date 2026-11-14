@@ -48,13 +48,13 @@ export function EditableTitle({
           />
           <button
             type="submit"
-            className="min-h-11 shrink-0 rounded-lg bg-[var(--color-accent)] px-3 text-sm font-medium text-[var(--color-on-fill)]"
+            className="min-h-11 shrink-0 rounded-lg bg-[var(--color-accent)] px-3 text-base font-medium text-[var(--color-on-fill)]"
           >
             Save
           </button>
           <button
             type="reset"
-            className="min-h-11 shrink-0 rounded-lg border border-[var(--color-line)] px-3 text-sm font-medium"
+            className="min-h-11 shrink-0 rounded-lg border border-[var(--color-line)] px-3 text-base font-medium"
           >
             Cancel
           </button>
@@ -87,7 +87,7 @@ export function EditableTitle({
           ) : null}
         </div>
       )}
-      {subtitle ? <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{subtitle}</p> : null}
+      {subtitle ? <p className="mt-1 text-base text-[var(--color-ink-soft)]">{subtitle}</p> : null}
     </header>
   )
 }

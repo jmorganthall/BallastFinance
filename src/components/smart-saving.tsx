@@ -14,10 +14,10 @@ import { formatCents, type SmartSaving } from '@/domain'
 
 function PerAccount({ saving }: { saving: SmartSaving }) {
   return (
-    <ul className="mt-2 space-y-1 text-sm">
+    <ul className="mt-2 space-y-1 text-base">
       {saving.accounts.map((a) => (
-        <li key={a.accountId} className="flex items-baseline justify-between gap-4">
-          <span className="min-w-0 truncate">{a.name}</span>
+        <li key={a.accountId} className="flex flex-wrap items-baseline justify-between gap-x-4">
+          <span className="min-w-0">{a.name}</span>
           <span className="shrink-0 tabular-nums">
             <Money cents={a.perWeekCents} className="font-semibold" /> a week
             {a.bankPerWeekCents !== null ? (
@@ -41,16 +41,16 @@ export function SmartSavingCard({ saving }: { saving: SmartSaving }) {
     <Card className="mb-6">
       {claim ? (
         <>
-          <p className="text-sm text-[var(--color-ink-soft)]">With Ballast you set aside</p>
+          <p className="text-base text-[var(--color-ink-soft)]">With Ballast you set aside</p>
           <p className="mt-1">
-            <Money cents={saving.lessPerMonthCents} className="text-4xl font-bold tracking-tight text-[var(--color-ahead)]" />{' '}
+            <Money cents={saving.lessPerMonthCents} className="figure-hero text-[var(--color-ahead)]" />{' '}
             <span className="text-[var(--color-ink-soft)]">a month less</span>
           </p>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+          <p className="mt-1 text-base text-[var(--color-ink-soft)]">
             <Money cents={saving.lessPerWeekCents} /> a week, <Money cents={saving.lessPerYearCents} /> a year, than
             saving {each} on its own. Ballast pays whatever is due soonest out of the money already set aside.
           </p>
-          <div className="mt-4 grid grid-cols-[9.5rem_1fr] items-center gap-x-4 gap-y-2 text-sm">
+          <div className="mt-4 grid grid-cols-[9.5rem_1fr] items-center gap-x-4 gap-y-2 text-base">
             <span className="text-[var(--color-ink-soft)]">
               <Hint
                 detail={`Each plan saving evenly on its own, from its Saving since to its due date: ${formatCents(saving.onItsOwnPerWeekCents)} a week. Ballast needs ${formatCents(saving.withBallastPerWeekCents)}, the smallest steady transfers that have the money there on every date.`}
@@ -66,16 +66,16 @@ export function SmartSavingCard({ saving }: { saving: SmartSaving }) {
               style={{ width: `${saving.withBallastShare * 100}%` }}
             />
           </div>
-          <p className="mt-6 text-sm">
+          <p className="mt-6 text-base">
             <Money cents={saving.withBallastPerWeekCents} className="font-semibold" />{' '}
             <span className="text-[var(--color-ink-soft)]">a week covers {plans}:</span>
           </p>
         </>
       ) : (
         <>
-          <p className="text-sm text-[var(--color-ink-soft)]">Your weekly set-aside</p>
+          <p className="text-base text-[var(--color-ink-soft)]">Your weekly set-aside</p>
           <p className="mt-1">
-            <Money cents={saving.withBallastPerWeekCents} className="text-4xl font-bold tracking-tight" />{' '}
+            <Money cents={saving.withBallastPerWeekCents} className="figure-hero" />{' '}
             <span className="text-[var(--color-ink-soft)]">
               a week covers {plans}
               {saving.coversOnItsOwn ? '' : ', once the to-dos below are done'}

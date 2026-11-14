@@ -70,7 +70,7 @@ export default async function PackagesPage({
       >
         Start a plan
       </Link>
-      <p className="-mt-2 mb-4 text-sm text-[var(--color-ink-soft)]">
+      <p className="-mt-2 mb-4 text-base text-[var(--color-ink-soft)]">
         Pricing a Disney trip?{' '}
         <Link href="/trips" className="text-[var(--color-accent)] underline underline-offset-4">
           Work it out under Trips
@@ -87,7 +87,7 @@ export default async function PackagesPage({
                 key={s.key}
                 href={sortHref(planOrderAfterTap(order, s.key))}
                 aria-current={active ? 'true' : undefined}
-                className={`rounded-full border px-3 py-1 text-sm ${
+                className={`rounded-full border px-3 py-1 text-base ${
                   active
                     ? 'border-transparent bg-[var(--color-accent)] font-medium text-[var(--color-on-fill)]'
                     : 'border-[var(--color-line)] text-[var(--color-ink-soft)]'
@@ -125,7 +125,7 @@ export default async function PackagesPage({
                 <Link href={`/packages/${view.package.id}`} className="block h-full">
                   <Card className="h-full">
                     <div className="flex items-start justify-between gap-4">
-                      <h2 className="font-semibold">{view.package.name}</h2>
+                      <h2 className="card-title">{view.package.name}</h2>
                       <span className="flex shrink-0 items-center gap-2">
                         {snoozed.length > 0 ? (
                           <Hint
@@ -142,13 +142,13 @@ export default async function PackagesPage({
                       </span>
                     </div>
                     {!plan || plan.parts.length === 0 ? (
-                      <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+                      <p className="mt-2 text-base text-[var(--color-ink-soft)]">
                         <Money cents={view.totalCents} /> total
                       </p>
                     ) : null}
                     {/* Every card names what is next and when (D41 (4)); the bar does not repeat it. */}
                     {next ? (
-                      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                      <p className="mt-1 text-base text-[var(--color-ink-soft)]">
                         Next due: {next.label === view.package.name ? null : <>{next.label}, </>}
                         <span className={URGENCY_WEIGHT[next.urgency]}>
                           <When date={next.dueDate} today={today} />
@@ -161,7 +161,7 @@ export default async function PackagesPage({
                       Short, what it is missing today beside it (D41 (2)).
                     */}
                     {plan && plan.parts.length > 0 ? (
-                      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                      <p className="mt-1 text-base text-[var(--color-ink-soft)]">
                         <Hint
                           detail={`What this plan costs a week, saved evenly. The transfer itself is set for the whole account${accounts.length === 1 ? '' : 's'} (${accounts.map((id) => accountNames.get(id) ?? '').join(', ')}), not plan by plan.`}
                         >

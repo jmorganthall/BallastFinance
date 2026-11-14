@@ -38,7 +38,7 @@ export async function UpdateCard({ engine }: { engine: Engine }) {
 
   return (
     <Card className="mb-6">
-      <div id="updates" className="scroll-mt-20 space-y-1 text-sm">
+      <div id="updates" className="scroll-mt-20 space-y-1 text-base">
         <p className="font-medium">Watchtower</p>
         {config.configured ? (
           <p>
@@ -54,7 +54,7 @@ export async function UpdateCard({ engine }: { engine: Engine }) {
       </div>
       <TestConnection />
 
-      <div className="mt-6 text-sm">
+      <div className="mt-6 text-base">
         <p className="font-medium">Last backup before an update</p>
         {backup ? (
           <p className="mt-1">
@@ -70,7 +70,7 @@ export async function UpdateCard({ engine }: { engine: Engine }) {
         )}
       </div>
 
-      <div className="mt-6 text-sm">
+      <div className="mt-6 text-base">
         <p className="font-medium">Update history</p>
         {history.length === 0 ? (
           <p className="mt-1 text-[var(--color-ink-soft)]">Update now has not been pressed yet.</p>

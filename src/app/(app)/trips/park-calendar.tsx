@@ -139,7 +139,7 @@ export function ParkCalendar({
         <Link href={monthHref(calendar.previous)} className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm" aria-label="Previous month">
           ‹
         </Link>
-        <h3 className="text-lg font-semibold">{calendar.label}</h3>
+        <h3 className="card-title">{calendar.label}</h3>
         <Link href={monthHref(calendar.next)} className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm" aria-label="Next month">
           ›
         </Link>

@@ -10,7 +10,7 @@ import { When } from '@/components/ui'
 
 export function MoneySince({ money, today }: { money: AccountMoneyToday; today: CivilDate }) {
   return (
-    <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+    <p className="mt-1 text-base text-[var(--color-ink-soft)]">
       {moneySinceParts(money).map((part, i) =>
         part.date ? <When key={i} date={part.date.on} today={today} as={part.date.as} /> : <span key={i}>{part.text}</span>,
       )}

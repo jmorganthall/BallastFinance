@@ -64,7 +64,7 @@ export function ProgressBar({
 
   return (
     <div className={className}>
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <span className="flex items-center gap-2">
           <Hint detail={statusDetail}>
             <PartStatusPill status={status} />
@@ -73,7 +73,7 @@ export function ProgressBar({
             <MakeUp cents={shortByCents} />
           ) : null}
         </span>
-        <span className="tabular text-xs text-[var(--color-ink-soft)]">
+        <span className="tabular text-sm text-[var(--color-ink-soft)]">
           {formatCents(countedCents)} of {formatCents(totalCents)}
           <span className="opacity-70"> · {bar.savedPercent}%</span>
           {dueDate ? (
@@ -114,7 +114,7 @@ export function ProgressBar({
         ) : null}
       </div>
       {status === 'short' && shortReasons.length > 0 ? (
-        <div className="mt-2 space-y-1 text-xs text-[var(--color-ink-soft)]">
+        <div className="mt-2 space-y-1 text-sm text-[var(--color-ink-soft)]">
           {shortReasons.map((r) => (
             <p key={r.accountId}>
               {r.accountName} runs short <When date={r.on} today={today} />.
@@ -135,7 +135,7 @@ export function ProgressBar({
 export function MakeUp({ cents }: { cents: Cents }) {
   return (
     <Hint detail="What it is missing today: what the account needs to hold for it now, less what is there for it. This week says how to make it up.">
-      <span className="tabular text-xs font-medium text-[var(--color-behind)]">
+      <span className="tabular whitespace-nowrap text-sm font-medium text-[var(--color-behind)]">
         + {formatCents(cents)} to make up
       </span>
     </Hint>

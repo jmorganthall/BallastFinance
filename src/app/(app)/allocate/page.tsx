@@ -91,7 +91,7 @@ async function AllocatePageRead({
 
       {source ? (
         <Card className="mb-4 bg-[var(--color-accent-soft)]">
-          <p className="text-sm">
+          <p className="text-base">
             This is the extra sitting in <strong>{source.name}</strong>. Whatever is shared out
             below will also go on your to-do list as a move out of that account.
           </p>
@@ -100,11 +100,11 @@ async function AllocatePageRead({
 
       {staleDebts.length > 0 ? (
         <Card className="mb-4 bg-[var(--color-caution-soft)]">
-          <p className="text-sm font-medium">
+          <p className="text-base font-medium">
             {staleDebts.length === 1 ? 'One debt balance has' : `${staleDebts.length} debt balances have`} not
             been checked for over a month.
           </p>
-          <p className="mt-1 text-sm">
+          <p className="mt-1 text-base">
             The share-out decides which debts get money from these balances. Update them from a
             statement if you can; if you go on, Ballast uses them as they are.
           </p>
@@ -114,7 +114,7 @@ async function AllocatePageRead({
                 <form action={updateDebtBalanceAction} className="flex items-end gap-2">
                   <input type="hidden" name="debt_id" value={view.debt.id} />
                   <input type="hidden" name="back" value="allocate" />
-                  <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
+                  <label className="flex-1 text-sm text-[var(--color-ink-soft)]">
                     {view.debt.name}, last checked {view.balanceAgeDays} days ago
                     <input
                       name="balance"
@@ -125,7 +125,7 @@ async function AllocatePageRead({
                   </label>
                   <button
                     type="submit"
-                    className="min-h-11 rounded-lg border border-[var(--color-line)] bg-[var(--color-card)] px-3 text-sm"
+                    className="min-h-11 rounded-lg border border-[var(--color-line)] bg-[var(--color-card)] px-3 text-base"
                   >
                     Update
                   </button>
@@ -139,7 +139,7 @@ async function AllocatePageRead({
       <Card className="mb-4">
         <form method="GET" className="space-y-4">
           {source ? <input type="hidden" name="from" value={source.id} /> : null}
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             {source
               ? `How much of the extra in ${source.name} to share out?`
               : 'What is left over after everything that is already spoken for?'}
@@ -152,7 +152,7 @@ async function AllocatePageRead({
               className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
             />
           </label>
-          <p className="text-xs text-[var(--color-ink-soft)]">
+          <p className="text-sm text-[var(--color-ink-soft)]">
             {source
               ? 'The cushion you keep back stays in the account.'
               : 'The lowest your unclaimed cash gets over the coming weeks — not today’s balance.'}
@@ -160,15 +160,15 @@ async function AllocatePageRead({
 
           {shortfalls.length > 0 ? (
             <fieldset className="rounded-xl border border-[var(--color-line)] p-3">
-              <legend className="px-1 text-sm font-medium">First, cover what is short?</legend>
-              <p className="mb-2 text-xs text-[var(--color-ink-soft)]">
+              <legend className="px-1 text-base font-medium">First, cover what is short?</legend>
+              <p className="mb-2 text-sm text-[var(--color-ink-soft)]">
                 Optional. Anything ticked is covered off the top, and the rest is shared out by
                 your rules.
               </p>
               <ul className="space-y-2">
                 {shortfalls.map((s) => (
                   <li key={keyOf(s)}>
-                    <label className="flex items-start gap-4 text-sm">
+                    <label className="flex items-start gap-4 text-base">
                       <input
                         type="checkbox"
                         name="fill"
@@ -183,7 +183,7 @@ async function AllocatePageRead({
                             <Money cents={s.shortCents} /> short
                           </span>
                         </span>
-                        <span className="block text-xs text-[var(--color-ink-soft)]">{s.reason}</span>
+                        <span className="block text-sm text-[var(--color-ink-soft)]">{s.reason}</span>
                       </span>
                     </label>
                   </li>
@@ -209,7 +209,7 @@ async function AllocatePageRead({
         plan.netCents <= 0 ? (
           <Card>
             <p className="font-medium">Nothing to share out.</p>
-            <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+            <p className="mt-2 text-base text-[var(--color-ink-soft)]">
               <Money cents={plan.floorCents} /> does not clear the{' '}
               <Money cents={bufferCents} /> cushion you keep back, so this round leaves
               everything where it is.
@@ -218,7 +218,7 @@ async function AllocatePageRead({
         ) : (
           <>
             <Card className="mb-4 bg-[var(--color-accent-soft)]">
-              <dl className="space-y-1 text-sm">
+              <dl className="space-y-1 text-base">
                 <div className="flex justify-between">
                   <dt>Spare</dt>
                   <dd className="tabular">
@@ -250,13 +250,13 @@ async function AllocatePageRead({
 
             {plan.topUps.length > 0 ? (
               <Card className="mb-4">
-                <h2 className="font-semibold">First, what is short</h2>
+                <h2 className="card-title">First, what is short</h2>
                 <ul className="mt-2 divide-y divide-[var(--color-line)]">
                   {plan.topUps.map((t) => (
-                    <li key={`${t.kind}:${t.targetId}`} className="flex items-baseline justify-between gap-4 py-2 text-sm first:pt-0 last:pb-0">
+                    <li key={`${t.kind}:${t.targetId}`} className="flex items-baseline justify-between gap-4 py-2 text-base first:pt-0 last:pb-0">
                       <span>
                         {t.label}
-                        <span className="block text-xs text-[var(--color-ink-soft)]">
+                        <span className="block text-sm text-[var(--color-ink-soft)]">
                           {t.amountCents < t.shortCents
                             ? `Part of the ${formatCents(t.shortCents)} it is short; the rest another time.`
                             : t.kind === 'plan'
@@ -271,7 +271,7 @@ async function AllocatePageRead({
                   ))}
                 </ul>
                 {plan.splitCents === 0 ? (
-                  <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                  <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
                     That takes all of it, so there is nothing left to share out this time.
                   </p>
                 ) : null}
@@ -285,17 +285,17 @@ async function AllocatePageRead({
                   <li key={share.destination}>
                     <Card>
                       <div className="flex items-baseline justify-between gap-4">
-                        <h2 className="font-semibold">{share.label}</h2>
+                        <h2 className="card-title">{share.label}</h2>
                         <span className="text-lg font-semibold tabular">
                           <Money cents={share.amountCents} />
                         </span>
                       </div>
-                      <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                      <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                         {share.percent}% of what is being shared out
                       </p>
 
                       {share.destination === 'lifestyle' && plan.lifestyleReleases.length === 2 ? (
-                        <p className="mt-2 rounded-lg bg-[var(--color-surface)] p-2 text-sm">
+                        <p className="mt-2 rounded-lg bg-[var(--color-surface)] p-2 text-base">
                           Released in two halves so it does not all go at once:{' '}
                           {formatCents(plan.lifestyleReleases[0]!.amountCents)} now, then{' '}
                           {formatCents(plan.lifestyleReleases[1]!.amountCents)} on{' '}
@@ -322,7 +322,7 @@ async function AllocatePageRead({
                 Use this split
               </button>
             </form>
-            <p className="mt-2 text-center text-xs text-[var(--color-ink-soft)]">
+            <p className="mt-2 text-center text-sm text-[var(--color-ink-soft)]">
               Adds each move to your to-do list. Nothing happens until you say you have done it.
             </p>
           </>

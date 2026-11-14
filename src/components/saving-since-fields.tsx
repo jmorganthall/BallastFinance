@@ -45,7 +45,7 @@ export function SavingSinceFields({
     label: string,
     note: string,
   ) => (
-    <label className="flex items-start gap-2 text-sm">
+    <label className="flex items-start gap-2 text-base">
       <input
         type="radio"
         name={name}
@@ -55,14 +55,14 @@ export function SavingSinceFields({
       />
       <span>
         {label}
-        <span className="block text-xs text-[var(--color-ink-soft)]">{note}</span>
+        <span className="block text-sm text-[var(--color-ink-soft)]">{note}</span>
       </span>
     </label>
   )
 
   return (
     <fieldset className="group/since space-y-2">
-      <legend className="text-sm font-medium">Saving since</legend>
+      <legend className="text-base font-medium">Saving since</legend>
       <input type="hidden" name="timeline_part" value={lineItemId} />
       {choice(
         'last_occurrence',
@@ -83,7 +83,7 @@ export function SavingSinceFields({
         'The day you started setting money aside for this. It should hold its share since then.',
       )}
       <div className="hidden pl-6 group-has-[.tl-typed:checked]/since:block">
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Which day?
           <input
             name={`timeline_date_${lineItemId}`}

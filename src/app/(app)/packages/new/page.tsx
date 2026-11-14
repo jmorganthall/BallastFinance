@@ -19,7 +19,7 @@ export default async function NewPackagePage() {
         />
         <Empty title="No savings accounts set up yet.">
           <form action={createReserveAccountAction} className="mt-4 space-y-4 text-left">
-            <label className="block text-sm font-medium">
+            <label className="block text-base font-medium">
               Account name
               <input
                 name="name"
@@ -34,7 +34,7 @@ export default async function NewPackagePage() {
             >
               Add it
             </button>
-            <p className="text-xs text-[var(--color-ink-soft)]">
+            <p className="text-sm text-[var(--color-ink-soft)]">
               This one is shared. Settings can add an account only you manage.
             </p>
           </form>
@@ -57,7 +57,7 @@ export default async function NewPackagePage() {
           scope: a.scope,
         }))}
       />
-      <p className="mt-6 text-center text-sm">
+      <p className="mt-6 text-center text-base">
         <Link href="/packages" className="text-[var(--color-accent)] underline">
           Back to plans
         </Link>

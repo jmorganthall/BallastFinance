@@ -23,8 +23,8 @@ import {
   type TripShape,
 } from '@/domain'
 
-const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium'
-const chip = 'rounded-full border px-3 py-1 text-sm'
+const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium'
+const chip = 'rounded-full border px-3 py-1 text-base'
 const input = 'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]'
 
 const CHIPS: readonly { label: string; parks: string | null }[] = [
@@ -61,7 +61,7 @@ export function ExploreSection({
   const exact = parks !== null && !CHIPS.some((c) => c.parks === parks)
   return (
     <div>
-      <p className="text-sm">
+      <p className="text-base">
         {asked} park {asked === '1' ? 'day' : 'days'} with a travel day each side.
         {drive ? ` The drive is ${hoursWords(drive.minutes)}, in easy stretches of ${hoursWords(result.stretchMinutes)}.` : ''}
         {parks === null ? ' Our usual.' : ` Our usual is ${usual}.`}
@@ -91,7 +91,7 @@ export function ExploreSection({
             defaultValue={exact ? parks : ''}
             placeholder="2-6"
             inputMode="numeric"
-            className={`w-16 rounded-full border px-3 py-1 text-sm ${exact ? 'border-[var(--color-accent)]' : 'border-[var(--color-line)]'} bg-[var(--color-surface)]`}
+            className={`w-16 rounded-full border px-3 py-1 text-base ${exact ? 'border-[var(--color-accent)]' : 'border-[var(--color-line)]'} bg-[var(--color-surface)]`}
           />
           <button type="submit" className={chip + ' border-[var(--color-line)]'}>
             Exact
@@ -100,7 +100,7 @@ export function ExploreSection({
       </nav>
 
       {lookedUp ? (
-        <div className="mt-4 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
+        <div className="mt-4 rounded-xl bg-[var(--color-accent-soft)] p-3 text-base">
           <p>
             The route says {lookedUp.miles} miles, {hoursWords(lookedUp.minutes)} one way. Keep it? Every trip from home uses it.
           </p>
@@ -113,7 +113,7 @@ export function ExploreSection({
           </form>
         </div>
       ) : !drive ? (
-        <div className="mt-4 rounded-xl border border-[var(--color-line)] p-3 text-sm">
+        <div className="mt-4 rounded-xl border border-[var(--color-line)] p-3 text-base">
           <p>The drive has not been looked up, so every travel day is a full one. Look it up, or type it.</p>
           <div className="mt-2 flex flex-wrap items-end gap-2">
             <form action={checkHomeDriveAction}>
@@ -122,11 +122,11 @@ export function ExploreSection({
               </button>
             </form>
             <form action={useHomeDriveAction} className="flex items-end gap-2">
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Miles
                 <input name="miles" inputMode="numeric" placeholder="480" className={input + ' w-20'} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Hours
                 <input name="hours" inputMode="decimal" placeholder="7.5" className={input + ' w-20'} />
               </label>
@@ -139,17 +139,17 @@ export function ExploreSection({
       ) : null}
 
       {result.top.length === 0 ? (
-        <p className="mt-4 text-sm text-[var(--color-ink-soft)]">Every window ahead runs into a day we cannot go.</p>
+        <p className="mt-4 text-base text-[var(--color-ink-soft)]">Every window ahead runs into a day we cannot go.</p>
       ) : (
         <ol className="mt-4 divide-y divide-[var(--color-line)]">
           {result.top.map((w, i) => (
             <li key={`${w.startDate}|${w.parkDays}`} className="flex items-start justify-between gap-4 py-2">
-              <div className="min-w-0 text-sm">
+              <div className="min-w-0 text-base">
                 <span className="font-medium">
                   {i + 1}. {dayWord(w.startDate)} {shortDate(w.startDate)} – {dayWord(w.endDate)} {shortDate(w.endDate)}, {w.endDate.slice(0, 4)}
                 </span>
                 <span className="block text-[var(--color-ink-soft)]">{w.words}</span>
-                <span className="block text-xs text-[var(--color-ink-soft)]">
+                <span className="block text-sm text-[var(--color-ink-soft)]">
                   {w.reasons.map((r, j) => (
                     <span key={r}>
                       {j > 0 ? ' · ' : ''}
@@ -169,7 +169,7 @@ export function ExploreSection({
         </ol>
       )}
 
-      <p className="mt-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+      <p className="mt-2 text-sm leading-snug text-[var(--color-ink-soft)]">
         From {shortDate(result.horizonFrom)} to {shortDate(result.horizonTo)}, {result.horizonTo.slice(0, 4)}: {result.considered} ways to go looked at.{' '}
         {judged} Cheap is what it costs to sleep at {stayWords(result.stay)}, night by night from the surest price we have;
         a week with no price yet is neither cheap nor dear. The strip above shades each day by how good a trip leaving it is, and the numbers on the month

@@ -14,7 +14,7 @@ import { PaystubLines, type LineValue } from './paystub-lines'
 import { Problem as ProblemNote } from '@/components/ui'
 
 const small =
-  'w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]'
+  'w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-base text-[var(--color-ink)]'
 
 const EMPTY: IncomeFormState = { error: null, values: {}, attempt: 0 }
 
@@ -72,7 +72,7 @@ export function SourceForm({
 
   return (
     // The key remounts the fields after a refusal, so they show what was posted.
-    <form key={state.attempt} action={formAction} className="space-y-4 text-sm">
+    <form key={state.attempt} action={formAction} className="space-y-4 text-base">
       {source ? <input type="hidden" name="id" value={source.id} /> : null}
       <div className="grid gap-4 sm:grid-cols-2">
         <fieldset className="block">
@@ -110,7 +110,7 @@ export function SourceForm({
         <label className="block font-medium">
           Started
           <input type="date" name="started_on" defaultValue={one('started_on', source?.startedOn ?? '')} className={`mt-1 ${small}`} />
-          <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">The bonus figure is per day since.</span>
+          <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">The bonus figure is per day since.</span>
         </label>
         <label className="block font-medium">
           Annual salary
@@ -124,7 +124,7 @@ export function SourceForm({
 
       <fieldset>
         <legend className="font-medium">Taken out before taxes, per check</legend>
-        <p className="text-xs text-[var(--color-ink-soft)]">Dollars, or a percent of the check like 6%. A line left without an amount is dropped.</p>
+        <p className="text-sm text-[var(--color-ink-soft)]">Dollars, or a percent of the check like 6%. A line left without an amount is dropped.</p>
         <PaystubLines prefix="pretax" initial={lines('pretax', (source?.pretax ?? []).map((l) => ({ label: l.label, amount: lineInput(l) })))} placeholder="Health insurance, 401k, HSA…" />
       </fieldset>
 
@@ -138,7 +138,7 @@ export function SourceForm({
             defaultValue={one('net_per_check', dollars(source?.netPerCheckCents ?? takeHomeCents))}
             className={`mt-1 ${small}`}
           />
-          <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+          <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
             What lands in checking, off the stub. Ballast works the taxes out from it: whatever is left
             after the deductions above.
           </span>
@@ -151,7 +151,7 @@ export function SourceForm({
       <label className="block font-medium">
         Known in Simplifi as
         <input name="simplifi_names" defaultValue={one('simplifi_names', source?.simplifiNames.join(', ') ?? '')} placeholder="Acme Payroll" className={`mt-1 ${small}`} />
-        <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+        <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
           The paycheck&apos;s name in Simplifi&apos;s recurring list; several with commas. Simplifi&apos;s figure is then
           checked against this one.
         </span>
@@ -170,26 +170,26 @@ export function PaymentForm({ sourceId, today }: { sourceId: string; today: stri
   return (
     <form key={state.attempt} action={formAction} className="mt-2 grid gap-2 sm:grid-cols-2">
       <input type="hidden" name="income_source_id" value={sourceId} />
-      <label className="text-xs font-medium">
+      <label className="text-sm font-medium">
         Landed on
         <input type="date" name="paid_on" required max={today} defaultValue={one('paid_on', today)} className={`mt-1 ${small}`} />
       </label>
-      <label className="text-xs font-medium">
+      <label className="text-sm font-medium">
         Amount that landed
         <input name="landed" required inputMode="decimal" defaultValue={one('landed', '')} className={`mt-1 ${small}`} />
       </label>
-      <label className="text-xs font-medium">
+      <label className="text-sm font-medium">
         Before tax (estimate)
         <input name="pretax_estimate" inputMode="decimal" defaultValue={one('pretax_estimate', '')} className={`mt-1 ${small}`} />
       </label>
-      <label className="text-xs font-medium">
+      <label className="text-sm font-medium">
         Note
         <input name="note" placeholder="Q3 commission" defaultValue={one('note', '')} className={`mt-1 ${small}`} />
       </label>
       <div className="sm:col-span-2">
         <Problem state={state} />
       </div>
-      <button type="submit" disabled={pending} className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium disabled:opacity-60 sm:col-span-2">
+      <button type="submit" disabled={pending} className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium disabled:opacity-60 sm:col-span-2">
         {pending ? 'Logging…' : 'Log it'}
       </button>
     </form>

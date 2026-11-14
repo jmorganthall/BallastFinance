@@ -12,10 +12,21 @@
  */
 @theme static {
   /*
-   * Small print reads at 1.5 line height, not Tailwind's 1.33: most of the
-   * app's helper sentences are text-xs and run to two or three lines.
+   * Small print reads at 1.5 line height, not Tailwind's 1.33 and 1.43:
+   * most of the app's helper sentences are text-sm and run to two or three
+   * lines, and text-xs is what is left of the old small print.
    */
   --text-xs--line-height: 1.5;
+  --text-sm--line-height: 1.5;
+  /*
+   * Each device's own interface face, chosen on purpose (not Tailwind's
+   * fallback by accident): San Francisco on Apple, Segoe UI on Windows,
+   * Roboto on Android. Nothing to download, so text never flashes or
+   * shifts while a font loads, and every one has even-width figures for
+   * money. A brand face would be a redesign, not a refinement.
+   */
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif,
+    'Apple Color Emoji', 'Segoe UI Emoji';
   --color-ink: oklch(0.22 0.02 250);
   --color-ink-soft: oklch(0.48 0.02 250);
   --color-surface: oklch(0.99 0.004 250);
@@ -172,6 +183,53 @@ input[type='date']::-webkit-date-and-time-value {
   min-height: 1.5rem;
   line-height: 1.5rem;
   text-align: left;
+}
+
+/*
+ * Type roles. Reading text is text-base (16px): a sentence a person acts on
+ * is never smaller. Helper sentences are text-sm (14px), never text-xs,
+ * which is kept for dense chrome: tab labels, status pills, table
+ * headers, calendar cells. Each role
+ * below is one style everywhere, so the same job always looks the same.
+ */
+
+/* A heading over a group of cards or rows: small capitals, quiet. */
+@utility section-label {
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-ink-soft);
+}
+
+/* The name at the top of a card: one step above reading text, so weight is not doing the job alone. */
+@utility card-title {
+  font-size: var(--text-lg);
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+/* The one figure a page leads with (This week, Debts, Recurring, Home equity). */
+@utility figure-hero {
+  font-size: var(--text-4xl);
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Headings wrap evenly; sentences avoid a lone last word. Both are ignored where unsupported. */
+h1, h2, h3, h4 {
+  text-wrap: balance;
+}
+p, li, dd {
+  text-wrap: pretty;
+}
+
+/* Figures in a table or a chart line up in columns. */
+table, svg text {
+  font-variant-numeric: tabular-nums;
 }
 
 /* A number a human is about to type into a bank should be unmistakable. */

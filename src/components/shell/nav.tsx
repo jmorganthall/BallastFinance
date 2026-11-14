@@ -107,7 +107,7 @@ export function currentSection(pathname: string): string {
 function SidebarGroup({ title, items, pathname }: { title: string; items: readonly NavItem[]; pathname: string }) {
   return (
     <div>
-      <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <p className="mb-1 px-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
         {title}
       </p>
       <ul className="space-y-1">

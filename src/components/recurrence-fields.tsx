@@ -44,7 +44,7 @@ export function RecurrenceFields({
   }
 
   return (
-    <div className="block text-sm font-medium">
+    <div className="block text-base font-medium">
       <span id={labelId}>{label}</span>
       <div className="mt-1 flex gap-2">
         {unit === 'none' ? (
@@ -85,7 +85,7 @@ export function RecurrenceFields({
         </select>
       </div>
       {unit === 'none' ? null : (
-        <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+        <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
           {describeRecurrence(recurrenceOf(every, unit)) === 'Just once'
             ? 'Enter how many.'
             : `${describeRecurrence(recurrenceOf(every, unit))}. It comes round again on its own, and a past date means the last one was then.`}

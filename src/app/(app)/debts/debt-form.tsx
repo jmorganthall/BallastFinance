@@ -107,13 +107,13 @@ export function DebtForm({
       {formProblem ? (
         <p
           role="alert"
-          className="rounded-xl bg-[var(--color-behind-soft)] p-3 text-sm text-[var(--color-behind)]"
+          className="rounded-xl bg-[var(--color-behind-soft)] p-3 text-base text-[var(--color-behind)]"
         >
           {formProblem}
         </p>
       ) : null}
       {justSaved ? (
-        <p role="status" className="rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">
+        <p role="status" className="rounded-xl bg-[var(--color-ahead-soft)] p-3 text-base text-[var(--color-ahead)]">
           {editing ? 'Saved.' : 'Added. It is in the payoff order above.'}
         </p>
       ) : null}
@@ -286,7 +286,7 @@ export function DebtForm({
           )}
         </Field>
       </div>
-      <p className="-mt-2 text-xs text-[var(--color-ink-soft)]">
+      <p className="-mt-2 text-sm text-[var(--color-ink-soft)]">
         If you pay more than the minimum, this is what decides whether a deal-rate balance is on
         track to be cleared before the rate ends, and when it is paid off. With a day, Ballast
         assumes the payment goes out each month and keeps the balance current between
@@ -308,7 +308,7 @@ export function DebtForm({
         )}
       </Field>
 
-      <label className="flex min-h-11 items-center gap-4 text-sm font-medium">
+      <label className="flex min-h-11 items-center gap-4 text-base font-medium">
         <input
           type="checkbox"
           name="has_promo"
@@ -346,7 +346,7 @@ export function DebtForm({
               )}
             </Field>
           </div>
-          <p className="rounded-lg bg-[var(--color-surface)] p-3 text-xs text-[var(--color-ink-soft)]">
+          <p className="rounded-lg bg-[var(--color-surface)] p-3 text-sm text-[var(--color-ink-soft)]">
             Make sure the interest rate above is the one it reverts to, not 0. Ballast uses that
             to work out whether you can clear the balance before the deal ends — and to start
             pushing this debt up the list in time if you cannot.
@@ -356,7 +356,7 @@ export function DebtForm({
             className="rounded-lg border border-[var(--color-line)] p-3"
             open={Boolean(problemFor('promo_started')) || undefined}
           >
-            <summary className="cursor-pointer text-sm font-medium">More about this deal</summary>
+            <summary className="cursor-pointer text-base font-medium">More about this deal</summary>
             <div className="mt-4 space-y-4">
               <Field
                 label="If it is not paid off by the end, is the interest charged back?"
@@ -399,7 +399,7 @@ export function DebtForm({
       {/* A standing offer to move money onto it (D61): a card's or a line of credit's. */}
       {values.category === 'consumer' ? (
         <>
-          <label className="flex min-h-11 items-center gap-4 text-sm font-medium">
+          <label className="flex min-h-11 items-center gap-4 text-base font-medium">
             <input
               type="checkbox"
               name="has_offer"
@@ -410,7 +410,7 @@ export function DebtForm({
             It has an offer for balance transfers
           </label>
           {problemFor('has_offer') ? (
-            <p className="-mt-2 text-xs text-[var(--color-behind)]">{problemFor('has_offer')}</p>
+            <p className="-mt-2 text-sm text-[var(--color-behind)]">{problemFor('has_offer')}</p>
           ) : null}
         </>
       ) : null}
@@ -483,7 +483,7 @@ export function DebtForm({
               )}
             </Field>
           ) : null}
-          <p className="rounded-lg bg-[var(--color-surface)] p-3 text-xs text-[var(--color-ink-soft)]">
+          <p className="rounded-lg bg-[var(--color-surface)] p-3 text-sm text-[var(--color-ink-soft)]">
             Ballast only works out whether a transfer is worth it when you ask, from this debt on Debts.
             Nothing moves: you make the transfer at the bank and update both debts here.
           </p>
@@ -575,23 +575,23 @@ function ShareFromStatement({
 
   return (
     <details className="sm:col-span-2">
-      <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
+      <summary className="cursor-pointer text-base font-medium text-[var(--color-accent)]">
         Work it out from a statement
       </summary>
       <div className="mt-2 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Statement balance
           <input inputMode="decimal" value={box.balance} onChange={put('balance')} placeholder="3341.75" className={small} />
         </label>
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Minimum payment due
           <input inputMode="decimal" value={box.minimum} onChange={put('minimum')} placeholder="116.94" className={small} />
         </label>
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Interest charged (optional)
           <input inputMode="decimal" value={box.interest} onChange={put('interest')} placeholder="83.52" className={small} />
         </label>
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Fees on this statement (optional)
           <input inputMode="decimal" value={box.fees} onChange={put('fees')} placeholder="0" className={small} />
         </label>
@@ -599,12 +599,12 @@ function ShareFromStatement({
       <button
         type="button"
         onClick={workItOut}
-        className="mt-4 min-h-11 w-full rounded-lg border border-[var(--color-line)] px-4 text-sm font-medium"
+        className="mt-4 min-h-11 w-full rounded-lg border border-[var(--color-line)] px-4 text-base font-medium"
       >
         Work out the percentage
       </button>
       {said ? (
-        <p role="status" className="mt-2 text-sm text-[var(--color-ink-soft)]">
+        <p role="status" className="mt-2 text-base text-[var(--color-ink-soft)]">
           {said}
         </p>
       ) : null}
@@ -630,7 +630,7 @@ function Field({
   const id = useId()
   const describedBy = problem ? `${id}-problem` : hint ? `${id}-hint` : undefined
   return (
-    <label className="block text-sm font-medium">
+    <label className="block text-base font-medium">
       {label}
       {children({
         className: `${fieldClass} ${problem ? badBorder : okBorder}`,
@@ -638,11 +638,11 @@ function Field({
         'aria-describedby': describedBy,
       })}
       {problem ? (
-        <span id={`${id}-problem`} className="mt-1 block text-xs font-normal text-[var(--color-behind)]">
+        <span id={`${id}-problem`} className="mt-1 block text-sm font-normal text-[var(--color-behind)]">
           {problem}
         </span>
       ) : hint ? (
-        <span id={`${id}-hint`} className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+        <span id={`${id}-hint`} className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
           {hint}
         </span>
       ) : null}

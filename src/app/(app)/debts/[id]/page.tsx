@@ -109,7 +109,7 @@ export default async function DebtPage({
 
   return (
     <div data-wide="">
-      <p className="mb-2 text-sm">
+      <p className="mb-2 text-base">
         <Link href="/debts" className="text-[var(--color-accent)] underline underline-offset-4">
           ← Payoff order
         </Link>
@@ -119,7 +119,7 @@ export default async function DebtPage({
         subtitle={`${KIND[debt.category] ?? debt.category}${rung ? ` · number ${rung.rank} in the payoff order` : ''}`}
       />
       {debt.transferOffer && debt.state === 'open' ? (
-        <p className="-mt-2 mb-4 text-sm">
+        <p className="-mt-2 mb-4 text-base">
           Transfer offer: {offerWords(debt.transferOffer, debt.aprBasisPoints, formatCents, humanDate)} ·{' '}
           <Link href={`/debts/transfer?debt=${debt.id}`} className="text-[var(--color-accent)] underline underline-offset-4">
             Is a transfer worth it?
@@ -127,7 +127,7 @@ export default async function DebtPage({
         </p>
       ) : null}
       {debt.linkUrl ? (
-        <p className="-mt-2 mb-4 text-sm">
+        <p className="-mt-2 mb-4 text-base">
           <a href={debt.linkUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] underline underline-offset-4">
             Open {debtLinkSite(debt.linkUrl)} ↗
           </a>
@@ -144,7 +144,7 @@ export default async function DebtPage({
         {view && view.status !== 'on_track' ? (
           <div className="mb-4">
             <Pill tone={view.status === 'short' ? 'behind' : 'caution'}>{debtStatusLabel(view)}</Pill>
-            <p className="mt-2 text-sm">
+            <p className="mt-2 text-base">
               {debtStatusLine(view).map((part, i) =>
                 part.date ? <When key={i} date={part.date.on} today={today} /> : <span key={i}>{part.text}</span>,
               )}{' '}
@@ -154,20 +154,20 @@ export default async function DebtPage({
             </p>
           </div>
         ) : paidOff ? (
-          <p className="mb-4 text-sm font-medium text-[var(--color-ahead)]">Paid off.</p>
+          <p className="mb-4 text-base font-medium text-[var(--color-ahead)]">Paid off.</p>
         ) : (
           <p className="mb-4">
             <Pill tone="ahead">On track</Pill>
           </p>
         )}
 
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-sm sm:grid-cols-3">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-4 text-base sm:grid-cols-3">
           <div>
-            <dt className="text-xs text-[var(--color-ink-soft)]">Balance</dt>
+            <dt className="text-sm text-[var(--color-ink-soft)]">Balance</dt>
             <dd className="font-medium tabular">
               <Money cents={debt.balanceCents} />
               {debt.statedBalanceCents !== undefined && debt.statedBalanceCents !== debt.balanceCents ? (
-                <span className="block text-xs font-normal text-[var(--color-ink-soft)]">
+                <span className="block text-sm font-normal text-[var(--color-ink-soft)]">
                   <Hint
                     detail={`The statement said ${formatCents(debt.statedBalanceCents)} on ${humanDate(debt.balanceAsOf)}; this is that less the payments since.`}
                   >
@@ -175,52 +175,52 @@ export default async function DebtPage({
                   </Hint>
                 </span>
               ) : (
-                <span className="block text-xs font-normal text-[var(--color-ink-soft)]">
+                <span className="block text-sm font-normal text-[var(--color-ink-soft)]">
                   checked <When date={debt.balanceAsOf} today={today} />
                 </span>
               )}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-ink-soft)]">
+            <dt className="text-sm text-[var(--color-ink-soft)]">
               <Hint detail="What it really costs right now, which is what the payoff order ranks by.">Rate</Hint>
             </dt>
             <dd className="font-medium tabular">
               {rung ? percent(rung.effectiveAprBasisPoints) : percent(debt.aprBasisPoints)}
               {rung && rung.effectiveAprBasisPoints !== debt.aprBasisPoints ? (
-                <span className="block text-xs font-normal text-[var(--color-ink-soft)]">
+                <span className="block text-sm font-normal text-[var(--color-ink-soft)]">
                   listed {percent(debt.aprBasisPoints)}
                 </span>
               ) : null}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-ink-soft)]">Per month</dt>
+            <dt className="text-sm text-[var(--color-ink-soft)]">Per month</dt>
             <dd className="font-medium tabular">
               {rung ? <Money cents={rung.paymentPerMonthCents} /> : '—'}
               {debt.paymentDay ? (
-                <span className="block text-xs font-normal text-[var(--color-ink-soft)]">on the {ordinal(debt.paymentDay)}</span>
+                <span className="block text-sm font-normal text-[var(--color-ink-soft)]">on the {ordinal(debt.paymentDay)}</span>
               ) : null}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-ink-soft)]">Paid off by</dt>
+            <dt className="text-sm text-[var(--color-ink-soft)]">Paid off by</dt>
             <dd className="font-medium">
               {projection.payoffDate ? humanDate(projection.payoffDate) : 'Never, at this payment'}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-ink-soft)]">Interest left to pay</dt>
+            <dt className="text-sm text-[var(--color-ink-soft)]">Interest left to pay</dt>
             <dd className="font-medium tabular">
               {projection.payoffDate ? <Money cents={projection.totalInterestCents} /> : '—'}
             </dd>
           </div>
           {deal ? (
             <div>
-              <dt className="text-xs text-[var(--color-ink-soft)]">Deal</dt>
+              <dt className="text-sm text-[var(--color-ink-soft)]">Deal</dt>
               <dd className="font-medium">
                 {percent(deal.rateBasisPoints)} until {humanDate(deal.untilDate)}
-                <span className="block text-xs font-normal text-[var(--color-ink-soft)]">
+                <span className="block text-sm font-normal text-[var(--color-ink-soft)]">
                   {deal.chargedBack === false
                     ? 'Interest is not charged back'
                     : deal.chargedBack === true
@@ -236,7 +236,7 @@ export default async function DebtPage({
 
       {/* When it is gone. */}
       <section className="mb-4">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+        <h2 className="mb-2 section-label">
           The balance from today
         </h2>
         <Card>
@@ -249,7 +249,7 @@ export default async function DebtPage({
               whatIf={whatIf ? { label: `With ${whatIfLabel}`, months: whatIf.thenMonths } : null}
             />
           ) : (
-            <p className="text-sm">
+            <p className="text-base">
               {debt.balanceCents === 0
                 ? 'Nothing is owed.'
                 : 'At the payment set up now, the interest each month is as much as the payment, so it is never paid off.'}
@@ -261,12 +261,12 @@ export default async function DebtPage({
       {/* What paying more would do. */}
       {debt.balanceCents > 0 ? (
         <section className="mb-4">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-2 section-label">
             What if we paid more?
           </h2>
           <Card>
             <form method="GET" className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 More each month
                 <input
                   name="extra"
@@ -276,7 +276,7 @@ export default async function DebtPage({
                   className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
                 />
               </label>
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 Once, today
                 <input
                   name="once"
@@ -288,13 +288,13 @@ export default async function DebtPage({
               </label>
               <button
                 type="submit"
-                className="min-h-11 rounded-xl border border-[var(--color-line)] px-4 text-sm font-medium"
+                className="min-h-11 rounded-xl border border-[var(--color-line)] px-4 text-base font-medium"
               >
                 Try it
               </button>
             </form>
             {whatIf ? (
-              <p className="mt-4 text-sm">
+              <p className="mt-4 text-base">
                 {whatIf.then.months === null
                   ? `Even with ${whatIfLabel}, it is never paid off.`
                   : whatIf.monthsSooner === null
@@ -310,14 +310,14 @@ export default async function DebtPage({
       {/* How much of each payment is interest. */}
       {months.length > 0 ? (
         <section className="mb-4">
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-2 section-label">
             Where each payment goes
           </h2>
           <Card>
             <PaymentSplitChart splits={paymentSplits(months)} />
-            <details className="mt-4 text-sm">
+            <details className="mt-4 text-base">
               <summary className="cursor-pointer text-[var(--color-accent)]">See the numbers</summary>
-              <table className="mt-2 w-full text-xs tabular">
+              <table className="mt-2 w-full text-sm tabular">
                 <thead>
                   <tr className="text-left text-[var(--color-ink-soft)]">
                     <th className="py-1 font-medium">When</th>
@@ -351,7 +351,7 @@ export default async function DebtPage({
         <form action={setSimplifiNamesAction} className="flex items-end gap-2">
           <input type="hidden" name="target" value={`debt:${debt.id}`} />
           <input type="hidden" name="back" value={`/debts/${debt.id}`} />
-          <label className="flex-1 text-sm font-medium">
+          <label className="flex-1 text-base font-medium">
             Known in Simplifi as
             <input
               name="names"
@@ -360,19 +360,19 @@ export default async function DebtPage({
               className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base font-normal text-[var(--color-ink)]"
             />
           </label>
-          <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium">
+          <button type="submit" className="rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium">
             Save
           </button>
         </form>
-        {error ? <p className="mt-2 text-sm text-[var(--color-behind)]">{error}</p> : saved ? <p className="mt-2 text-sm text-[var(--color-ahead)]">Saved.</p> : null}
+        {error ? <p className="mt-2 text-base text-[var(--color-behind)]">{error}</p> : saved ? <p className="mt-2 text-base text-[var(--color-ahead)]">Saved.</p> : null}
       </Card>
 
       <section className="mb-4">
-        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+        <h2 className="mb-2 section-label">
           History
         </h2>
         <Card>
-          <ul className="space-y-2 text-sm">
+          <ul className="space-y-2 text-base">
             {[...history].reverse().map((entry, i) => (
               <li key={i} className="flex justify-between gap-4">
                 <span>{historyWords(entry)}</span>

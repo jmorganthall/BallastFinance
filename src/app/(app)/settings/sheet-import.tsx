@@ -23,7 +23,7 @@ export function SheetImport() {
 
   if (state.phase === 'done') {
     return (
-      <div className="space-y-4 text-sm">
+      <div className="space-y-4 text-base">
         <p className="rounded-xl bg-[var(--color-ahead-soft)] p-3 font-medium text-[var(--color-ahead)]">
           Done. {state.plansCreated.length} plan{state.plansCreated.length === 1 ? '' : 's'},{' '}
           {state.debtsCreated.length} debt{state.debtsCreated.length === 1 ? '' : 's'}
@@ -60,7 +60,7 @@ export function SheetImport() {
 
   return (
     <form action={formAction} className="space-y-4">
-      <label className="block text-sm font-medium">
+      <label className="block text-base font-medium">
         Paste the rows, header line included
         <textarea
           name="sheet"
@@ -69,9 +69,9 @@ export function SheetImport() {
           placeholder={
             'Account\tIn Simplifi\tExpense\tBracket\tDue Every\tNext Due\tReserved Now\tAmount\tMonthly\tWeekly\n…\n\nLoan\tCategory\tFreed Up\tMonthly\tAPR\t%\t$\t…'
           }
-          className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 font-mono text-xs text-[var(--color-ink)]"
+          className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-[var(--color-ink)]"
         />
-        <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+        <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
           Copy straight out of the sheet: both tabs at once is fine. Ballast keeps the raw
           inputs and throws the sheet&apos;s own arithmetic away.
         </span>
@@ -82,7 +82,7 @@ export function SheetImport() {
       ) : null}
 
       {preview ? (
-        <div className="space-y-4 text-sm">
+        <div className="space-y-4 text-base">
           {preview.problems.length > 0 ? (
             <div className="rounded-xl bg-[var(--color-behind-soft)] p-3 text-[var(--color-behind)]">
               <p className="font-medium">
@@ -108,7 +108,7 @@ export function SheetImport() {
 
           {preview.expenses.length > 0 ? (
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+              <h3 className="section-label">
                 {preview.expenses.length} plan{preview.expenses.length === 1 ? '' : 's'}
               </h3>
               <ul className="mt-2 divide-y divide-[var(--color-line)]">
@@ -118,13 +118,13 @@ export function SheetImport() {
                       <span className="font-medium">{e.label}</span>
                       <span className="shrink-0 tabular">{formatCents(e.amountCents)}</span>
                     </div>
-                    <p className="text-xs text-[var(--color-ink-soft)]">
+                    <p className="text-sm text-[var(--color-ink-soft)]">
                       {e.account} · {e.recurrence.toLowerCase()}
                       {e.repeats ? ', next' : ', needed by'} {humanDate(e.dueDate)}
                       {e.openingCents > 0 ? ` · ${formatCents(e.openingCents)} already set aside` : ''}
                     </p>
                     {e.notes.map((n, i) => (
-                      <p key={i} className="text-xs text-[var(--color-accent)]">
+                      <p key={i} className="text-sm text-[var(--color-accent)]">
                         {n}
                       </p>
                     ))}
@@ -136,7 +136,7 @@ export function SheetImport() {
 
           {preview.debts.length > 0 ? (
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+              <h3 className="section-label">
                 {preview.debts.length} debt{preview.debts.length === 1 ? '' : 's'}
               </h3>
               <ul className="mt-2 divide-y divide-[var(--color-line)]">
@@ -146,14 +146,14 @@ export function SheetImport() {
                       <span className="font-medium">{d.name}</span>
                       <span className="shrink-0 tabular">{formatCents(d.balanceCents)}</span>
                     </div>
-                    <p className="text-xs text-[var(--color-ink-soft)]">
+                    <p className="text-sm text-[var(--color-ink-soft)]">
                       {CATEGORY_LABELS[d.category] ?? d.category} · {(d.aprBasisPoints / 100).toFixed(2)}% ·
                       minimum {d.minimum}
                       {d.creditLimitCents ? ` · limit ${formatCents(d.creditLimitCents)}` : ''}
                       {d.balanceAsOf ? ` · balance as of ${humanDate(d.balanceAsOf)}` : ''}
                     </p>
                     {d.notes.map((n, i) => (
-                      <p key={i} className="text-xs text-[var(--color-accent)]">
+                      <p key={i} className="text-sm text-[var(--color-accent)]">
                         {n}
                       </p>
                     ))}
@@ -164,7 +164,7 @@ export function SheetImport() {
           ) : null}
 
           {preview.ignoredColumns.length > 0 ? (
-            <p className="text-xs text-[var(--color-ink-soft)]">
+            <p className="text-sm text-[var(--color-ink-soft)]">
               Thrown away on purpose, because Ballast works these out itself:{' '}
               {preview.ignoredColumns.join(', ')}.
             </p>
@@ -178,7 +178,7 @@ export function SheetImport() {
           name="mode"
           value="preview"
           disabled={pending}
-          className="rounded-xl border border-[var(--color-line)] px-4 py-3 text-sm font-medium disabled:opacity-60"
+          className="rounded-xl border border-[var(--color-line)] px-4 py-3 text-base font-medium disabled:opacity-60"
         >
           {pending ? 'Reading…' : preview ? 'Check it again' : 'Check it first'}
         </button>
@@ -188,14 +188,14 @@ export function SheetImport() {
             name="mode"
             value="import"
             disabled={pending}
-            className="rounded-xl bg-[var(--color-accent)] px-4 py-3 text-sm font-medium text-[var(--color-on-fill)] disabled:opacity-60"
+            className="rounded-xl bg-[var(--color-accent)] px-4 py-3 text-base font-medium text-[var(--color-on-fill)] disabled:opacity-60"
           >
             {pending ? 'Bringing in…' : `Bring in ${count} row${count === 1 ? '' : 's'}`}
           </button>
         ) : null}
       </div>
       {preview && count > 0 ? (
-        <p className="text-center text-xs text-[var(--color-ink-soft)]">
+        <p className="text-center text-sm text-[var(--color-ink-soft)]">
           Plans go live straight away, saving from today. Anything wrong afterwards can be changed
           on its own screen.
         </p>

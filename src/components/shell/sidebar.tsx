@@ -17,7 +17,7 @@ export function Sidebar() {
       <div className="mt-2 flex flex-1 flex-col">
         <SidebarNav />
       </div>
-      <p className="px-5 pb-5 text-xs text-[var(--color-ink-soft)]">
+      <p className="px-5 pb-5 text-sm text-[var(--color-ink-soft)]">
         Never moves money. You make the transfers.
       </p>
     </aside>

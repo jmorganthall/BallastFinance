@@ -48,7 +48,7 @@ export function Tip({
       {open ? (
         <span
           role="tooltip"
-          className={`absolute z-10 block w-max max-w-[16rem] whitespace-pre-line rounded-lg border ${above ? 'bottom-full left-1/2 mb-1 -translate-x-1/2' : 'left-0 top-full mt-1'} border-[var(--color-line)] bg-[var(--color-card)] px-2.5 py-1.5 text-xs font-normal text-[var(--color-ink)] no-underline shadow-lg`}
+          className={`absolute z-10 block w-max max-w-[16rem] whitespace-pre-line rounded-lg border ${above ? 'bottom-full left-1/2 mb-1 -translate-x-1/2' : 'left-0 top-full mt-1'} border-[var(--color-line)] bg-[var(--color-card)] px-2.5 py-1.5 text-sm font-normal text-[var(--color-ink)] no-underline shadow-lg`}
         >
           {detail}
         </span>

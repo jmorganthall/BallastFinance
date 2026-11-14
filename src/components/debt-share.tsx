@@ -17,7 +17,7 @@ export function DebtShare({ optimised }: { optimised: OptimizerResult | null }) 
     // The optimizer says which; a plan with debts must never read as "none".
     const noDebts = optimised.consideredDebts === 0
     return (
-      <p className="mt-4 rounded-xl bg-[var(--color-surface)] p-3 text-sm text-[var(--color-ink-soft)]">
+      <p className="mt-4 rounded-xl bg-[var(--color-surface)] p-3 text-base text-[var(--color-ink-soft)]">
         {noDebts ? (
           <>
             No debts recorded yet, so this has nowhere specific to go.{' '}
@@ -38,7 +38,7 @@ export function DebtShare({ optimised }: { optimised: OptimizerResult | null }) 
       <PayoffImpact result={optimised} />
 
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+        <h3 className="section-label">
           Where it goes
         </h3>
         <ul className="mt-2 divide-y divide-[var(--color-line)]">
@@ -53,7 +53,7 @@ export function DebtShare({ optimised }: { optimised: OptimizerResult | null }) 
                   <Money cents={allocation.amountCents} />
                 </span>
               </div>
-              <p className="mt-1 text-xs leading-snug text-[var(--color-ink-soft)]">
+              <p className="mt-1 text-sm leading-snug text-[var(--color-ink-soft)]">
                 {allocation.reason}
               </p>
             </li>
@@ -62,13 +62,13 @@ export function DebtShare({ optimised }: { optimised: OptimizerResult | null }) 
       </div>
 
       {optimised.unallocatedCents > 0 ? (
-        <p className="text-xs text-[var(--color-ink-soft)]">
+        <p className="text-sm text-[var(--color-ink-soft)]">
           <Money cents={optimised.unallocatedCents} /> is left over — you will be asked where it
           goes.
         </p>
       ) : null}
 
-      <p className="text-xs text-[var(--color-ink-soft)]">
+      <p className="text-sm text-[var(--color-ink-soft)]">
         Same order as the Debts screen, at your normal setting.{' '}
         <Link href="/debts" className="underline">
           Change the order

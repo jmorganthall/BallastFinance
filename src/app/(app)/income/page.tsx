@@ -27,8 +27,8 @@ import {
 export const dynamic = 'force-dynamic'
 
 const small =
-  'w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-sm text-[var(--color-ink)]'
-const heading = 'mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
+  'w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 py-1.5 text-base text-[var(--color-ink)]'
+const heading = 'mb-2 section-label'
 
 /** One row of the sheet: a label and the figure in every column. */
 function SheetRow({
@@ -60,9 +60,9 @@ function SheetRow({
 function SheetTable({ children }: { children: React.ReactNode }) {
   return (
     <div className="-mx-4 overflow-x-auto px-4">
-      <table className="w-full min-w-[36rem] text-sm">
+      <table className="w-full min-w-[36rem] text-base">
         <thead>
-          <tr className="text-xs text-[var(--color-ink-soft)]">
+          <tr className="text-sm text-[var(--color-ink-soft)]">
             <th />
             {INCOME_COLUMNS.map((c) => (
               <th key={c} scope="col" className="pb-1 pl-3 text-right font-medium whitespace-nowrap">
@@ -96,14 +96,14 @@ function SourceCard({
       <div id={`source-${source.id}`} className="mb-4 flex items-start justify-between gap-4">
         <div>
           <p className="font-semibold">{source.name}</p>
-          <p className="text-xs text-[var(--color-ink-soft)]">
+          <p className="text-sm text-[var(--color-ink-soft)]">
             Paid {FREQUENCY_WORDS[source.frequency]}
             {source.startedOn ? `, since ${humanDate(source.startedOn)}` : ''}
           </p>
         </div>
         <p className="text-right">
           <Money cents={paycheck.netCents} className="text-lg font-semibold" />
-          <span className="block text-xs text-[var(--color-ink-soft)]">take-home a check</span>
+          <span className="block text-sm text-[var(--color-ink-soft)]">take-home a check</span>
         </p>
       </div>
 
@@ -128,30 +128,30 @@ function SourceCard({
         <SheetRow label="Take-home" cols={view.net} strong />
       </SheetTable>
       {paycheck.taxRateBasisPoints !== null && source.netPerCheckCents !== null ? (
-        <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+        <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
           Taxes and withholding take {formatRate(paycheck.taxRateBasisPoints)} of the pay left after the deductions,
           worked out from the take-home on the stub.
         </p>
       ) : null}
 
       {check ? (
-        <p className={`mt-4 text-sm ${check.differs ? 'text-[var(--color-caution)]' : 'text-[var(--color-ink-soft)]'}`}>
+        <p className={`mt-4 text-base ${check.differs ? 'text-[var(--color-caution)]' : 'text-[var(--color-ink-soft)]'}`}>
           {check.differs
             ? `Simplifi expects ${check.items.map((i) => `${formatCents(i.amountCents)} ${FREQUENCY_WORDS[i.frequency]}`).join(' + ')}: ${formatCents(Math.abs(check.differenceYearlyCents))} a year ${check.differenceYearlyCents > 0 ? 'more' : 'less'} than these paystub figures. These are the ones that count; update Simplifi, or the stub lines here.`
             : `Simplifi agrees (${check.items.map((i) => i.name).join(', ')}).`}
         </p>
       ) : source.simplifiNames.length === 0 ? (
-        <p className="mt-4 text-xs text-[var(--color-ink-soft)]">Not linked to Simplifi yet: give its name under Change.</p>
+        <p className="mt-4 text-sm text-[var(--color-ink-soft)]">Not linked to Simplifi yet: give its name under Change.</p>
       ) : null}
 
       <div className="mt-4 border-t border-[var(--color-line)] pt-3">
         <div className="flex items-baseline justify-between gap-4">
-          <p className="text-sm font-medium">Bonuses and commission</p>
+          <p className="text-base font-medium">Bonuses and commission</p>
           {view.bonus ? (
             <Hint
               detail={`What the log adds up to before tax, ${formatCents(view.bonus.pretaxTotalCents)}, over the ${view.bonus.days} days since the job started, times 365. What landed, at the same rate: ${formatCents(view.bonus.landedYearlyCents)} a year.`}
             >
-              <span className="text-sm">
+              <span className="text-base">
                 <Money cents={view.bonus.pretaxYearlyCents} /> a year before tax
               </span>
             </Hint>
@@ -159,9 +159,9 @@ function SourceCard({
         </div>
         {view.payments.length > 0 ? (
           <div className="-mx-4 mt-2 overflow-x-auto px-4">
-            <table className="w-full min-w-[34rem] text-sm">
+            <table className="w-full min-w-[34rem] text-base">
               <thead>
-                <tr className="text-xs text-[var(--color-ink-soft)]">
+                <tr className="text-sm text-[var(--color-ink-soft)]">
                   <th className="pb-1 text-left font-medium">Landed on</th>
                   <th className="pb-1 text-right font-medium">Landed</th>
                   <th className="pb-1 text-right font-medium">Before tax</th>
@@ -177,7 +177,7 @@ function SourceCard({
                   <tr key={payment.id}>
                     <td className="py-1">
                       {humanDate(payment.paidOn)}
-                      {payment.note ? <span className="block text-xs text-[var(--color-ink-soft)]">{payment.note}</span> : null}
+                      {payment.note ? <span className="block text-sm text-[var(--color-ink-soft)]">{payment.note}</span> : null}
                     </td>
                     <td className="tabular py-1 text-right">{formatCents(payment.landedCents)}</td>
                     <td className="tabular py-1 text-right">{payment.pretaxEstimateCents === null ? '—' : formatCents(payment.pretaxEstimateCents)}</td>
@@ -187,7 +187,7 @@ function SourceCard({
                       <form action={removeIncomePaymentAction}>
                         <input type="hidden" name="id" value={payment.id} />
                         <input type="hidden" name="income_source_id" value={source.id} />
-                        <button type="submit" className="text-xs text-[var(--color-ink-soft)] underline">
+                        <button type="submit" className="text-sm text-[var(--color-ink-soft)] underline">
                           Remove
                         </button>
                       </form>
@@ -198,21 +198,21 @@ function SourceCard({
             </table>
           </div>
         ) : (
-          <p className="mt-1 text-xs text-[var(--color-ink-soft)]">None logged.</p>
+          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">None logged.</p>
         )}
         <details className="mt-2">
-          <summary className="cursor-pointer text-sm underline">Log one that landed</summary>
+          <summary className="cursor-pointer text-base underline">Log one that landed</summary>
           <PaymentForm sourceId={source.id} today={today} />
         </details>
       </div>
 
       <details className="mt-4 border-t border-[var(--color-line)] pt-3">
-        <summary className="cursor-pointer text-sm underline">Change</summary>
+        <summary className="cursor-pointer text-base underline">Change</summary>
         <div className="mt-4">
           <SourceForm source={source} takeHomeCents={paycheck.netCents} members={members} viewerId={viewerId} />
           <form action={endIncomeSourceAction} className="mt-2">
             <input type="hidden" name="id" value={source.id} />
-            <button type="submit" className="text-sm text-[var(--color-behind)] underline">
+            <button type="submit" className="text-base text-[var(--color-behind)] underline">
               This job has ended
             </button>
           </form>
@@ -244,7 +244,7 @@ export default async function IncomePage({
 
         {saved ? (
           <Card className="mb-4 bg-[var(--color-ahead-soft)]">
-            <p className="text-sm font-medium text-[var(--color-ahead)]">Saved.</p>
+            <p className="text-base font-medium text-[var(--color-ahead)]">Saved.</p>
           </Card>
         ) : null}
         {error ? (
@@ -284,13 +284,13 @@ export default async function IncomePage({
 
         <h2 className={heading}>Add income</h2>
         <Card className="mb-6">
-          <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
+          <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
             One per job. Type the lines off a real paystub: Ballast only adds and subtracts them, it never works out tax.
           </p>
           <SourceForm members={members} viewerId={viewer.userId} />
         </Card>
         {income.people.length === 0 ? null : (
-          <p className="mb-6 text-xs text-[var(--color-ink-soft)]">
+          <p className="mb-6 text-sm text-[var(--color-ink-soft)]">
             <Pill tone="neutral">Rounding</Pill> Every column is the year&apos;s figure divided down and rounded down, so
             take-home is never overstated.
           </p>

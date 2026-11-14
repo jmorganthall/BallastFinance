@@ -162,7 +162,7 @@ async function PackageDetailPageRead({
         <Problem className="mb-4">{error}</Problem>
       ) : null}
       {saved ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm font-medium text-[var(--color-ahead)]">
+        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-base font-medium text-[var(--color-ahead)]">
           Saved. The weekly amount has been worked out again.
         </p>
       ) : null}
@@ -170,7 +170,7 @@ async function PackageDetailPageRead({
       <Card className="mb-4">
         {/* What it costs in all and, once spends have lowered it, what is
             still to have ready: the bar's figure (D57 (2)). */}
-        <p className="text-sm text-[var(--color-ink-soft)]">Costs in all</p>
+        <p className="text-base text-[var(--color-ink-soft)]">Costs in all</p>
         <p className="mt-1 text-2xl font-semibold">
           <Money cents={cost.allCents} />
           {cost.stillCents !== null ? (
@@ -184,13 +184,13 @@ async function PackageDetailPageRead({
         {isDraft ? (
           <>
             <div className="mt-4 rounded-xl bg-[var(--color-surface)] p-3">
-              <p className="text-sm font-medium">If you commit this today</p>
+              <p className="text-base font-medium">If you commit this today</p>
               {whatIf.length === 0 ? (
-                <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
+                <p className="mt-1 text-base text-[var(--color-ink-soft)]">
                   Nothing to set aside — check the dates and amounts below.
                 </p>
               ) : (
-                <ul className="mt-2 space-y-1 text-sm">
+                <ul className="mt-2 space-y-1 text-base">
                   {whatIf.map((line) => (
                     <li key={line.accountId}>
                       <div className="flex justify-between gap-4">
@@ -204,7 +204,7 @@ async function PackageDetailPageRead({
                         </span>
                       </div>
                       {line.moveAfterCents > 0 && line.moveBy ? (
-                        <p className="text-xs text-[var(--color-ink-soft)]">
+                        <p className="text-sm text-[var(--color-ink-soft)]">
                           And a one-time move of <Money cents={line.moveAfterCents} /> by{' '}
                           {humanDate(line.moveBy)}: too soon for the weekly transfer to cover.
                         </p>
@@ -228,13 +228,13 @@ async function PackageDetailPageRead({
 
               {repeating.length > 0 ? (
                 <div className="space-y-2 rounded-xl border-2 border-[var(--color-accent)] bg-[var(--color-accent-soft)] p-3">
-                  <p className="text-sm font-medium">Parts that come round again</p>
+                  <p className="text-base font-medium">Parts that come round again</p>
                   {repeating.map((item) => {
                     const offer = elapsed.find((s) => s.lineItemId === item.lineItem.id) ?? null
                     const last = previousOccurrence(item.lineItem.dueDate, item.lineItem.recurrence)!
                     return (
                       <div key={item.lineItem.id} className="group/part rounded-lg bg-[var(--color-card)] p-2">
-                        <p className="mb-2 text-sm font-medium">{item.lineItem.label}</p>
+                        <p className="mb-2 text-base font-medium">{item.lineItem.label}</p>
                         <SavingSinceFields
                           lineItemId={item.lineItem.id}
                           lastOccurrence={last}
@@ -246,12 +246,12 @@ async function PackageDetailPageRead({
                         />
                         {offer ? (
                           <>
-                            <p className="mt-2 hidden text-xs text-[var(--color-ink-soft)] group-has-[.tl-last:checked]/part:block">
+                            <p className="mt-2 hidden text-sm text-[var(--color-ink-soft)] group-has-[.tl-last:checked]/part:block">
                               Saving steadily since then, <Money cents={offer.cents} /> would be here
                               today. If the account does not have it, the weekly transfer is set so it
                               is all there by the due date.
                             </p>
-                            <p className="mt-2 hidden text-xs text-[var(--color-ink-soft)] group-has-[.tl-commit:checked]/part:block">
+                            <p className="mt-2 hidden text-sm text-[var(--color-ink-soft)] group-has-[.tl-commit:checked]/part:block">
                               You would have <Money cents={offer.cents} /> set aside by now if you
                               had been saving since {humanDate(offer.lastOccurrence)} — is that about
                               what you have?
@@ -275,7 +275,7 @@ async function PackageDetailPageRead({
               ) : null}
 
               <label
-                className={`block text-sm font-medium ${
+                className={`block text-base font-medium ${
                   live.some((i) => i.lineItem.recurrence === null) || repeating.length === 0
                     ? ''
                     : 'hidden group-has-[.tl-commit:checked]:block'
@@ -283,7 +283,7 @@ async function PackageDetailPageRead({
               >
                 Already set aside for this (optional)
                 <input name="opening" inputMode="decimal" placeholder="0" className={field} />
-                <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+                <span className="mt-1 block text-sm font-normal text-[var(--color-ink-soft)]">
                   Money you already have toward it. Shared by cost across the parts that start
                   today, so the weekly amount is right from the first week.
                 </span>
@@ -318,7 +318,7 @@ async function PackageDetailPageRead({
 
       {curve ? (
         <Card className="mb-4">
-          <h2 className="mb-4 text-sm font-semibold">How the money builds up</h2>
+          <h2 className="mb-4 text-base font-semibold">How the money builds up</h2>
           {/* The chart and the story that reads it, side by side on a wide screen. */}
           <div className="xl:grid xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] xl:items-start xl:gap-x-8">
             <AccrualChart chart={curve} today={today} />
@@ -329,7 +329,7 @@ async function PackageDetailPageRead({
 
       {closeOuts.length > 0 ? (
         <section className="mt-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-4 section-label">
             Did this get spent?
           </h2>
           {/* Two to a row on a wide screen, like the parts: one card never stretches its box across the page. */}
@@ -350,7 +350,7 @@ async function PackageDetailPageRead({
         </section>
       ) : null}
 
-      <h2 className="mb-4 mt-6 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+      <h2 className="mb-4 mt-6 section-label">
         What it is made of
       </h2>
 
@@ -368,7 +368,7 @@ async function PackageDetailPageRead({
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <h3 className="font-medium">{item.lineItem.label}</h3>
-                  <p className="mt-0.5 text-xs text-[var(--color-ink-soft)]">
+                  <p className="mt-0.5 text-sm text-[var(--color-ink-soft)]">
                     {accountName(item.lineItem.reserveAccountId)}
                     {' · '}
                     {item.lineItem.recurrence === null ? (
@@ -387,7 +387,7 @@ async function PackageDetailPageRead({
                 ) : null}
               </div>
 
-              <p className="mt-2 text-sm">
+              <p className="mt-2 text-base">
                 {item.lineItem.quantity} × <Money cents={item.lineItem.unitAmountCents} /> ={' '}
                 <strong>
                   <Money cents={item.totalCents} />
@@ -402,7 +402,7 @@ async function PackageDetailPageRead({
                     reason are the domain's.
                   */}
                   {part.savingSince.date !== savingSinceDate ? (
-                    <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                    <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                       Saving since {humanDate(part.savingSince.date)} —{' '}
                       {steadySinceWords(part.savingSince.reason)}.
                     </p>
@@ -419,7 +419,7 @@ async function PackageDetailPageRead({
                     shortReasons={reasons.get(part.accountId) ? [reasons.get(part.accountId)!] : []}
                   />
                   {part.round.spentCents > 0 ? (
-                    <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+                    <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
                       <Money cents={part.round.spentCents} /> of <Money cents={part.round.fullCents} /> already
                       spent, so <Money cents={part.totalCents} /> is still needed.
                     </p>
@@ -432,7 +432,7 @@ async function PackageDetailPageRead({
                       <button
                         type="submit"
                         title="What was spent stays spent; the account saves it again."
-                        className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-xs font-medium"
+                        className="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm font-medium"
                       >
                         Save back up to <Money cents={part.round.fullCents} />
                       </button>
@@ -449,14 +449,14 @@ async function PackageDetailPageRead({
               */}
               {open.length > 0 ? (
                 <details className="mt-4 border-t border-[var(--color-line)] pt-3">
-                  <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
+                  <summary className="cursor-pointer text-base font-medium text-[var(--color-accent)]">
                     Money went out for this
                   </summary>
                   <form action={recordSpendAction} className="mt-4 space-y-2">
                     <input type="hidden" name="line_item_id" value={item.lineItem.id} />
                     <input type="hidden" name="package_id" value={view.package.id} />
                     {open.length > 1 ? (
-                      <label className="block text-sm font-medium">
+                      <label className="block text-base font-medium">
                         Which one
                         <select name="round_due" defaultValue={open[0]!.round.dueDate} className={field}>
                           {open.map((r) => (
@@ -469,11 +469,11 @@ async function PackageDetailPageRead({
                     ) : (
                       <input type="hidden" name="round_due" value={open[0]!.round.dueDate} />
                     )}
-                    <label className="block text-sm font-medium">
+                    <label className="block text-base font-medium">
                       How much went out
                       <input name="actual_amount" inputMode="decimal" placeholder="0.00" required className={field} />
                     </label>
-                    <p className="text-xs text-[var(--color-ink-soft)]">
+                    <p className="text-sm text-[var(--color-ink-soft)]">
                       It comes off what this account holds and off what is still needed. Once what went out
                       reaches the total it is finished; more than that comes out of what the account holds for
                       other plans.
@@ -481,7 +481,7 @@ async function PackageDetailPageRead({
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="submit"
-                        className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
+                        className="rounded-xl bg-[var(--color-accent)] px-4 py-2 text-base font-medium text-[var(--color-on-fill)]"
                       >
                         Record spend
                       </button>
@@ -490,7 +490,7 @@ async function PackageDetailPageRead({
                         formAction={finishRoundAction}
                         formNoValidate
                         title="Nothing more is going out for it; what it still holds stays in the account for your other plans."
-                        className="rounded-xl border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+                        className="rounded-xl border border-[var(--color-line)] px-4 py-2 text-base font-medium"
                       >
                         Finish it
                       </button>
@@ -501,18 +501,18 @@ async function PackageDetailPageRead({
 
               {!isDone ? (
                 <details className="mt-4 border-t border-[var(--color-line)] pt-3">
-                  <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
+                  <summary className="cursor-pointer text-base font-medium text-[var(--color-accent)]">
                     Change this part
                   </summary>
                   <form action={updateLineItemAction} className="mt-4 space-y-4">
                     <input type="hidden" name="line_item_id" value={item.lineItem.id} />
                     <input type="hidden" name="package_id" value={view.package.id} />
-                    <label className="block text-sm font-medium">
+                    <label className="block text-base font-medium">
                       What is it?
                       <input name="label" defaultValue={item.lineItem.label} required className={field} />
                     </label>
                     <div className="grid grid-cols-2 gap-4">
-                      <label className="block text-sm font-medium">
+                      <label className="block text-base font-medium">
                         Cost of one
                         <input
                           name="unit_amount"
@@ -521,7 +521,7 @@ async function PackageDetailPageRead({
                           className={field}
                         />
                       </label>
-                      <label className="block text-sm font-medium">
+                      <label className="block text-base font-medium">
                         How many
                         <input
                           name="quantity"
@@ -533,7 +533,7 @@ async function PackageDetailPageRead({
                       </label>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
-                      <label className="block text-sm font-medium">
+                      <label className="block text-base font-medium">
                         Needed by
                         <input
                           name="due_date"
@@ -558,7 +558,7 @@ async function PackageDetailPageRead({
                         />
                       </div>
                     ) : null}
-                    <label className="block text-sm font-medium">
+                    <label className="block text-base font-medium">
                       Save it in
                       <select
                         name="reserve_account"
@@ -570,7 +570,7 @@ async function PackageDetailPageRead({
                     </label>
                     <button
                       type="submit"
-                      className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]"
+                      className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-2 text-base font-medium text-[var(--color-on-fill)]"
                     >
                       Save this part
                     </button>
@@ -580,7 +580,7 @@ async function PackageDetailPageRead({
                     <input type="hidden" name="package_id" value={view.package.id} />
                     <button
                       type="submit"
-                      className="w-full rounded-xl border border-[var(--color-line)] px-4 py-2 text-sm text-[var(--color-ink-soft)]"
+                      className="w-full rounded-xl border border-[var(--color-line)] px-4 py-2 text-base text-[var(--color-ink-soft)]"
                     >
                       Take this part out of the plan
                     </button>
@@ -596,11 +596,11 @@ async function PackageDetailPageRead({
 
       {history.length > 0 ? (
         <section className="mt-6">
-          <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-4 section-label">
             What went out
           </h2>
           <Card>
-            <ul className="divide-y divide-[var(--color-line)] text-sm">
+            <ul className="divide-y divide-[var(--color-line)] text-base">
               {history.map((entry) => (
                 <li key={entry.eventId} className="flex items-center justify-between gap-4 py-2">
                   <div className={entry.undone ? 'text-[var(--color-ink-soft)] line-through' : ''}>
@@ -617,17 +617,17 @@ async function PackageDetailPageRead({
                       · {entry.label}
                       {entry.recurrence ? ` (${roundSuffix(entry.roundDue, entry.recurrence, today)})` : ''}
                     </p>
-                    <p className="text-xs text-[var(--color-ink-soft)]">{humanDate(entry.on)}</p>
+                    <p className="text-sm text-[var(--color-ink-soft)]">{humanDate(entry.on)}</p>
                   </div>
                   {entry.undone ? (
-                    <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">Taken back</span>
+                    <span className="shrink-0 text-sm text-[var(--color-ink-soft)]">Taken back</span>
                   ) : !isDone ? (
                     <form action={undoRoundEventAction}>
                       <input type="hidden" name="event_id" value={entry.eventId} />
                       <input type="hidden" name="package_id" value={view.package.id} />
                       <button
                         type="submit"
-                        className="shrink-0 rounded-lg px-3 py-1.5 text-sm text-[var(--color-ink-soft)] underline"
+                        className="shrink-0 rounded-lg px-3 py-1.5 text-base text-[var(--color-ink-soft)] underline"
                       >
                         Undo
                       </button>
@@ -643,47 +643,47 @@ async function PackageDetailPageRead({
       {!isDone ? (
         <Card className="mt-4 xl:max-w-3xl">
           <details>
-            <summary className="cursor-pointer text-sm font-medium text-[var(--color-accent)]">
+            <summary className="cursor-pointer text-base font-medium text-[var(--color-accent)]">
               Add another part
             </summary>
             <form action={addLineItemAction} className="mt-4 space-y-4">
               <input type="hidden" name="package_id" value={view.package.id} />
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 What is it?
                 <input name="label" required placeholder="Hotel" className={field} />
               </label>
               <div className="grid grid-cols-2 gap-4">
-                <label className="block text-sm font-medium">
+                <label className="block text-base font-medium">
                   Cost of one
                   <input name="unit_amount" inputMode="decimal" placeholder="600" className={field} />
                 </label>
-                <label className="block text-sm font-medium">
+                <label className="block text-base font-medium">
                   How many
                   <input name="quantity" type="number" min={1} defaultValue={1} className={field} />
                 </label>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <label className="block text-sm font-medium">
+                <label className="block text-base font-medium">
                   Needed by
                   <input name="due_date" type="date" className={field} />
                 </label>
                 <RecurrenceFields />
               </div>
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 Save it in
                 <select name="reserve_account" defaultValue={defaultAccount} className={field}>
                   {accountOptions}
                 </select>
               </label>
               {!isDraft ? (
-                <p className="text-xs text-[var(--color-ink-soft)]">
+                <p className="text-sm text-[var(--color-ink-soft)]">
                   A one-off starts being set aside from today. A part that comes round again
                   counts from the last time it did, and should already hold its share.
                 </p>
               ) : null}
               <button
                 type="submit"
-                className="w-full rounded-xl border border-[var(--color-line)] px-4 py-2 text-sm font-medium"
+                className="w-full rounded-xl border border-[var(--color-line)] px-4 py-2 text-base font-medium"
               >
                 Add it
               </button>
@@ -693,14 +693,14 @@ async function PackageDetailPageRead({
       ) : null}
 
       {retired.length > 0 ? (
-        <p className="mt-4 text-xs text-[var(--color-ink-soft)]">
+        <p className="mt-4 text-sm text-[var(--color-ink-soft)]">
           No longer part of this plan: {retired.map((i) => i.lineItem.label).join(', ')}.
         </p>
       ) : null}
 
       {isDone ? (
         <>
-          <h2 className="mb-4 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-4 mt-8 section-label">
             The plan itself
           </h2>
           <Card>
@@ -709,7 +709,7 @@ async function PackageDetailPageRead({
         </>
       ) : (
         <>
-          <h2 className="mb-4 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+          <h2 className="mb-4 mt-8 section-label">
             The plan itself
           </h2>
           <Card>
@@ -717,10 +717,10 @@ async function PackageDetailPageRead({
             <div>
               {confirm === 'stop' ? (
                 <div className="rounded-xl bg-[var(--color-behind-soft)] p-3">
-                  <p className="text-sm font-medium text-[var(--color-behind)]">
+                  <p className="text-base font-medium text-[var(--color-behind)]">
                     Stop saving for {view.package.name}?
                   </p>
-                  <p className="mt-1 text-xs text-[var(--color-ink-soft)]">
+                  <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
                     Nothing is deleted and no money moves. Whatever is already in the account
                     shows up as extra at your next check-in, where you can decide what to do
                     with it.
@@ -730,14 +730,14 @@ async function PackageDetailPageRead({
                       <input type="hidden" name="package_id" value={view.package.id} />
                       <button
                         type="submit"
-                        className="w-full rounded-lg bg-[var(--color-behind)] px-3 py-2 text-sm font-medium text-[var(--color-on-fill)]"
+                        className="w-full rounded-lg bg-[var(--color-behind)] px-3 py-2 text-base font-medium text-[var(--color-on-fill)]"
                       >
                         Yes, stop it
                       </button>
                     </form>
                     <Link
                       href={`/packages/${view.package.id}`}
-                      className="flex items-center justify-center rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium"
+                      className="flex items-center justify-center rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium"
                     >
                       Keep it
                     </Link>
@@ -746,7 +746,7 @@ async function PackageDetailPageRead({
               ) : (
                 <Link
                   href={`/packages/${view.package.id}?confirm=stop`}
-                  className="block text-center text-sm text-[var(--color-ink-soft)] underline"
+                  className="block text-center text-base text-[var(--color-ink-soft)] underline"
                 >
                   {isDraft ? 'Throw this draft away' : 'Stop saving for this'}
                 </Link>
@@ -756,7 +756,7 @@ async function PackageDetailPageRead({
         </>
       )}
 
-      <p className="mt-6 text-center text-sm">
+      <p className="mt-6 text-center text-base">
         <Link href="/packages" className="text-[var(--color-accent)] underline">
           Back to plans
         </Link>

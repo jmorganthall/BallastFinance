@@ -30,7 +30,7 @@ export function CountField({
 }) {
   return (
     <div className="mt-4">
-      <label htmlFor={balanceField(accountId)} className="block text-sm font-medium">
+      <label htmlFor={balanceField(accountId)} className="block text-base font-medium">
         {label}
       </label>
       <div className="mt-1 flex items-stretch gap-2">
@@ -45,7 +45,7 @@ export function CountField({
           form={itsFormId(accountId)}
           name={ITS_FIELD}
           value={itsValue(accountId, likelyCents)}
-          className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium"
+          className="shrink-0 rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium"
         >
           It&apos;s {formatCents(likelyCents)}
         </button>
@@ -88,7 +88,7 @@ export function BalancesRecorded({ count, after }: { count: number; after?: stri
   if (count > 0) {
     return (
       <Card className="mb-4 bg-[var(--color-ahead-soft)]">
-        <p className="text-sm font-medium text-[var(--color-ahead)]">
+        <p className="text-base font-medium text-[var(--color-ahead)]">
           {count === 1 ? 'One balance recorded.' : `${count} balances recorded.`}
           {after ? ` ${after}` : ''}
         </p>
@@ -97,8 +97,8 @@ export function BalancesRecorded({ count, after }: { count: number; after?: stri
   }
   return (
     <Card className="mb-4 bg-[var(--color-caution-soft)]">
-      <p className="text-sm font-medium">Nothing was recorded.</p>
-      <p className="mt-1 text-sm">
+      <p className="text-base font-medium">Nothing was recorded.</p>
+      <p className="mt-1 text-base">
         Every box was empty or not an amount. Type what each account holds, or tap It&apos;s $X when the figure is right.
       </p>
     </Card>

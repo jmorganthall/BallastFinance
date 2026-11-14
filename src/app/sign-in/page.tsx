@@ -68,7 +68,7 @@ export default async function SignInPage({
         </button>
       </form>
 
-      <p className="mt-6 text-xs text-[var(--color-ink-soft)]">
+      <p className="mt-6 text-sm text-[var(--color-ink-soft)]">
         Ballast never connects to your bank and never moves money. It works out the numbers; you
         make the transfers.
       </p>

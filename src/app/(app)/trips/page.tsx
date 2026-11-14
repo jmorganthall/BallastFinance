@@ -68,10 +68,10 @@ export const dynamic = 'force-dynamic'
 
 const input =
   'mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]'
-const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-fill)]'
-const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium'
-const sectionTitle = 'mb-4 mt-8 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]'
-const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-sm font-medium'
+const primaryButton = 'w-full rounded-lg bg-[var(--color-accent)] px-4 py-2 text-base font-medium text-[var(--color-on-fill)]'
+const secondaryButton = 'w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium'
+const sectionTitle = 'mb-4 mt-8 section-label'
+const smallButton = 'rounded-lg border border-[var(--color-line)] px-3 py-2 text-base font-medium'
 
 /** The three questions behind the score (D25), each answered A lot / Some / A little / Not at all. */
 const WEIGHT_QUESTIONS: readonly { key: 'busy' | 'price' | 'school'; field: string; label: string }[] = [
@@ -204,11 +204,11 @@ export default async function TripsPage({
       {error ? (
         <Problem className="mb-4">{error}</Problem>
       ) : saved === 'home' ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">
+        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-base text-[var(--color-ahead)]">
           Home saved{home?.resolvedName ? ` and found on the map: ${home.resolvedName}` : ''}.
         </p>
       ) : saved ? (
-        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">Saved.</p>
+        <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-base text-[var(--color-ahead)]">Saved.</p>
       ) : null}
 
       {open.length === 0 ? (
@@ -225,10 +225,10 @@ export default async function TripsPage({
                 <Link href={`/trips/${trip.id}`}>
                   <Card>
                     <div className="flex items-start justify-between gap-4">
-                      <h2 className="font-semibold">{trip.name}</h2>
+                      <h2 className="card-title">{trip.name}</h2>
                       <Pill tone={status.tone}>{status.label}</Pill>
                     </div>
-                    <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
+                    <p className="mt-2 text-base text-[var(--color-ink-soft)]">
                       {humanDate(trip.startDate)} to {humanDate(trip.endDate)} · {heads.everyone} going
                       {heads.infants > 0 ? ` (${heads.infants} under 3)` : ''}
                     </p>
@@ -244,15 +244,15 @@ export default async function TripsPage({
         Look at the year
       </h2>
       <Card>
-        {refreshed ? <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-sm text-[var(--color-ahead)]">{refreshed}</p> : null}
+        {refreshed ? <p className="mb-4 rounded-xl bg-[var(--color-ahead-soft)] p-3 text-base text-[var(--color-ahead)]">{refreshed}</p> : null}
         {pendingCrowds ? (
-          <div className="mb-4 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
+          <div className="mb-4 rounded-xl bg-[var(--color-accent-soft)] p-3 text-base">
             <p className="font-semibold">How busy, as {pendingCrowds.label} sees it</p>
             <p className="mt-1">
               {pendingCrowds.levels.length} park-days read for {pendingCrowds.months.join(', ')}, fetched {humanDate(pendingCrowds.fetchedOn)}. Keep them? A level
               you typed yourself is always shown over these.
             </p>
-            <ul className="mt-2 text-xs text-[var(--color-ink-soft)]">
+            <ul className="mt-2 text-sm text-[var(--color-ink-soft)]">
               {crowdPullSummary(pendingCrowds.levels).map((s) => (
                 <li key={s.park}>
                   {s.label}: {s.days} days, {shortDate(s.from)} to {shortDate(s.to)}, how busy {s.lowest} to {s.highest}
@@ -318,22 +318,22 @@ export default async function TripsPage({
           </h2>
           <Card>
             <form action={createTripAction} className="space-y-4">
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 What to call it
                 <input name="name" required placeholder="Disney, June 2027" defaultValue={newTripLayout ? (nameParam ?? '') : ''} className={input} />
               </label>
               <div className="grid grid-cols-2 gap-4">
-                <label className="block text-sm font-medium">
+                <label className="block text-base font-medium">
                   First day
                   <input name="start_date" type="date" required defaultValue={newTripStart} className={input} />
                 </label>
-                <label className="block text-sm font-medium">
+                <label className="block text-base font-medium">
                   Last day
                   <input name="end_date" type="date" required defaultValue={newTripEnd} className={input} />
                 </label>
               </div>
               {newTripLayout ? (
-                <p className="rounded-lg bg-[var(--color-accent-soft)] p-2 text-xs">
+                <p className="rounded-lg bg-[var(--color-accent-soft)] p-2 text-sm">
                   <input type="hidden" name="layout" value={layoutParam} />
                   From the best times to go: the days come laid out, travel days and park days, and the trip&apos;s page can choose the parks. Change the dates and
                   the usual days are used instead.
@@ -341,16 +341,16 @@ export default async function TripsPage({
               ) : null}
               <TravelerFields />
               <div className="grid grid-cols-2 gap-4">
-                <label className="block text-sm font-medium">
+                <label className="block text-base font-medium">
                   Car, miles per gallon
                   <input name="car_mpg" inputMode="numeric" placeholder="25" className={input} />
                 </label>
-                <label className="block text-sm font-medium">
+                <label className="block text-base font-medium">
                   Seats
                   <input name="car_seats" inputMode="numeric" placeholder="7" className={input} />
                 </label>
               </div>
-              <p className="text-xs text-[var(--color-ink-soft)]">
+              <p className="text-sm text-[var(--color-ink-soft)]">
                 The car is only for pricing the drive. Leave it blank if you would fly.
                 {home
                   ? homeIsLocated(home)
@@ -371,7 +371,7 @@ export default async function TripsPage({
               <h2 className={sectionTitle}>Put away</h2>
               <ul className="space-y-2">
                 {putAway.map((trip) => (
-                  <li key={trip.id} className="text-sm text-[var(--color-ink-soft)]">
+                  <li key={trip.id} className="text-base text-[var(--color-ink-soft)]">
                     <Link href={`/trips/${trip.id}`} className="underline underline-offset-4">
                       {trip.name}
                     </Link>{' '}
@@ -386,28 +386,28 @@ export default async function TripsPage({
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
           <h2 className={sectionTitle}>Where home is</h2>
           <Card>
-            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
               For looking up the drive to Orlando. Type the address; saving finds it on the map once, through the public
               OpenStreetMap service, and keeps the spot. Nothing is sent anywhere except when you press save.
             </p>
             {home ? (
-              <p className="mb-4 text-sm">
+              <p className="mb-4 text-base">
                 {homeIsLocated(home) ? (
                   <>
                     <strong>{home.address ?? home.label}</strong>
                     {home.resolvedName ? (
-                      <span className="block text-xs text-[var(--color-ink-soft)]">
+                      <span className="block text-sm text-[var(--color-ink-soft)]">
                         Found on the map as {home.resolvedName}
                         {home.geocodedOn ? `, ${humanDate(home.geocodedOn)}` : ''}.
                       </span>
                     ) : (
-                      <span className="block text-xs text-[var(--color-ink-soft)]">Saved as a spot on the map, before addresses were typed here.</span>
+                      <span className="block text-sm text-[var(--color-ink-soft)]">Saved as a spot on the map, before addresses were typed here.</span>
                     )}
                   </>
                 ) : (
                   <>
                     <strong>{home.address ?? home.label}</strong>
-                    <span className="block text-xs text-[var(--color-behind)]">
+                    <span className="block text-sm text-[var(--color-behind)]">
                       Not found on the map yet, so the drive cannot be looked up. Check the address and save it again.
                     </span>
                   </>
@@ -415,7 +415,7 @@ export default async function TripsPage({
               </p>
             ) : null}
             <form action={saveHomeAddressAction} className="space-y-4">
-              <label className="block text-sm font-medium">
+              <label className="block text-base font-medium">
                 Address
                 <input
                   name="address"
@@ -436,22 +436,22 @@ export default async function TripsPage({
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
           <h2 className={sectionTitle}>Weeks we cannot go</h2>
           <Card>
-            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
               School terms, work trips, the recital. A trip&apos;s &ldquo;When&rdquo; section flags any week that runs into
               one of these. Leave a row blank to drop it.
             </p>
             <form action={saveBlackoutDatesAction} className="space-y-2">
               {[...blackouts, { from: '', to: '', label: '' }, { from: '', to: '', label: '' }].map((b, i) => (
-                <div key={i} className="grid grid-cols-[1fr_1fr_1.4fr] gap-2">
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                <div key={i} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)] gap-2">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     From
                     <input name="blackout_from" type="date" defaultValue={b.from} className={input} />
                   </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     To
                     <input name="blackout_to" type="date" defaultValue={b.to} className={input} />
                   </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     What
                     <input name="blackout_label" defaultValue={b.label} placeholder="School term" className={input} />
                   </label>
@@ -470,8 +470,8 @@ export default async function TripsPage({
           </h2>
           {pendingCalendar ? (
             <Card className="mb-4 bg-[var(--color-accent-soft)]">
-              <h3 className="font-semibold">Days off school, as {pendingCalendar.label} lists them</h3>
-              <p className="mt-1 text-sm">
+              <h3 className="card-title">Days off school, as {pendingCalendar.label} lists them</h3>
+              <p className="mt-1 text-base">
                 {pendingCalendar.items.length} {pendingCalendar.items.length === 1 ? 'day' : 'days'}
                 {pendingCalendar.schoolYear ? ` for ${pendingCalendar.schoolYear}` : ''}, {dayOffSourceName(pendingCalendar.source)} on{' '}
                 {humanDate(pendingCalendar.readOn)}. Look them over; nothing is a day off until you keep
@@ -479,16 +479,16 @@ export default async function TripsPage({
                 {pendingCalendar.source.startsWith('read:') ? ' The reader can misread a table, so check the dates against the document.' : ''}
               </p>
               {(pendingCalendar.yearDays ?? []).length > 0 ? (
-                <ul className="mt-2 text-sm">
+                <ul className="mt-2 text-base">
                   {(pendingCalendar.yearDays ?? []).map((d) => (
                     <li key={`${d.schoolYear}|${d.which}`}>
                       {d.which === 'first' ? 'First' : 'Last'} day of school for {d.schoolYear}: {weekdayName(d.date).slice(0, 3)} {shortDate(d.date)},{' '}
-                      {d.date.slice(0, 4)} <span className="text-xs text-[var(--color-ink-soft)]">· {d.label}</span>
+                      {d.date.slice(0, 4)} <span className="text-sm text-[var(--color-ink-soft)]">· {d.label}</span>
                     </li>
                   ))}
                 </ul>
               ) : null}
-              <ul className="mt-2 max-h-64 overflow-y-auto text-xs text-[var(--color-ink-soft)]">
+              <ul className="mt-2 max-h-64 overflow-y-auto text-sm text-[var(--color-ink-soft)]">
                 {pendingCalendar.items.map((d) => (
                   <li key={`${d.date}|${d.label}`}>
                     {weekdayName(d.date).slice(0, 3)} {shortDate(d.date)}, {d.date.slice(0, 4)} · {d.label}
@@ -515,25 +515,25 @@ export default async function TripsPage({
             </Card>
           ) : null}
           <Card>
-            <h3 className="text-sm font-semibold">When school starts and ends</h3>
-            <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <h3 className="text-base font-semibold">When school starts and ends</h3>
+            <p className="mb-2 text-sm leading-snug text-[var(--color-ink-soft)]">
               Every day before the first day of school and after the last is summer: no school missed, and the calendar
               shades it. A district&apos;s calendar feed fills these in when it names them; what you type here stays.
             </p>
             <ul className="mb-4 divide-y divide-[var(--color-line)]">
               {schoolYears.map((y) => (
                 <li key={y.schoolYear} className="py-2">
-                  <form action={saveSchoolYearDaysAction} className="grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+                  <form action={saveSchoolYearDaysAction} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2">
                     <input type="hidden" name="school_year" value={y.schoolYear} />
                     <input type="hidden" name="first_day_was" value={y.first?.date ?? ''} />
                     <input type="hidden" name="last_day_was" value={y.last?.date ?? ''} />
-                    <p className="col-span-3 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">{y.schoolYear}</p>
-                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                    <p className="col-span-3 section-label">{y.schoolYear}</p>
+                    <label className="block text-sm text-[var(--color-ink-soft)]">
                       First day of school
                       <input name="first_day" type="date" defaultValue={y.first?.date ?? ''} className={input} />
                       <span className="mt-0.5 block">{schoolYearEndWords(y.first, y.guessFirst, 'first', !y.counted && y.last !== null)}</span>
                     </label>
-                    <label className="block text-xs text-[var(--color-ink-soft)]">
+                    <label className="block text-sm text-[var(--color-ink-soft)]">
                       Last day of school
                       <input name="last_day" type="date" defaultValue={y.last?.date ?? ''} className={input} />
                       <span className="mt-0.5 block">{schoolYearEndWords(y.last, y.guessLast, 'last', !y.counted && y.first !== null)}</span>
@@ -545,29 +545,29 @@ export default async function TripsPage({
                 </li>
               ))}
             </ul>
-            <h3 className="text-sm font-semibold">Days off school</h3>
-            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <h3 className="text-base font-semibold">Days off school</h3>
+            <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
               Days off school make long weekends, and a trip on a school day is a day missed. The best-weeks list on each trip
               uses both. Type the days, or point at the district&apos;s calendar below and read it in.
             </p>
             {daysOff.length === 0 ? (
-              <p className="mb-4 text-sm text-[var(--color-ink-soft)]">
+              <p className="mb-4 text-base text-[var(--color-ink-soft)]">
                 No days off yet, so every weekday counts as school. Federal holidays are already known.
               </p>
             ) : (
               bySchoolYear(daysOff).map((group) => (
                 <div key={group.schoolYear} className="mb-4">
-                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">{group.schoolYear}</h3>
+                  <h3 className="section-label">{group.schoolYear}</h3>
                   <ul className="mt-1 divide-y divide-[var(--color-line)]">
                     {group.days.map((d) => (
-                      <li key={d.id} className="flex items-center justify-between gap-4 py-1.5 text-sm">
+                      <li key={d.id} className="flex items-center justify-between gap-4 py-1.5 text-base">
                         <span className="min-w-0">
                           {weekdayName(d.date).slice(0, 3)} {shortDate(d.date)}, {d.date.slice(0, 4)} · {d.label}
-                          <span className="block text-xs text-[var(--color-ink-soft)]">{dayOffSourceName(d.source)}</span>
+                          <span className="block text-sm text-[var(--color-ink-soft)]">{dayOffSourceName(d.source)}</span>
                         </span>
                         <form action={removeSchoolDayOffAction}>
                           <input type="hidden" name="day_off_id" value={d.id} />
-                          <button type="submit" className="text-xs text-[var(--color-behind)] underline underline-offset-4">
+                          <button type="submit" className="text-sm text-[var(--color-behind)] underline underline-offset-4">
                             Remove
                           </button>
                         </form>
@@ -577,16 +577,16 @@ export default async function TripsPage({
                 </div>
               ))
             )}
-            <form action={addSchoolDayOffAction} className="grid grid-cols-[1fr_1.4fr_0.8fr_auto] items-end gap-2">
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+            <form action={addSchoolDayOffAction} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,0.8fr)_auto] items-end gap-2">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Date
                 <input name="date" type="date" required className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 What
                 <input name="label" required placeholder="Teacher work day" className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 School year
                 <input name="school_year" placeholder="2026-27" className={input} />
               </label>
@@ -595,8 +595,8 @@ export default async function TripsPage({
               </button>
             </form>
 
-            <h3 className="mt-6 text-sm font-semibold">Where the calendar is</h3>
-            <p className="mb-2 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <h3 className="mt-6 text-base font-semibold">Where the calendar is</h3>
+            <p className="mb-2 text-sm leading-snug text-[var(--color-ink-soft)]">
               A district&apos;s calendar feed is read straight in. A PDF or a web page has no fixed shape, so those go to the
               reader, which shows you what it found before anything is kept.
               {readerOn
@@ -606,10 +606,10 @@ export default async function TripsPage({
             {calendarSources.length > 0 ? (
               <ul className="mb-4 divide-y divide-[var(--color-line)]">
                 {calendarSources.map((s, i) => (
-                  <li key={`${s.url}|${i}`} className="flex items-center justify-between gap-4 py-2 text-sm">
+                  <li key={`${s.url}|${i}`} className="flex items-center justify-between gap-4 py-2 text-base">
                     <span className="min-w-0">
                       {s.label}
-                      <span className="block truncate text-xs text-[var(--color-ink-soft)]">
+                      <span className="block truncate text-sm text-[var(--color-ink-soft)]">
                         {SOURCE_KIND_WORDS[s.kind]} · {s.url}
                       </span>
                     </span>
@@ -626,15 +626,15 @@ export default async function TripsPage({
             <form action={saveSchoolCalendarSourcesAction} className="space-y-2">
               {[...calendarSources, { label: '', url: '', kind: 'ical' as SchoolCalendarSourceKind }].map((s, i) => (
                 <div key={i} className="grid grid-cols-[1fr_1.6fr_1fr] gap-2">
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     Name
                     <input name="source_label" defaultValue={s.label} placeholder="District calendar" className={input} />
                   </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     Link
                     <input name="source_url" type="url" defaultValue={s.url} placeholder="https://" className={input} />
                   </label>
-                  <label className="block text-xs text-[var(--color-ink-soft)]">
+                  <label className="block text-sm text-[var(--color-ink-soft)]">
                     Kind
                     <select name="source_kind" defaultValue={s.kind} className={input}>
                       {(Object.keys(SOURCE_KIND_WORDS) as SchoolCalendarSourceKind[]).map((kind) => (
@@ -658,25 +658,25 @@ export default async function TripsPage({
             How we like to go
           </h2>
           <Card>
-            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
               The best times to go above are trips of this shape: park days with a travel day each side. A drive longer than an easy stretch
               can leave the evening before and finish in the morning; when a travel day would cost school, that makes the first day a quick park
               day. Each trip also lists its ten best weeks of its own length. A week you cannot go is left out.
             </p>
             <form action={saveWeekSettingsAction} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Fewest park days
                 <input name="park_days_min" inputMode="numeric" defaultValue={explored.shape.parkDaysMin} className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Most park days
                 <input name="park_days_max" inputMode="numeric" defaultValue={explored.shape.parkDaysMax} className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Adult drivers
                 <input name="adult_drivers" inputMode="numeric" defaultValue={explored.shape.adultDrivers} className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Easy stretch, hours
                 <input
                   name="easy_stretch_hours"
@@ -686,11 +686,11 @@ export default async function TripsPage({
                   className={input}
                 />
               </label>
-              <label className="col-span-2 flex items-center gap-2 text-sm sm:col-span-4">
+              <label className="col-span-2 flex items-center gap-2 text-base sm:col-span-4">
                 <input type="checkbox" name="split_when_free" defaultChecked={explored.shape.splitWhenFree} />
                 Split a long drive whenever it costs nothing
               </label>
-              <label className="col-span-2 block text-xs text-[var(--color-ink-soft)] sm:col-span-4">
+              <label className="col-span-2 block text-sm text-[var(--color-ink-soft)] sm:col-span-4">
                 Where we usually stay, for what a night costs
                 <select name="stay" defaultValue={stayKey(explored.shape.stay)} className={input}>
                   {(stayChoices.length > 0 ? stayChoices : ['all']).map((k) => (
@@ -700,15 +700,15 @@ export default async function TripsPage({
                   ))}
                 </select>
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Months ahead
                 <input name="horizon_months" inputMode="numeric" defaultValue={horizonMonths} className={input} />
               </label>
               <div className="col-span-2 space-y-2 sm:col-span-4">
-                <p className="text-sm font-medium">How much does each matter?</p>
+                <p className="text-base font-medium">How much does each matter?</p>
                 {WEIGHT_QUESTIONS.map((q) => (
                   <fieldset key={q.field} className="flex flex-wrap items-center gap-x-4 gap-y-1">
-                    <legend className="float-left w-40 text-sm">{q.label}</legend>
+                    <legend className="float-left w-40 text-base">{q.label}</legend>
                     <div className="flex flex-wrap gap-1">
                       {IMPORTANCES.map((level) => (
                         <label key={level} className="cursor-pointer">
@@ -719,7 +719,7 @@ export default async function TripsPage({
                             defaultChecked={importanceOf(weekWeights[q.key]) === level}
                             className="peer sr-only"
                           />
-                          <span className="inline-block rounded-full border border-[var(--color-line)] px-3 py-1 text-sm peer-checked:border-[var(--color-accent)] peer-checked:bg-[var(--color-accent-soft)] peer-checked:font-medium peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-accent)]">
+                          <span className="inline-block rounded-full border border-[var(--color-line)] px-3 py-1 text-base peer-checked:border-[var(--color-accent)] peer-checked:bg-[var(--color-accent-soft)] peer-checked:font-medium peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--color-accent)]">
                             {IMPORTANCE_WORDS[level]}
                           </span>
                         </label>
@@ -727,7 +727,7 @@ export default async function TripsPage({
                     </div>
                   </fieldset>
                 ))}
-                <p className="rounded-lg bg-[var(--color-accent-soft)] p-2 text-xs">{weightsSentence(weekWeights)}</p>
+                <p className="rounded-lg bg-[var(--color-accent-soft)] p-2 text-sm">{weightsSentence(weekWeights)}</p>
               </div>
               <button type="submit" className={secondaryButton + ' col-span-2 sm:col-span-4'}>
                 Save how we like to go
@@ -741,7 +741,7 @@ export default async function TripsPage({
             What a night costs
           </h2>
           <Card>
-            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
               The best times to go are priced night by night from the surest figure there is: a price we were quoted for those nights, then
               Disney&apos;s rate for the week, then for the month. Disney&apos;s rates come from{' '}
               <a href={RESORTINGS_CREDIT.url} className="underline">
@@ -750,7 +750,7 @@ export default async function TripsPage({
               : open its prices-by-month page, copy the whole page and paste it here. It is shown before it is kept.
             </p>
             {lodgingPull ? (
-              <div className="mb-4 rounded-xl bg-[var(--color-accent-soft)] p-3 text-sm">
+              <div className="mb-4 rounded-xl bg-[var(--color-accent-soft)] p-3 text-base">
                 <p className="font-semibold">Disney&apos;s rates, as {lodgingPull.label} lists them</p>
                 {(() => {
                   const sum = ratesPullSummary(lodgingPull.rates)
@@ -762,7 +762,7 @@ export default async function TripsPage({
                     </p>
                   )
                 })()}
-                {lodgingPull.basis ? <p className="mt-1 text-xs text-[var(--color-ink-soft)]">{lodgingPull.basis}.</p> : null}
+                {lodgingPull.basis ? <p className="mt-1 text-sm text-[var(--color-ink-soft)]">{lodgingPull.basis}.</p> : null}
                 <div className="mt-4 flex gap-2">
                   <form action={keepLodgingPullAction} className="flex-1">
                     <button type="submit" className={secondaryButton}>
@@ -778,7 +778,7 @@ export default async function TripsPage({
               </div>
             ) : null}
             <form action={readLodgingPasteAction} className="space-y-2">
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 The resortings.com page, pasted
                 <textarea name="text" rows={3} className={input} placeholder="What a night costs, month by month…" />
               </label>
@@ -786,11 +786,11 @@ export default async function TripsPage({
                 Read the page
               </button>
             </form>
-            <h3 className="mt-6 text-sm font-semibold">Prices we were quoted</h3>
+            <h3 className="mt-6 text-base font-semibold">Prices we were quoted</h3>
             {quotes.length === 0 ? (
-              <p className="mt-1 text-xs text-[var(--color-ink-soft)]">None yet. A quote beats Disney&apos;s published rate for its nights.</p>
+              <p className="mt-1 text-sm text-[var(--color-ink-soft)]">None yet. A quote beats Disney&apos;s published rate for its nights.</p>
             ) : (
-              <ul className="mt-1 divide-y divide-[var(--color-line)] text-sm">
+              <ul className="mt-1 divide-y divide-[var(--color-line)] text-base">
                 {quotes.map((q) => (
                   <li key={q.id} className="flex items-center justify-between gap-2 py-1.5">
                     <span>
@@ -808,7 +808,7 @@ export default async function TripsPage({
               </ul>
             )}
             <form action={typeLodgingQuoteAction} className="mt-2 grid grid-cols-2 gap-2">
-              <label className="col-span-2 block text-xs text-[var(--color-ink-soft)]">
+              <label className="col-span-2 block text-sm text-[var(--color-ink-soft)]">
                 Where
                 <select name="stay" defaultValue={stayKey(explored.shape.stay)} className={input}>
                   {(stayChoices.length > 0 ? stayChoices : ['all']).map((k) => (
@@ -818,19 +818,19 @@ export default async function TripsPage({
                   ))}
                 </select>
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 First night
                 <input name="from_date" type="date" required className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Last night
                 <input name="to_date" type="date" required className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 A night, $
                 <input name="nightly" inputMode="decimal" required placeholder="310" className={input} />
               </label>
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 From
                 <input name="note" placeholder="Disney's site, phone quote…" className={input} />
               </label>
@@ -846,7 +846,7 @@ export default async function TripsPage({
             Where the park data comes from
           </h2>
           <Card>
-            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
               Weather comes from Open-Meteo and park hours from ThemeParks.wiki; neither needs setting. How busy comes from
               Thrill Data&rsquo;s crowd calendar, checked by &ldquo;Refresh park data&rdquo; and
               shown to you before it is kept. A crowd outlook is read only from an address you give below: there is no
@@ -854,7 +854,7 @@ export default async function TripsPage({
               under the name shown. Change a name only if &ldquo;Refresh park data&rdquo; says a park was not found.
             </p>
             <form action={saveParkDataSourcesAction} className="space-y-2">
-              <label className="block text-xs text-[var(--color-ink-soft)]">
+              <label className="block text-sm text-[var(--color-ink-soft)]">
                 Crowd outlook address
                 <input name="outlook_url" type="url" defaultValue={outlookUrl} placeholder="https://" className={input} />
               </label>
@@ -867,7 +867,7 @@ export default async function TripsPage({
                     ['animal_kingdom', 'Animal Kingdom'],
                   ] as const
                 ).map(([park, label]) => (
-                  <label key={park} className="block text-xs text-[var(--color-ink-soft)]">
+                  <label key={park} className="block text-sm text-[var(--color-ink-soft)]">
                     {label}, as the wait feed names it
                     <input name={`wait_name_${park}`} defaultValue={waitParkNames[park] ?? ''} className={input} />
                   </label>
@@ -883,7 +883,7 @@ export default async function TripsPage({
         <section className="break-inside-avoid pt-8 empty:hidden [&>h2:first-child]:mt-0">
           <h2 className={sectionTitle}>Our usual figures</h2>
           <Card>
-            <p className="mb-4 text-xs leading-snug text-[var(--color-ink-soft)]">
+            <p className="mb-4 text-sm leading-snug text-[var(--color-ink-soft)]">
               Where every new trip&apos;s figures start. Each one has the date it was checked and where; nothing Disney
               sells can be looked up by the app, so these are yours to keep current. Changing a figure marks it checked
               today unless you type a date.
@@ -896,8 +896,8 @@ export default async function TripsPage({
                   return (
                     <li key={price.key} className="py-3 first:pt-0 last:pb-0">
                       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                        <span className="text-sm font-medium">{price.label}</span>
-                        <span className="text-xs text-[var(--color-ink-soft)]">
+                        <span className="text-base font-medium">{price.label}</span>
+                        <span className="text-sm text-[var(--color-ink-soft)]">
                           {sourceName(price.sourceUrl)}, {humanDate(price.asOf)}
                           {fresh.stale ? (
                             <>
@@ -908,7 +908,7 @@ export default async function TripsPage({
                         </span>
                       </div>
                       <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        <label className="block text-xs text-[var(--color-ink-soft)]">
+                        <label className="block text-sm text-[var(--color-ink-soft)]">
                           {price.unit === 'percent' ? 'Percent' : 'Amount'}
                           <input
                             name={`amount_${price.key}`}
@@ -917,11 +917,11 @@ export default async function TripsPage({
                             className={input}
                           />
                         </label>
-                        <label className="block text-xs text-[var(--color-ink-soft)]">
+                        <label className="block text-sm text-[var(--color-ink-soft)]">
                           Checked on
                           <input name={`as_of_${price.key}`} type="date" defaultValue={price.asOf} className={input} />
                         </label>
-                        <label className="col-span-2 block text-xs text-[var(--color-ink-soft)] sm:col-span-1">
+                        <label className="col-span-2 block text-sm text-[var(--color-ink-soft)] sm:col-span-1">
                           Where (link)
                           <input name={`source_${price.key}`} type="url" defaultValue={price.sourceUrl ?? ''} placeholder="Blank if it is our own guess" className={input} />
                         </label>

@@ -57,7 +57,7 @@ const field =
 function Problem({ message }: { message?: string }) {
   return message ? (
     // A mark beside the words, so the field's problem never rests on the red alone.
-    <span role="alert" className="mt-1 flex items-start gap-1 text-sm font-normal text-[var(--color-behind)]">
+    <span role="alert" className="mt-1 flex items-start gap-1 text-base font-normal text-[var(--color-behind)]">
       <span aria-hidden="true">⚠</span>
       <span>{message}</span>
     </span>
@@ -91,7 +91,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
   const costFields = (row: Row, index: number) => (
     <>
       <div className="mt-4 grid grid-cols-2 gap-4">
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Cost of one
           <input
             name="unit_amount"
@@ -105,7 +105,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
           <Problem message={problemFor(index, 'unit_amount')} />
         </label>
 
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           How many
           <input
             name="quantity"
@@ -119,7 +119,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-4">
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Needed by
           <input
             name="due_date"
@@ -139,7 +139,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
       </div>
 
       <div className="mt-4">
-        <label className="block text-sm font-medium">
+        <label className="block text-base font-medium">
           Save it in
           <select
             name="reserve_account"
@@ -178,7 +178,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
          * asking the same question twice.
          */
         <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-4">
-          <label className="block text-sm font-medium">
+          <label className="block text-base font-medium">
             What are you saving for?
             <input
               name="name"
@@ -197,10 +197,10 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
       ) : (
         <>
           <div className="rounded-2xl border border-[var(--color-accent)] bg-[var(--color-card)] p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-accent)]">
+            <p className="text-sm font-semibold uppercase tracking-wide text-[var(--color-accent)]">
               The plan
             </p>
-            <label className="mt-2 block text-sm font-medium">
+            <label className="mt-2 block text-base font-medium">
               What is this whole plan for?
               <input
                 name="name"
@@ -213,14 +213,14 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
               />
               <Problem message={nameProblem} />
             </label>
-            <p className="mt-2 text-xs text-[var(--color-ink-soft)]">
+            <p className="mt-2 text-sm text-[var(--color-ink-soft)]">
               One name for the whole thing. The {rows.length} parts below are what it is made of,
               and each one has its own cost and date.
             </p>
           </div>
 
           <div className="space-y-4 border-l-2 border-[var(--color-accent)] pl-3 sm:pl-4">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+            <h2 className="section-label">
               What it is made of
             </h2>
             {rows.map((row, index) => (
@@ -228,11 +228,11 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
                 key={row.key}
                 className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-card)] p-4"
               >
-                <legend className="px-1 text-xs font-medium text-[var(--color-ink-soft)]">
+                <legend className="px-1 text-sm font-medium text-[var(--color-ink-soft)]">
                   Part {index + 1} of {rows.length}
                 </legend>
 
-                <label className="block text-sm font-medium">
+                <label className="block text-base font-medium">
                   What is this part?
                   <input
                     name="label"
@@ -250,7 +250,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
                 <button
                   type="button"
                   onClick={() => setRows((c) => c.filter((r) => r.key !== row.key))}
-                  className="mt-4 min-h-11 text-sm text-[var(--color-ink-soft)] underline"
+                  className="mt-4 min-h-11 text-base text-[var(--color-ink-soft)] underline"
                 >
                   Remove this part
                 </button>
@@ -263,12 +263,12 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
       <button
         type="button"
         onClick={addPart}
-        className="w-full rounded-xl border border-dashed border-[var(--color-line)] px-4 py-3 text-sm font-medium"
+        className="w-full rounded-xl border border-dashed border-[var(--color-line)] px-4 py-3 text-base font-medium"
       >
         {isBundle ? 'Add another part' : 'This has more than one part'}
       </button>
       {!isBundle ? (
-        <p className="-mt-4 text-center text-xs text-[var(--color-ink-soft)]">
+        <p className="-mt-4 text-center text-sm text-[var(--color-ink-soft)]">
           Tickets, hotel and flights can be one plan with several parts, each with its own date.
         </p>
       ) : null}
@@ -281,7 +281,7 @@ export function PackageBuilder({ accounts }: { accounts: AccountOption[] }) {
         {pending ? 'Working it out…' : 'See what this would cost per week'}
       </button>
 
-      <p className="text-center text-xs text-[var(--color-ink-soft)]">
+      <p className="text-center text-sm text-[var(--color-ink-soft)]">
         This creates a draft. Nothing is set aside until you say so.
       </p>
     </form>
