@@ -1,0 +1,87 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Weekly to-do loop</title><style>:root {
+  --bg: #fafafc; --surface: #ffffff; --fg: #18182b; --fg-muted: #65657a;
+  --border: #d8d8e4; --accent: #4338ca;
+  --sans: "Hanken Grotesk", Inter, system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px;
+  --s5: 20px; --s6: 24px; --s7: 32px; --s8: 48px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #18182b; --surface: #1f1f36; --fg: #f0f0f8; --fg-muted: #8888a8;
+    --border: #2a2a44; --accent: #7c6ff0;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #18182b; --surface: #1f1f36; --fg: #f0f0f8; --fg-muted: #8888a8;
+  --border: #2a2a44; --accent: #7c6ff0;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: var(--sans); background: var(--bg); color: var(--fg);
+  padding: var(--s7); line-height: 1.5; margin: 0;
+}
+.visual-diagram {
+  margin: 0; padding: var(--s5);
+  background: var(--surface); border-radius: 8px;
+  border: 1px solid var(--border); overflow-x: auto;
+}
+.visual-label {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  color: var(--fg-muted); letter-spacing: 0.06em;
+  margin-bottom: var(--s4); text-transform: uppercase;
+}
+.blueprint-lane { padding: var(--s2) 0; }
+.blueprint-lane-label { margin-bottom: var(--s2); }
+.blueprint-lane-title {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-muted);
+}
+.blueprint-lane-sub { font-size: 10px; color: var(--fg-muted); margin-left: var(--s2); }
+.blueprint-lane-nodes { display: flex; align-items: center; }
+.blueprint-node {
+  flex: 1; padding: var(--s2);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; text-align: center; min-width: 0;
+}
+.blueprint-node-step { font-family: var(--mono); font-size: 9px; color: var(--accent); font-weight: 600; }
+.blueprint-node-label { font-size: 11px; font-weight: 500; color: var(--fg); }
+.blueprint-node-end { border-color: var(--accent); }
+.blueprint-connector {
+  width: 12px; min-width: 12px; height: 1px;
+  background: var(--border); flex-shrink: 0;
+}
+.blueprint-line-of-interaction,
+.blueprint-line-of-visibility,
+.blueprint-line-of-support {
+  border-top: 1px dashed var(--border);
+  padding: 4px 0; text-align: right;
+}
+.blueprint-line-of-interaction span,
+.blueprint-line-of-visibility span,
+.blueprint-line-of-support span {
+  font-size: 9px; font-family: var(--mono);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--fg-muted); opacity: 0.5;
+}
+.blueprint-lane-services { display: flex; gap: var(--s2); flex-wrap: wrap; }
+.blueprint-service {
+  padding: var(--s2) var(--s3);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 4px; flex: 1; min-width: 80px;
+}
+.blueprint-service-name { font-size: 11px; font-weight: 600; color: var(--fg); }
+.blueprint-service-detail { font-size: 10px; color: var(--fg-muted); margin-top: 1px; }
+.blueprint-service-infra { background: transparent; border-style: dashed; }
+.blueprint-lane-backstage { opacity: 0.85; }
+.blueprint-lane-support { opacity: 0.6; }
+
+h1{font-size:20px;margin:0 0 var(--s2)} p.key{color:var(--fg-muted);font-size:13px;max-width:70ch;margin:0 0 var(--s5)}
+.blueprint-node{min-width:96px}</style></head><body>
+<h1>The weekly to-do loop, as it should work</h1>
+<p class="key">Each numbered box is a step one spouse takes; the same number in the second lane is the same moment seen by the other spouse. Below the line of visibility is what Ballast does that neither sees; below the line of support, what it rests on. Ballast never reaches Capital One 360: step 3 happens only in the bank&rsquo;s app, and Ballast knows it only from step 4.</p>
+<div class="visual-diagram"><div class="visual-label">Service Blueprint: confirming this week&rsquo;s to-dos</div>
+<div class="blueprint-lane"><div class="blueprint-lane-label"><span class="blueprint-lane-title">Frontstage</span><span class="blueprint-lane-sub">The spouse doing transfers, on a phone</span></div><div class="blueprint-lane-nodes"><div class="blueprint-node"><div class="blueprint-node-step">1</div><div class="blueprint-node-label">Opens This week on the transfer day</div></div><div class="blueprint-connector"></div><div class="blueprint-node"><div class="blueprint-node-step">2</div><div class="blueprint-node-label">Reads: set Annual Expenses to $420.00</div></div><div class="blueprint-connector"></div><div class="blueprint-node"><div class="blueprint-node-step">3</div><div class="blueprint-node-label">Changes the transfer in Capital One 360</div></div><div class="blueprint-connector"></div><div class="blueprint-node"><div class="blueprint-node-step">4</div><div class="blueprint-node-label">Types the figure, or taps Done: it&rsquo;s $420.00</div></div><div class="blueprint-connector"></div><div class="blueprint-node"><div class="blueprint-node-step">5</div><div class="blueprint-node-label">Sees Recorded &middot; Undo, and any new to-do with its reason</div></div><div class="blueprint-connector"></div><div class="blueprint-node blueprint-node-end"><div class="blueprint-node-step">6</div><div class="blueprint-node-label">All caught up</div></div></div></div><div class="blueprint-line-of-interaction"><span>Line of interaction</span></div><div class="blueprint-lane"><div class="blueprint-lane-label"><span class="blueprint-lane-title">Frontstage</span><span class="blueprint-lane-sub">The other spouse, later</span></div><div class="blueprint-lane-nodes"><div class="blueprint-node"><div class="blueprint-node-step">1</div><div class="blueprint-node-label">Opens This week</div></div><div class="blueprint-connector"></div><div class="blueprint-node"><div class="blueprint-node-step">4</div><div class="blueprint-node-label">Pressing Done on an old page says who already did it</div></div><div class="blueprint-connector"></div><div class="blueprint-node"><div class="blueprint-node-step">5</div><div class="blueprint-node-label">Sees Done lately: Alex set Annual Expenses to $420.00, 9:14</div></div><div class="blueprint-connector"></div><div class="blueprint-node blueprint-node-end"><div class="blueprint-node-step">6</div><div class="blueprint-node-label">All caught up</div></div></div></div>
+<div class="blueprint-line-of-visibility"><span>Line of visibility</span></div><div class="blueprint-lane blueprint-lane-backstage"><div class="blueprint-lane-label"><span class="blueprint-lane-title">Backstage</span></div><div class="blueprint-lane-nodes blueprint-lane-services"><div class="blueprint-service"><div class="blueprint-service-name">householdView</div><div class="blueprint-service-detail">derives the to-dos from the position; nothing issued ahead</div></div><div class="blueprint-service"><div class="blueprint-service-name">Confirm form rule</div><div class="blueprint-service-detail">typed figure, else the button&rsquo;s figure; beside countsFromForm</div></div><div class="blueprint-service"><div class="blueprint-service-name">confirmTransfer</div><div class="blueprint-service-detail">view before &rarr; record &rarr; view after, one transaction</div></div><div class="blueprint-service"><div class="blueprint-service-name">Done lately</div><div class="blueprint-service-detail">confirmations of the last 7 days, read from the event log</div></div><div class="blueprint-service"><div class="blueprint-service-name">Undo</div><div class="blueprint-service-detail">event_undone on the confirmation, until the next count or transfer day</div></div></div></div>
+<div class="blueprint-line-of-support"><span>Line of support</span></div><div class="blueprint-lane blueprint-lane-support"><div class="blueprint-lane-label"><span class="blueprint-lane-title">Support</span></div><div class="blueprint-lane-nodes blueprint-lane-services"><div class="blueprint-service blueprint-service-infra"><div class="blueprint-service-name">Capital One 360</div><div class="blueprint-service-detail">where money moves; Ballast cannot see it</div></div><div class="blueprint-service blueprint-service-infra"><div class="blueprint-service-name">Event log</div><div class="blueprint-service-detail">append-only, enforced by migration 0001</div></div><div class="blueprint-service blueprint-service-infra"><div class="blueprint-service-name">ledgerOf</div><div class="blueprint-service-detail">puts events in order; leaves undone ones out</div></div><div class="blueprint-service blueprint-service-infra"><div class="blueprint-service-name">position()</div><div class="blueprint-service-detail">the one position, every figure</div></div><div class="blueprint-service blueprint-service-infra"><div class="blueprint-service-name">n8n digest</div><div class="blueprint-service-detail">sent on the transfer day</div></div></div></div></div></body></html>
