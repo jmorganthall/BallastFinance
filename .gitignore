@@ -41,3 +41,8 @@ pgdata/
 
 # Claude Code agent worktrees (session scratch, auto-removed)
 .claude/worktrees/
+
+# Per-person tool settings: the Impeccable hook wiring and its consent, never shared
+.claude/settings.local.json
+.impeccable/config.local.json
+.impeccable/hook.cache.json
