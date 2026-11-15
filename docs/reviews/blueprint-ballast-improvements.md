@@ -34,7 +34,7 @@ The diagram is in [blueprint-ballast-improvements.html](blueprint-ballast-improv
 | 3. Act at the bank | Opens Capital One 360 and changes the transfer | Not involved | **Line of interaction with a party Ballast cannot see.** Ballast has no bank access, so it knows only what a person tells it | Capital One 360 (external) |
 | 4. Say it is done | Types the figure the bank now shows, or taps "Done: it's $420.00" | — | `confirmTransfer` records the instruction and its confirmation in one transaction. In the same transaction it derives the to-dos before and after, and returns the difference | `recordEvent`; the append-only trigger (migration 0001) |
 | 5. See what changed | Sees "Recorded: Annual Expenses moves $420.00 a week · Undo", what it settled, and any new to-do it caused, with the reason | Sees it under "Done lately" with who did it and when | "Done lately" is read from the event log (confirmations in the last 7 days, with the actor); nothing new is stored | `ledgerOf` |
-| 6. Take it back if wrong | Taps Undo | May Undo too (see Open questions) | Records `event_undone` on the confirmation; the ledger leaves it out; the position re-derives | `ledgerOf`'s undone set, extended to confirmations |
+| 6. Take it back if wrong | Taps Undo | May Undo it too, on a shared account | Records `event_undone` on the confirmation; the ledger leaves it out; the position re-derives | `ledgerOf`'s undone set, extended to confirmations |
 | 7. All caught up | Sees "All caught up" | Sees the same | `householdView.caughtUp` | — |
 
 **Where it hurts today:**
@@ -126,12 +126,6 @@ flowchart LR
 | **One section's save drops another's edits** | Likely: edits in a second section vanish after saving the first. | One setting | Unsaved-edit warning before submitting or leaving. |
 | **How the loop ends each week** | Every to-do is confirmed or no longer needed, and This week says All caught up. Undo windows close at the next count or transfer day. Done lately drops entries after 7 days; the events stay in the log forever, as for every fact. | — | — |
 
-## Open questions
-
-- When one spouse marks a transfer done, should the other hear about it, or is seeing it under Done lately enough?
-- Can either spouse undo the other's confirmation on a shared account, or only the person who made it?
-- Should Done lately cover the last 7 days, or only since the last transfer day?
-
 ## Decision log
 
 | Decision | Chosen | Chosen against | Why |
@@ -144,4 +138,7 @@ flowchart LR
 | A second confirmation of the same to-do | **Record nothing and say who did it** | Record it, as today, where only the first counts | Today the second is kept and ignored, which tells the second person nothing. Saying who did it is what stops a second change at the bank. |
 | Share out's reasons | **Sentence parts from the one builder** | Format the date on the Share out screen | The project rule is one definition per figure and sentence. Formatting on the screen would leave two sentence builders. |
 | Best times to go with missing data | **`explore` returns its basis and each window's gaps** | Let the screen guess from "no price yet" text | The domain knows what was missing. The screen must not work it out. |
+| Telling the other spouse | **No message.** The to-do leaves the list for both at once, and the change sits under Done lately | A push or digest line when one spouse confirms | The household's call: it is not hidden, so it needs no announcement. To-dos are derived, so a confirmation already removes it for everyone. |
+| Who can Undo | **Either spouse**, on any account they could have confirmed | Only the person who confirmed it | The household's call. Undo follows the same rule as Done: an `individual` account's funding is its owner's alone (`canWriteAccount`), so only its owner may undo there. |
+| How far back Done lately looks | **The last 7 days** | Since the last transfer day | Since the last transfer day would empty the list on the transfer day itself, just as the digest sends both spouses to look. Seven days always covers the previous transfer day. |
 | Settings saves | **Warn about unsaved edits in another section** | Save each field as it changes | Share-out percentages must add to 100, so a half-edited set is invalid. A row and an event on every change of focus would clutter the history. |
