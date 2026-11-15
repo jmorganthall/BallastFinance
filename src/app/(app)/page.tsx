@@ -36,13 +36,17 @@ import {
   type OutstandingInstruction,
   type SentencePart,
   type Weekday,
+  donePressSentence,
+  canWriteAccount,
+  DONE_ITS_FIELD,
+  todoKey,
+  type DonePress,
 } from '@/domain'
 import {
   confirmBalancesAction,
   confirmInstructionAction,
-  confirmMoveBetweenAction,
-  confirmMoveInAction,
-  confirmTransferAction,
+  markTodoDoneAction,
+  undoDoneAction,
   endInstructionAction,
   raiseDebtPaymentAction,
   setDealChargedBackAction,
@@ -113,43 +117,52 @@ function CreatedOn({
 const plain = (cents: number) => formatCents(cents).replace('$', '').replace(/,/g, '')
 
 /**
- * A to-do the position derived (D35). Marking it done records what the
- * person says they did, at the amount in the box, and the run-forward uses
- * it from then on.
+ * A to-do the position derived (D35). Done records what the person says
+ * they did (D62): the box starts empty with no hint, a figure typed there is
+ * recorded with Record (or Enter), and "Done: it's $X", in a small form of
+ * its own so Enter in the box never sends it, records exactly the figure it
+ * shows. The form names the to-do it was shown, so a press on a page opened
+ * before someone else's records nothing.
  */
-function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate }) {
+function DerivedTodoCard({ todo, today, isNew }: { todo: DerivedTodo; today: CivilDate; isNew: boolean }) {
   const amount = todo.kind === 'set_transfer' ? todo.toCents : todo.amountCents
+  const key = todoKey(todo)
+  const transfer = todo.kind === 'set_transfer'
   return (
     <Card className={todo.blocking ? '' : 'border-dashed'}>
+      {isNew ? (
+        <p className="mb-2 flex flex-wrap items-center gap-2 text-sm text-[var(--color-ink-soft)]">
+          <Pill tone="accent">New</Pill>
+          Because of what was just recorded.
+        </p>
+      ) : null}
       <Parts parts={derivedTodoSentenceParts(todo, humanDate)} today={today} />
-      <form
-        action={
-          todo.kind === 'move_between'
-            ? confirmMoveBetweenAction
-            : todo.kind === 'move_in'
-              ? confirmMoveInAction
-              : confirmTransferAction
-        }
-        className="mt-4 flex items-end gap-2"
-      >
-        <input type="hidden" name="reserve_account_id" value={todo.accountId} />
-        {todo.kind === 'move_between' ? (
-          <input type="hidden" name="from_account_id" value={todo.fromAccountId} />
-        ) : null}
-        <label className="flex-1 text-sm text-[var(--color-ink-soft)]">
-          {todo.kind === 'set_transfer' ? 'What the transfer is now, per week' : 'How much you moved'}
+      <form action={markTodoDoneAction} className="mt-4">
+        <input type="hidden" name="todo" value={key} />
+        <label htmlFor={`amount-${key}`} className="block text-sm text-[var(--color-ink-soft)]">
+          {transfer ? 'What the transfer is now, per week' : 'How much you moved'}
+        </label>
+        <div className="mt-1 flex items-stretch gap-2">
           <input
+            id={`amount-${key}`}
             name="amount"
             inputMode="decimal"
-            defaultValue={plain(amount)}
-            className="mt-1 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
+            className="min-w-0 flex-1 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-ink)]"
           />
-        </label>
+          <button type="submit" className="shrink-0 rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium">
+            Record
+          </button>
+        </div>
+      </form>
+      <form action={markTodoDoneAction} className="mt-2">
+        <input type="hidden" name="todo" value={key} />
         <button
           type="submit"
-          className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium"
+          name={DONE_ITS_FIELD}
+          value={String(amount)}
+          className="w-full rounded-lg border border-[var(--color-line)] px-4 py-2 text-base font-medium"
         >
-          {todo.kind === 'set_transfer' && todo.reason === 'confirm' ? "That's it" : 'Done'}
+          {transfer ? `Done: it's ${formatCents(amount)}` : `Done: moved ${formatCents(amount)}`}
         </button>
       </form>
       {!todo.blocking ? (
@@ -158,6 +171,126 @@ function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate 
         </p>
       ) : null}
     </Card>
+  )
+}
+
+/** An Undo button for one press (D62). */
+function UndoPress({ press }: { press: DonePress }) {
+  return (
+    <form action={undoDoneAction}>
+      <input type="hidden" name="group" value={press.groupId} />
+      <button type="submit" className="shrink-0 rounded-lg px-3 py-2 text-base text-[var(--color-ink-soft)] underline">
+        Undo
+      </button>
+    </form>
+  )
+}
+
+/**
+ * What the last press did (D62): recorded, with Undo, and how many new
+ * to-dos it brought; or that someone had already done it; or that nothing
+ * was recorded. Read from the address the action landed on and from Done
+ * lately, never stored.
+ */
+function DoneResult({
+  params,
+  presses,
+  nameOf,
+  canUndo,
+  today,
+}: {
+  params: { done?: string; new?: string; already?: string; nothing?: string; undone?: string; done_error?: string }
+  presses: DonePress[]
+  nameOf: (userId: string | null) => string
+  canUndo: (press: DonePress) => boolean
+  today: CivilDate
+}) {
+  if (params.done_error) return <Problem className="mb-6">{params.done_error}</Problem>
+  if (params.done) {
+    const press = presses.find((p) => p.groupId === params.done)
+    if (!press) return null
+    const added = (params.new ?? '').split(',').filter(Boolean).length
+    return (
+      <Card className="mb-6 flex items-start justify-between gap-4 bg-[var(--color-ahead-soft)]">
+        <div>
+          <p className="text-base font-medium text-[var(--color-ahead)]">Recorded: {donePressSentence(press)}.</p>
+          {added > 0 ? (
+            <p className="mt-1 text-base">
+              {added === 1 ? 'It brought one new to-do, marked New below.' : `It brought ${added} new to-dos, marked New below.`}
+            </p>
+          ) : null}
+        </div>
+        {canUndo(press) ? <UndoPress press={press} /> : null}
+      </Card>
+    )
+  }
+  if (params.already !== undefined) {
+    const press = presses.find((p) => p.groupId === params.already)
+    return (
+      <Card className="mb-6 bg-[var(--color-caution-soft)]">
+        <p className="text-base font-medium">
+          {press ? (
+            <>
+              Already done: {nameOf(press.actorUserId) === 'You' ? 'you' : nameOf(press.actorUserId)} recorded &ldquo;
+              {donePressSentence(press)}&rdquo; <When date={press.on} today={today} />.
+            </>
+          ) : (
+            'Someone had already done this.'
+          )}
+        </p>
+        <p className="mt-1 text-base">Nothing was recorded twice, so there is nothing more to change at the bank for it.</p>
+      </Card>
+    )
+  }
+  if (params.nothing !== undefined) {
+    return (
+      <Card className="mb-6 bg-[var(--color-caution-soft)]">
+        <p className="text-base font-medium">Nothing was recorded.</p>
+        <p className="mt-1 text-base">The box was empty or not an amount. Type what it is, or tap Done when the figure on it is right.</p>
+      </Card>
+    )
+  }
+  if (params.undone) {
+    return (
+      <Card className="mb-6 border-dashed">
+        <p className="text-base">Undone. Every figure is as it was before, and the to-do is back if it is still needed.</p>
+      </Card>
+    )
+  }
+  return null
+}
+
+/** What was marked done in the last week, by whom and when, with Undo while it can still be taken back (D62). */
+function DoneLately({
+  presses,
+  nameOf,
+  canUndo,
+  today,
+}: {
+  presses: DonePress[]
+  nameOf: (userId: string | null) => string
+  canUndo: (press: DonePress) => boolean
+  today: CivilDate
+}) {
+  return (
+    <section className="mb-6">
+      <h2 className="mb-2 section-label">Done lately</h2>
+      <Card className="py-1">
+        <ul className="divide-y divide-[var(--color-line)]">
+          {presses.map((press) => (
+            <li key={press.groupId} className="flex items-center justify-between gap-4 py-3">
+              <div className="min-w-0">
+                <p className="text-base">{donePressSentence(press)}</p>
+                <p className="text-sm text-[var(--color-ink-soft)]">
+                  {nameOf(press.actorUserId)} · <When date={press.on} today={today} />
+                </p>
+              </div>
+              {canUndo(press) ? <UndoPress press={press} /> : null}
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </section>
   )
 }
 
@@ -299,11 +432,18 @@ export default async function ThisWeekPage({
     snooze_error?: string
     item?: string
     error?: string
+    done?: string
+    new?: string
+    already?: string
+    nothing?: string
+    undone?: string
+    done_error?: string
   }>
 }) {
-  const { balances, snoozed, until, snooze_error: snoozeError, item: errorItem, error } = await searchParams
+  const params = await searchParams
+  const { balances, snoozed, until, snooze_error: snoozeError, item: errorItem, error } = params
   const { engine, viewer } = await requireEngine()
-  const [{ position, debts: debtState, household }, allCloseOuts, commitments, tripToDos, transferWeekday] =
+  const [{ position, debts: debtState, household }, allCloseOuts, commitments, tripToDos, transferWeekday, presses, members] =
     await engine.reading((e) =>
       Promise.all([
         e.view(),
@@ -311,8 +451,21 @@ export default async function ThisWeekPage({
         e.openCommitmentsByAccount(),
         e.comingUpTripTasks(3),
         e.transferWeekday(),
+        e.donePresses(),
+        e.householdMembers(),
       ]),
     )
+  // Who pressed what (D62): a member by their own first name.
+  const nameOf = (userId: string | null) =>
+    userId === viewer.userId ? 'You' : (members.find((m) => m.userId === userId)?.name ?? 'Someone')
+  // Undo is offered where this person could have marked it done: an individual account's is its owner's.
+  const canUndo = (press: DonePress) =>
+    press.undoable &&
+    press.accountIds.every((id) => {
+      const account = position.accounts.find((a) => a.account.id === id)?.account
+      return account ? canWriteAccount(account, viewer.userId) : false
+    })
+  const newKeys = new Set((params.new ?? '').split(',').filter(Boolean))
   const today = engine.today()
   // A snoozed "did this get spent?" is off this screen until it wakes (D38);
   // the one just snoozed stays as a line with an undo, so a slip is cheap.
@@ -455,6 +608,10 @@ export default async function ThisWeekPage({
         </section>
       ) : null}
 
+      <div id="todo" className="scroll-mt-20">
+        <DoneResult params={params} presses={presses} nameOf={nameOf} canUndo={canUndo} today={today} />
+      </div>
+
       {anythingToDo ? (
         <section className="mb-6">
           <h2 className="mb-2 section-label">
@@ -464,7 +621,7 @@ export default async function ThisWeekPage({
             {todos.map((item) => (
               <li key={item.key}>
                 {item.from === 'position' ? (
-                  <DerivedTodoCard todo={item.todo} today={today} />
+                  <DerivedTodoCard todo={item.todo} today={today} isNew={newKeys.has(todoKey(item.todo))} />
                 ) : item.from === 'debt' ? (
                   <DebtTodoCard todo={item.todo} today={today} />
                 ) : (
@@ -481,6 +638,8 @@ export default async function ThisWeekPage({
           ) : null}
         </section>
       ) : null}
+
+      {presses.length > 0 ? <DoneLately presses={presses} nameOf={nameOf} canUndo={canUndo} today={today} /> : null}
 
       {balances !== undefined ? <BalancesRecorded count={Number(balances) || 0} /> : null}
 

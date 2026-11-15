@@ -20,7 +20,10 @@
  *   a second (a double tap, or a press recorded before the engine refused
  *   them) is ignored everywhere -- account money, debt payments, history.
  * - **Taken back** (`event_undone`) means gone: a spend, a finish or a save
- *   back up that was undone is in no figure, only in the round log.
+ *   back up that was undone is in no figure, only in the round log. A Done
+ *   that was undone (D62: the undo names its `instruction_id`) is as if it
+ *   had never been recorded: its issue, confirmations and end are dropped
+ *   before anything else reads the log, so it is no figure and no open ask.
  * - **A spend belongs to the account it came out of**: the account recorded
  *   on the spend, never the one its part happens to be in now. A spend
  *   recorded before spends carried their account is in the account its
@@ -119,6 +122,20 @@ export interface Ledger {
 
 const ROUND_KINDS = { spend_recorded: 'spend', round_finished: 'finish', round_saved_back_up: 'save_back_up' } as const
 
+const INSTRUCTION_KINDS = new Set(['instruction_issued', 'instruction_confirmed', 'instruction_ended'])
+
+/** The log with every event of an instruction whose Done was undone left out (D62). */
+function withoutTakenBackInstructions(log: RecordedEvent[]): RecordedEvent[] {
+  const takenBack = new Set<Id>()
+  for (const row of log) {
+    if (row.kind === 'event_undone' && typeof row.payload.instruction_id === 'string') {
+      takenBack.add(row.payload.instruction_id as Id)
+    }
+  }
+  if (takenBack.size === 0) return log
+  return log.filter((row) => !(INSTRUCTION_KINDS.has(row.kind) && takenBack.has(row.payload.instruction_id as Id)))
+}
+
 /** Recorded order: when recorded, then the id. */
 function byRecorded(a: RecordedEvent, b: RecordedEvent): number {
   const at = BigInt(a.recordedAtMicros) - BigInt(b.recordedAtMicros)
@@ -127,7 +144,7 @@ function byRecorded(a: RecordedEvent, b: RecordedEvent): number {
 }
 
 export function ledgerOf(facts: LedgerFacts): Ledger {
-  const log = [...facts.events].sort(byRecorded)
+  const log = withoutTakenBackInstructions([...facts.events].sort(byRecorded))
   const accountOfItem = new Map(facts.lineItems.map((li) => [li.id, li.reserveAccountId]))
 
   // ---- instructions, over the whole log first (see "Order" above)

@@ -325,6 +325,25 @@ principles, and they are non-negotiable.
   in the domain (`planRows`, `PlanChart.endsShortCents`,
   `PartPosition.datePassed`, `DebtView.payoff`, `currentDeal`,
   `dealEndMark`, `dueWithinTransfers`, `accountsToCheckIn`).
+- **Done says what it recorded, and can be undone** (PRD D62, rev 121; the
+  savings to-dos for now, the debts' to-dos to follow). A to-do card's box
+  starts empty with no hint; "Record" takes what was typed, and "Done: it's
+  $X" (its own small form, so Enter never sends it) records exactly its
+  figure (`doneAmountFromForm` in `src/domain/done.ts`). The form posts the
+  to-do's `todoKey`, and `Engine.markTodoDone` records nothing when that
+  to-do is no longer in the list ("already", naming the press), so a stale
+  page never changes the bank twice or counts a move twice; otherwise it
+  returns the group and the to-dos the press brought, which This week marks
+  New. Every instruction one press records carries one `group_id`;
+  `donePressesOf` reads the last `DONE_LATELY_DAYS` (7) of presses for "Done
+  lately", with who pressed and `undoable`: until the household's next
+  transfer day, and never once an account it touched was counted since.
+  `Engine.undoDone` writes an `event_undone` naming each `instruction_id`;
+  `ledgerOf` then drops every event of that instruction before anything
+  reads the log, so an undone Done is no figure and no open ask (the ledger
+  test pins "as if never recorded"). Either spouse may undo; an individual
+  account's is its owner's. Nobody is notified: the to-do leaves the list
+  for both at once.
 - **A move marked done is money the account holds until the next count**
   (PRD D34, rev 47). Which moves and spends came after the last count is the
   order the events were recorded (`recorded_at`, then id), answered only by
@@ -836,7 +855,7 @@ principles, and they are non-negotiable.
 ## Working on it
 
 ```bash
-npm test            # 1054 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
+npm test            # 1071 tests. Database tests skip when DATABASE_URL is unset (the pending-migrations test needs DATABASE_MIGRATION_URL, the owner)
 npm run typecheck
 npm run demo        # the Disney scenario, for checking against the sheet
 npm run bootstrap   # migrate + set the app role's password + seed, as the container does

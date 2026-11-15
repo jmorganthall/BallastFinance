@@ -57,6 +57,35 @@ describe('the ledger', () => {
     expect(ledger.confirmed).toEqual([{ instructionId: 't1', confirmedOn: '2026-10-24', actualAmountCents: 1200 }])
   })
 
+  it('reads a Done that was undone as if it had never been recorded (D62)', () => {
+    const before = [
+      { id: 'c1', kind: 'balance_confirmed', payload: { reserve_account_id: 'gifts', amount_cents: 10000 } },
+      { id: 'k1', kind: 'instruction_issued', payload: { instruction_id: 'keep', type: 'set_weekly_transfer', amount_cents: 2000, target_id: 'gifts', target_label: 'Gifts', group_id: 'g0' } },
+      { id: 'k2', kind: 'instruction_confirmed', payload: { instruction_id: 'keep', actual_amount_cents: null } },
+    ]
+    // A move between accounts: two instructions done at once, one group.
+    const done = [
+      { id: 'o1', kind: 'instruction_issued', payload: { instruction_id: 'out', type: 'one_time_move_out', amount_cents: 700, target_id: 'gifts', target_label: 'Gifts', group_id: 'g1' } },
+      { id: 'o2', kind: 'instruction_confirmed', payload: { instruction_id: 'out', actual_amount_cents: null } },
+      { id: 'i1', kind: 'instruction_issued', payload: { instruction_id: 'in', type: 'one_time_move', purpose: 'catch_up', amount_cents: 700, target_id: 'car', target_label: 'Car', group_id: 'g1' } },
+      { id: 'i2', kind: 'instruction_confirmed', payload: { instruction_id: 'in', actual_amount_cents: null } },
+    ]
+    const undo = [
+      { id: 'u1', kind: 'event_undone', payload: { event_id: 'o1', instruction_id: 'out', group_id: 'g1' } },
+      { id: 'u2', kind: 'event_undone', payload: { event_id: 'i1', instruction_id: 'in', group_id: 'g1' } },
+    ]
+    const later = [{ id: 's1', kind: 'spend_recorded', payload: { line_item_id: 'part', round_due: '2026-10-03', amount_cents: 300 } }]
+    const withUndo = ledgerOf({ events: log([...before, ...done, ...undo, ...later]), lineItems: items, debts: [] })
+    const never = ledgerOf({ events: log([...before, ...later]), lineItems: items, debts: [] })
+    const { undone: takenBack, ...rest } = withUndo
+    const { undone: none, ...expected } = never
+    expect(rest).toEqual(expected)
+    expect([...takenBack].sort()).toEqual(['i1', 'o1'])
+    expect(none.size).toBe(0)
+    // Never an open ask either: an undone issue has no confirmation to wait on.
+    expect(withUndo.issued.map((i) => i.instructionId)).toEqual(['keep'])
+  })
+
   it('leaves out what was taken back, except in the round log', () => {
     const ledger = ledgerOf({
       events: log([

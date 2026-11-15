@@ -87,6 +87,9 @@ import {
   DEFAULT_TRANSFER_WEEKDAY,
   isWeekday,
   ledgerOf,
+  donePressesOf,
+  todoKey,
+  type DonePress,
   commitOpenings,
   debtTopUps,
   householdView,
@@ -362,6 +365,12 @@ import {
 import { readerEnabled, readerSourceName, readStructured, type ReaderDeps } from '@/server/reader'
 
 /** One instruction recorded as asked and done at once (D35). */
+/** What a Done on This week did (D62). */
+export type TodoDoneResult =
+  | { status: 'recorded'; groupId: Id; newTodoKeys: string[] }
+  /** The to-do had gone: someone else marked it done (that press, when it is still in Done lately). */
+  | { status: 'already'; press: DonePress | null }
+
 interface DoneInstructionInput {
   type: InstructionType
   amountCents: Cents
@@ -1737,12 +1746,12 @@ export class Engine {
    * confirmation together, at the amount the person says the bank moves.
    * From then on the run-forward uses it.
    */
-  async confirmTransfer(input: { reserveAccountId: Id; perWeekCents: Cents }): Promise<void> {
+  async confirmTransfer(input: { reserveAccountId: Id; perWeekCents: Cents }): Promise<{ groupId: Id }> {
     const account = await this.assertCanWriteAccount(input.reserveAccountId)
     if (!Number.isInteger(input.perWeekCents) || input.perWeekCents < 0) {
       throw new EngineError('A weekly transfer is zero or more, in whole cents')
     }
-    await this.recordDoneInstruction({
+    return this.recordDoneInstruction({
       type: 'set_weekly_transfer',
       amountCents: input.perWeekCents,
       targetId: account.id,
@@ -1755,12 +1764,12 @@ export class Engine {
    * recorded as a catch-up move asked and done at once, which the next read
    * carries as money in the account until the next count (D34).
    */
-  async confirmMoveIn(input: { reserveAccountId: Id; amountCents: Cents }): Promise<void> {
+  async confirmMoveIn(input: { reserveAccountId: Id; amountCents: Cents }): Promise<{ groupId: Id }> {
     const account = await this.assertCanWriteAccount(input.reserveAccountId)
     if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
       throw new EngineError('A move is more than zero, in whole cents')
     }
-    await this.recordDoneInstruction({
+    return this.recordDoneInstruction({
       type: 'one_time_move',
       purpose: 'catch_up',
       amountCents: input.amountCents,
@@ -1781,7 +1790,7 @@ export class Engine {
     fromAccountId: Id
     toAccountId: Id
     amountCents: Cents
-  }): Promise<void> {
+  }): Promise<{ groupId: Id }> {
     if (input.fromAccountId === input.toAccountId) {
       throw new EngineError('A move between accounts needs two different accounts')
     }
@@ -1790,7 +1799,7 @@ export class Engine {
     if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
       throw new EngineError('A move is more than zero, in whole cents')
     }
-    await this.recordDoneInstructions([
+    return this.recordDoneInstructions([
       {
         type: 'one_time_move_out',
         amountCents: input.amountCents,
@@ -1809,13 +1818,18 @@ export class Engine {
     ])
   }
 
-  private async recordDoneInstruction(input: DoneInstructionInput): Promise<void> {
-    await this.recordDoneInstructions([input])
+  private async recordDoneInstruction(input: DoneInstructionInput): Promise<{ groupId: Id }> {
+    return this.recordDoneInstructions([input])
   }
 
-  /** Each instruction asked and done at once; several are recorded in one transaction. */
-  private async recordDoneInstructions(inputs: readonly DoneInstructionInput[]): Promise<void> {
+  /**
+   * Each instruction asked and done at once; several are recorded in one
+   * transaction. One press is one group (D62): every instruction it records
+   * carries the same `group_id`, which Done lately lists and Undo takes back.
+   */
+  private async recordDoneInstructions(inputs: readonly DoneInstructionInput[]): Promise<{ groupId: Id }> {
     const today = this.today()
+    const groupId = randomUUID()
     await this.db.transaction(async (tx) => {
       for (const input of inputs) {
         const instructionId = randomUUID()
@@ -1834,6 +1848,7 @@ export class Engine {
             ends_on: null,
             purpose: input.purpose ?? null,
             available_on: null,
+            group_id: groupId,
           },
         })
         await tx.insert(events).values({
@@ -1843,6 +1858,103 @@ export class Engine {
           actorUserId: this.actorUserId,
           source: 'manual',
           payload: { instruction_id: instructionId, actual_amount_cents: null },
+        })
+      }
+    })
+    return { groupId }
+  }
+
+  /**
+   * "Done" on a savings to-do (D62). The form names the to-do it was shown
+   * (`todoKey`); when that to-do is no longer in the list, someone got there
+   * first, nothing is recorded, and the press that did it is named. Else the
+   * person's figure is recorded as that to-do's kind, and what the press
+   * changed comes back: the to-dos the list did not have before.
+   */
+  async markTodoDone(input: { key: string; amountCents: Cents }): Promise<TodoDoneResult> {
+    const before = await this.position()
+    const todo = before.todos.find((t) => todoKey(t) === input.key)
+    if (!todo) {
+      const accounts = input.key.split(':').slice(1)
+      const press = (await this.donePresses()).find((p) => accounts.every((a) => p.accountIds.includes(a)))
+      return { status: 'already', press: press ?? null }
+    }
+    const { groupId } =
+      todo.kind === 'set_transfer'
+        ? await this.confirmTransfer({ reserveAccountId: todo.accountId, perWeekCents: input.amountCents })
+        : todo.kind === 'move_in'
+          ? await this.confirmMoveIn({ reserveAccountId: todo.accountId, amountCents: input.amountCents })
+          : await this.confirmMoveBetween({
+              fromAccountId: todo.fromAccountId,
+              toAccountId: todo.accountId,
+              amountCents: input.amountCents,
+            })
+    const had = new Set(before.todos.map(todoKey))
+    const after = await this.position()
+    return { status: 'recorded', groupId, newTodoKeys: after.todos.map(todoKey).filter((k) => !had.has(k)) }
+  }
+
+  /** What was marked done on This week in the last week, newest first, with whether each can be undone (D62). */
+  async donePresses(): Promise<DonePress[]> {
+    const [rows, transferWeekday] = await Promise.all([
+      this.db
+        .select({
+          id: events.id,
+          kind: events.kind,
+          on: events.occurredAt,
+          recordedAtMicros: sql<string>`(extract(epoch from ${events.recordedAt}) * 1000000)::bigint::text`,
+          actorUserId: events.actorUserId,
+          payload: events.payload,
+        })
+        .from(events)
+        .where(
+          and(
+            eq(events.householdId, this.householdId),
+            inArray(events.kind, ['instruction_issued', 'instruction_confirmed', 'event_undone', 'balance_confirmed']),
+          ),
+        ),
+      this.transferWeekday(),
+    ])
+    return donePressesOf({
+      rows: rows.map((r) => ({
+        id: r.id,
+        kind: r.kind,
+        on: r.on as CivilDate,
+        recordedAtMicros: r.recordedAtMicros,
+        actorUserId: r.actorUserId ?? null,
+        payload: (r.payload ?? {}) as Record<string, unknown>,
+      })),
+      today: this.today(),
+      transferWeekday,
+    })
+  }
+
+  /**
+   * Undo a press from Done lately (D62): an `event_undone` for each of its
+   * instructions, in one transaction, after which the ledger reads them as
+   * never recorded. Either spouse may undo, on any account they could have
+   * marked it done on; never once the next transfer day has come or an
+   * account it touched has been counted since.
+   */
+  async undoDone(groupId: Id): Promise<void> {
+    const press = (await this.donePresses()).find((p) => p.groupId === groupId)
+    if (!press) throw new EngineError('That is no longer in Done lately, so it cannot be undone here.')
+    if (!press.undoable) {
+      throw new EngineError(
+        'It can no longer be undone: the transfer day has come or the account has been counted since. Record what the bank shows instead.',
+      )
+    }
+    for (const accountId of press.accountIds) await this.assertCanWriteAccount(accountId)
+    const today = this.today()
+    await this.db.transaction(async (tx) => {
+      for (const line of press.lines) {
+        await tx.insert(events).values({
+          householdId: this.householdId,
+          kind: 'event_undone',
+          occurredAt: today,
+          actorUserId: this.actorUserId,
+          source: 'manual',
+          payload: { event_id: line.issuedEventId, kind: 'instruction_issued', instruction_id: line.instructionId, group_id: groupId },
         })
       }
     })

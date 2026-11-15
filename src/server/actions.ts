@@ -292,51 +292,49 @@ export async function deletePackageAction(formData: FormData): Promise<void> {
 }
 
 /**
- * "Yes, the bank moves this" for a derived transfer to-do (D35): the amount
- * the person says the recurring transfer is now set to. From then on the
- * run-forward uses it. A box left as junk changes nothing.
+ * "Done" on a savings to-do (D62). The form names the to-do it was shown;
+ * the figure is the button's when "Done: it's $X" was pressed, else what was
+ * typed, and an empty box records nothing. This week then says what was
+ * recorded (with Undo), or that someone else had already done it.
  */
-export async function confirmTransferAction(formData: FormData): Promise<void> {
+export async function markTodoDoneAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const { parseAmountOrNull } = await import('@/domain')
-  const perWeekCents = parseAmountOrNull(String(formData.get('amount') ?? ''))
-  if (perWeekCents === null || perWeekCents < 0) return
-  await engine.confirmTransfer({
-    reserveAccountId: String(formData.get('reserve_account_id') ?? ''),
-    perWeekCents,
+  const { doneAmountFromForm, DONE_ITS_FIELD } = await import('@/domain')
+  const { EngineError } = await import('@/server/engine')
+  const amountCents = doneAmountFromForm({
+    typed: formData.get('amount') === null ? null : String(formData.get('amount')),
+    its: formData.get(DONE_ITS_FIELD) === null ? null : String(formData.get(DONE_ITS_FIELD)),
   })
+  const key = String(formData.get('todo') ?? '')
+  if (amountCents === null) redirect(`/?nothing=${encodeURIComponent(key)}#todo`)
+  let target: string
+  try {
+    const result = await engine.markTodoDone({ key, amountCents })
+    target =
+      result.status === 'recorded'
+        ? `/?done=${result.groupId}${result.newTodoKeys.length ? `&new=${encodeURIComponent(result.newTodoKeys.join(','))}` : ''}#todo`
+        : `/?already=${result.press?.groupId ?? 'unknown'}#todo`
+  } catch (error) {
+    if (!(error instanceof EngineError)) throw error
+    target = `/?done_error=${encodeURIComponent(error.message)}#todo`
+  }
   afterWrite()
+  redirect(target)
 }
 
-/** "Yes, I moved it" for the one-time move the position asks for (D35). */
-export async function confirmMoveInAction(formData: FormData): Promise<void> {
+/** Undo a press from Done lately (D62). */
+export async function undoDoneAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
-  const { parseAmountOrNull } = await import('@/domain')
-  const amountCents = parseAmountOrNull(String(formData.get('amount') ?? ''))
-  if (amountCents === null || amountCents <= 0) return
-  await engine.confirmMoveIn({
-    reserveAccountId: String(formData.get('reserve_account_id') ?? ''),
-    amountCents,
-  })
+  const { EngineError } = await import('@/server/engine')
+  let target = '/?undone=1#todo'
+  try {
+    await engine.undoDone(String(formData.get('group') ?? ''))
+  } catch (error) {
+    if (!(error instanceof EngineError)) throw error
+    target = `/?done_error=${encodeURIComponent(error.message)}#todo`
+  }
   afterWrite()
-}
-
-/**
- * "Yes, I moved it" for spare money from one account into one that is Short
- * (D40): the move out and the move in recorded together, at the amount in
- * the box. A box left as junk changes nothing.
- */
-export async function confirmMoveBetweenAction(formData: FormData): Promise<void> {
-  const { engine } = await requireEngine()
-  const { parseAmountOrNull } = await import('@/domain')
-  const amountCents = parseAmountOrNull(String(formData.get('amount') ?? ''))
-  if (amountCents === null || amountCents <= 0) return
-  await engine.confirmMoveBetween({
-    fromAccountId: String(formData.get('from_account_id') ?? ''),
-    toAccountId: String(formData.get('reserve_account_id') ?? ''),
-    amountCents,
-  })
-  afterWrite()
+  redirect(target)
 }
 
 export async function createReserveAccountAction(formData: FormData): Promise<void> {
