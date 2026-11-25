@@ -31,6 +31,7 @@ import {
   type Projection,
 } from './debt'
 import type { CivilDate } from './dates'
+import { debtLinkSite } from './debt-form'
 import type { SentencePart } from './instructions'
 import { formatCents, type Cents } from './money'
 import type { Id } from './types'
@@ -110,6 +111,8 @@ export type DebtTodo =
       ageDays: number
       /** The likely balance, for the box. */
       likelyCents: Cents
+      /** The lender's site (D60), so the statement is a tap away; null when the debt has none. */
+      link: { url: string; site: string } | null
       blocking: false
     }
 
@@ -202,6 +205,7 @@ export function debtStatuses(args: {
         debtName: view.debt.name,
         ageDays: view.balanceAgeDays,
         likelyCents: view.debt.balanceCents,
+        link: view.debt.linkUrl ? { url: view.debt.linkUrl, site: debtLinkSite(view.debt.linkUrl) } : null,
         blocking: false,
       })
     }

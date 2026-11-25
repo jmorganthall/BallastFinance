@@ -200,6 +200,18 @@ function DebtTodoCard({ todo, today }: { todo: DebtTodo; today: CivilDate }) {
   return (
     <Card className={todo.blocking ? '' : 'border-dashed'}>
       <Parts parts={debtTodoSentenceParts(todo)} today={today} />
+      {todo.kind === 'update_debt_balance' && todo.link ? (
+        <p className="mt-1 text-sm">
+          <a
+            href={todo.link.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[var(--color-accent)] underline underline-offset-4"
+          >
+            Open {todo.link.site} ↗
+          </a>
+        </p>
+      ) : null}
       <form action={raise ? raiseDebtPaymentAction : updateDebtBalanceAction} className="mt-4 flex items-end gap-2">
         <input type="hidden" name="debt_id" value={todo.debtId} />
         {raise ? null : <input type="hidden" name="back" value="home" />}
