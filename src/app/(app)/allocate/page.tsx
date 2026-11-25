@@ -116,6 +116,19 @@ async function AllocatePageRead({
                   <input type="hidden" name="back" value="allocate" />
                   <label className="flex-1 text-xs text-[var(--color-ink-soft)]">
                     {view.debt.name}, last checked {view.balanceAgeDays} days ago
+                    {view.link ? (
+                      <>
+                        {' · '}
+                        <a
+                          href={view.link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[var(--color-accent)] underline underline-offset-4"
+                        >
+                          Open {view.link.site} ↗
+                        </a>
+                      </>
+                    ) : null}
                     <input
                       name="balance"
                       inputMode="decimal"

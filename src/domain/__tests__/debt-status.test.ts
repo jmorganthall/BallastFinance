@@ -99,6 +99,17 @@ describe('debtStatuses', () => {
     expect(caughtUp).toBe(true)
   })
 
+  it("a balance to check carries the lender's site, when the debt links to one", () => {
+    const linked = { ...clears, balanceAsOf: '2026-09-13', linkUrl: 'https://www.americanexpress.com/login' }
+    const unlinked = { ...clears, id: 'u', balanceAsOf: '2026-09-13' }
+    const { debts, todos } = debtStatuses({ debts: [linked, unlinked], today: TODAY })
+    expect(debts.map((v) => v.link?.site ?? null)).toEqual(['americanexpress.com', null])
+    expect(todos.map((t) => (t.kind === 'update_debt_balance' ? t.link : undefined))).toEqual([
+      { url: 'https://www.americanexpress.com/login', site: 'americanexpress.com' },
+      null,
+    ])
+  })
+
   it('a paid-off debt has no status and asks nothing', () => {
     const done = { ...misses, balanceCents: 0, state: 'paid_off' as const, balanceAsOf: '2025-01-01' }
     expect(debtStatuses({ debts: [done], today: TODAY })).toEqual({ debts: [], todos: [], caughtUp: true })
