@@ -80,6 +80,14 @@ export interface DebtView {
   balanceAgeDays: number
   /** Its stated balance is older than `BALANCE_STALE_AFTER_DAYS`. */
   balanceStale: boolean
+  /** The lender's site (D60), so a statement is a tap away; null when the debt has none. */
+  link: DebtLink | null
+}
+
+export interface DebtLink {
+  url: string
+  /** As said on screen: "chase.com". */
+  site: string
 }
 
 export type DebtTodo =
@@ -112,7 +120,7 @@ export type DebtTodo =
       /** The likely balance, for the box. */
       likelyCents: Cents
       /** The lender's site (D60), so the statement is a tap away; null when the debt has none. */
-      link: { url: string; site: string } | null
+      link: DebtLink | null
       blocking: false
     }
 
@@ -164,6 +172,7 @@ export function debtStatuses(args: {
         payoff: projectPayoff({ debt, today: args.today }),
         balanceAgeDays: freshness.ageDays,
         balanceStale: freshness.stale,
+        link: debt.linkUrl ? { url: debt.linkUrl, site: debtLinkSite(debt.linkUrl) } : null,
       }
     })
 
@@ -205,7 +214,7 @@ export function debtStatuses(args: {
         debtName: view.debt.name,
         ageDays: view.balanceAgeDays,
         likelyCents: view.debt.balanceCents,
-        link: view.debt.linkUrl ? { url: view.debt.linkUrl, site: debtLinkSite(view.debt.linkUrl) } : null,
+        link: view.link,
         blocking: false,
       })
     }
