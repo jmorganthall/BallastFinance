@@ -151,6 +151,13 @@ export const eventKindEnum = pgEnum('event_kind', [
   'package_renamed',
   /** A debt entered: its terms and the balance stated with it. */
   'debt_added',
+  // Paid on credit (migration 0031): a plan's spend that went on a card is a
+  // spend_recorded naming the card (debt_id); these are the two steps that
+  // put it right, each naming the charges (spend event ids) it covered.
+  /** The plans' money moved into the bills account: { from_reserve_account_id, to_reserve_account_id, charge_ids, amount_cents }. */
+  'credit_moved',
+  /** The card paid for what plans put on it: { debt_id, charge_ids, amount_cents }. */
+  'credit_paid',
 ])
 
 export const tripLineCategoryEnum = pgEnum('trip_line_category', [

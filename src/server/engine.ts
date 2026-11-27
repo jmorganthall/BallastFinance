@@ -74,6 +74,12 @@ import {
   type DebtHistoryEntry,
   type DebtStatuses,
   likelyDebtBalance,
+  billsAccountOf,
+  billsAccountSetting,
+  creditTodos,
+  debtWithCharges,
+  type BillsAccount,
+  type CreditTodo,
   type DebtPaymentMade,
   canWriteAccount,
   closeOutPrompts,
@@ -414,6 +420,10 @@ export interface RoundHistoryEntry {
   amountCents: Cents
   on: CivilDate
   undone: boolean
+  /** The card a spend went on (paid on credit); absent when it was paid straight from the account. */
+  debtId?: Id
+  /** A card's spend whose money has moved or been paid to the card: it can no longer be taken back. */
+  settled?: true
 }
 
 /** One account's line in "If you commit this today" (D35). */
@@ -454,6 +464,9 @@ const LEDGER_EVENT_KINDS = [
   'debt_balance_updated',
   'debt_updated',
   'debt_added',
+  // Paid on credit: the move to the bills account and the card's payment.
+  'credit_moved',
+  'credit_paid',
   // Where each part was when, for spends recorded before they carried their account.
   'line_item_changed',
   'package_created',
@@ -461,6 +474,13 @@ const LEDGER_EVENT_KINDS = [
 ] as const
 
 type EventKind = (typeof eventKindEnum.enumValues)[number]
+
+/** The same ids, in any order. */
+function sameIds(a: readonly Id[], b: readonly Id[]): boolean {
+  if (a.length !== b.length) return false
+  const set = new Set(a)
+  return b.every((id) => set.has(id)) && new Set(b).size === b.length
+}
 
 /**
  * A crowd calendar pull, held for the person to look at before it is kept
@@ -1522,6 +1542,107 @@ export class Engine {
     await this.putSetting('transfer_weekday', day)
   }
 
+  // ---------------------------------------------------------------- paid on credit
+
+  /**
+   * The account the household pays bills from (paid on credit): where a
+   * plan's money goes before it pays the card. Null until they say which.
+   * A value that is not one (a hand-edited row) reads as not said yet.
+   */
+  async billsAccount(db: Conn = this.db): Promise<BillsAccount | null> {
+    return billsAccountOf(await this.settingIn<unknown>(db, 'bills_account', null))
+  }
+
+  /** Recorded like every other setting: a dated row, never an edit. */
+  async setBillsAccount(input: unknown): Promise<void> {
+    const parsed = billsAccountSetting.safeParse(input)
+    if (!parsed.success) throw new EngineError('Pick the account, or type the name of the one you pay bills from')
+    const bills = parsed.data
+    if (bills.kind === 'reserve_account' && !(await this.listReserveAccounts()).some((a) => a.id === bills.accountId)) {
+      throw new EngineError('No such reserve account in this household')
+    }
+    await this.putSetting('bills_account', bills)
+  }
+
+  /**
+   * What plans put on cards still calls for (`creditTodos`): one move per
+   * plans' account into the bills account, then one payment per card. Given
+   * a transaction, it reads inside it (a write checking what is open now).
+   */
+  async creditTodos(db?: Conn): Promise<CreditTodo[]> {
+    const read = async (conn: Conn) => {
+      const mine = this.householdId
+      const [ledger, bills, accounts, debtRows, packageRows, itemRows] = await Promise.all([
+        this.ledger(conn),
+        this.billsAccount(conn),
+        conn
+          .select({ id: reserveAccountsTable.id, name: reserveAccountsTable.name })
+          .from(reserveAccountsTable)
+          .where(eq(reserveAccountsTable.householdId, mine)),
+        conn.select({ id: debtsTable.id, name: debtsTable.name }).from(debtsTable).where(eq(debtsTable.householdId, mine)),
+        conn.select({ id: packagesTable.id, name: packagesTable.name }).from(packagesTable).where(eq(packagesTable.householdId, mine)),
+        conn
+          .select({ id: lineItemsTable.id, label: lineItemsTable.label, packageId: lineItemsTable.packageId })
+          .from(lineItemsTable)
+          .where(eq(lineItemsTable.householdId, mine)),
+      ])
+      const planName = new Map(packageRows.map((p) => [p.id, p.name]))
+      return creditTodos({
+        charges: ledger.creditCharges,
+        bills,
+        names: {
+          accounts: new Map(accounts.map((a) => [a.id, a.name])),
+          debts: new Map(debtRows.map((d) => [d.id, d.name])),
+          parts: new Map(itemRows.map((li) => [li.id, `${planName.get(li.packageId) ?? 'A plan'} · ${li.label}`])),
+        },
+      })
+    }
+    return db ? read(db) : this.inSnapshot(read)
+  }
+
+  /**
+   * "Done" on a move to the bills account: the plans' money for the charges
+   * the to-do listed is out of that account. The amount is the to-do's, never
+   * a figure a form posted; if what is open has changed since the page was
+   * shown (another charge, or someone else pressed Done), nothing is
+   * recorded and the person looks again.
+   */
+  async confirmCreditMove(input: { fromAccountId: Id; chargeIds: readonly Id[] }): Promise<void> {
+    await this.assertCanWriteAccount(input.fromAccountId)
+    await this.db.transaction(async (tx) => {
+      const todo = (await this.creditTodos(tx)).find(
+        (t) => t.kind === 'move_to_bills' && t.fromAccountId === input.fromAccountId,
+      )
+      if (!todo) throw new EngineError('Nothing from plans is waiting to be moved out of that account')
+      if (!sameIds(todo.charges.map((c) => c.chargeId), input.chargeIds)) {
+        throw new EngineError('What plans put on cards changed since this page was shown. Look again.')
+      }
+      const bills = await this.billsAccount(tx)
+      await this.recordEvent(tx, 'credit_moved', {
+        from_reserve_account_id: input.fromAccountId,
+        to_reserve_account_id: bills?.kind === 'reserve_account' ? bills.accountId : null,
+        charge_ids: todo.charges.map((c) => c.chargeId),
+        amount_cents: todo.amountCents,
+      })
+    })
+  }
+
+  /** "Done" on paying a card for what plans put on it: in full, at the to-do's amount (as `confirmCreditMove`). */
+  async confirmCreditPayoff(input: { debtId: Id; chargeIds: readonly Id[] }): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      const todo = (await this.creditTodos(tx)).find((t) => t.kind === 'pay_card' && t.debtId === input.debtId)
+      if (!todo) throw new EngineError('Nothing plans put on that card is waiting to be paid')
+      if (!sameIds(todo.charges.map((c) => c.chargeId), input.chargeIds)) {
+        throw new EngineError('What plans put on cards changed since this page was shown. Look again.')
+      }
+      await this.recordEvent(tx, 'credit_paid', {
+        debt_id: input.debtId,
+        charge_ids: todo.charges.map((c) => c.chargeId),
+        amount_cents: todo.amountCents,
+      })
+    })
+  }
+
   /** Home / This Week: the per-account numbers to move (PRD §9). */
   /** Every plan with its parts and its total; how each stands is the position's (D35). */
   async packageViews(): Promise<PackageView[]> {
@@ -1686,12 +1807,13 @@ export class Engine {
     debts: DebtStatuses
     household: HouseholdView
   }> {
-    const [position, debts, open] = await Promise.all([
+    const [position, debts, open, credit] = await Promise.all([
       this.position(),
       this.debtStatuses(),
       this.outstandingInstructions(),
+      this.creditTodos(),
     ])
-    return { position, debts, household: householdView({ position, debts, open }) }
+    return { position, debts, household: householdView({ position, debts, open, credit }) }
   }
 
   /** The one position: every money figure any screen, the digest or a to-do shows (D35). */
@@ -2090,11 +2212,29 @@ export class Engine {
    * named, the oldest open one; with no amount, what the round still
    * holds, read here and never a figure a form posted.
    */
-  async recordSpend(input: { lineItemId: Id; roundDue?: CivilDate | null; amountCents?: Cents }): Promise<void> {
+  async recordSpend(input: {
+    lineItemId: Id
+    roundDue?: CivilDate | null
+    amountCents?: Cents
+    /**
+     * The card or line of credit it went on (paid on credit), or absent when
+     * it was paid straight from the account. A card's spend then asks for
+     * the money to be moved to the bills account and the card paid.
+     */
+    debtId?: Id
+  }): Promise<void> {
     if (input.amountCents !== undefined && (!Number.isInteger(input.amountCents) || input.amountCents <= 0)) {
       throw new EngineError('What went out must be more than zero, in whole cents')
     }
     await this.db.transaction(async (tx) => {
+      if (input.debtId !== undefined) {
+        const [card] = await tx
+          .select({ category: debtsTable.category })
+          .from(debtsTable)
+          .where(and(eq(debtsTable.id, input.debtId), eq(debtsTable.householdId, this.householdId)))
+        if (!card) throw new EngineError('No such card in this household')
+        if (card.category !== 'consumer') throw new EngineError('Only a card or line of credit can be paid on')
+      }
       const { item, rounds } = await this.roundsForWrite(tx, input.lineItemId)
       const round = this.openRound(rounds, input.roundDue)
       const amountCents = input.amountCents ?? round.needsCents
@@ -2112,6 +2252,7 @@ export class Engine {
           reserve_account_id: item.reserveAccountId,
           round_due: round.dueDate,
           amount_cents: amountCents,
+          ...(input.debtId !== undefined ? { debt_id: input.debtId } : {}),
         },
       })
       await this.settleRounds(tx, item, item.dueDate)
@@ -2185,6 +2326,14 @@ export class Engine {
       if (!row) throw new EngineError('There is nothing like that to take back')
       const { undone } = await this.roundEvents(tx)
       if (undone.has(row.id)) throw new EngineError('That was already taken back')
+      if (row.kind === 'spend_recorded') {
+        // A charge on a card whose money has moved or whose card was paid
+        // can no longer be taken back: the money really went.
+        const charge = (await this.ledger(tx)).creditCharges.find((c) => c.chargeId === row.id)
+        if (charge && (charge.moved !== null || charge.paidOn !== null)) {
+          throw new EngineError('Its money has already been moved or paid to the card, so it cannot be taken back')
+        }
+      }
       const p = row.payload as { line_item_id: Id; round_due: CivilDate }
       const { row: itemRow, item } = await this.roundsForWrite(tx, p.line_item_id)
       if (itemRow.state === 'retired') {
@@ -2221,10 +2370,21 @@ export class Engine {
   async roundHistory(packageId: Id): Promise<RoundHistoryEntry[]> {
     const [items, ledger] = await Promise.all([this.listLineItems(), this.ledger()])
     const byId = new Map(items.filter((li) => li.packageId === packageId).map((li) => [li.id, li]))
+    const settled = new Set(
+      ledger.creditCharges.filter((c) => c.moved !== null || c.paidOn !== null).map((c) => c.chargeId),
+    )
     return ledger.roundLog
       .flatMap((entry): RoundHistoryEntry[] => {
         const item = byId.get(entry.lineItemId)
-        return item ? [{ ...entry, label: item.label, recurrence: item.recurrence }] : []
+        if (!item) return []
+        return [
+          {
+            ...entry,
+            label: item.label,
+            recurrence: item.recurrence,
+            ...(settled.has(entry.eventId) ? { settled: true as const } : {}),
+          },
+        ]
       })
       .reverse()
   }
@@ -2726,9 +2886,21 @@ export class Engine {
         ...(ledger.debtPaymentsSinceStated.get(row.id) ?? []),
         ...(extra?.debtId === row.id ? [extra.payment] : []),
       ]
+      // What plans put on it (paid on credit): on the card, left out of the payoff.
+      const sinceStated = ledger.creditSinceStated.get(row.id) ?? { chargedCents: 0, paidCents: 0 }
+      const onCardCents = ledger.creditCharges
+        .filter((c) => c.debtId === row.id && c.paidOn === null)
+        .reduce((sum, c) => sum + c.amountCents, 0)
+      const figures = debtWithCharges({
+        likelyCents: likelyDebtBalance({ debt: stated, payments, today }),
+        chargedSinceStatedCents: sinceStated.chargedCents,
+        paidSinceStatedCents: sinceStated.paidCents,
+        onCardCents,
+      })
       return {
         ...stated,
-        balanceCents: likelyDebtBalance({ debt: stated, payments, today }),
+        balanceCents: figures.balanceCents,
+        ...(figures.onCardFromPlansCents > 0 ? { onCardFromPlansCents: figures.onCardFromPlansCents } : {}),
         statedBalanceCents: stated.balanceCents,
       }
     })

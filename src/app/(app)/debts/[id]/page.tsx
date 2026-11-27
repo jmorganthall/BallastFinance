@@ -30,6 +30,7 @@ import {
   currentDeal,
   dealEndMark,
   isPaidOff,
+  cardBalanceCents,
   offerWords,
   type DebtHistoryEntry,
 } from '@/domain'
@@ -56,6 +57,10 @@ function historyWords(entry: DebtHistoryEntry): string {
       return `Changed its ${entry.changed.join(', ')}`
     case 'entered':
       return 'Entered in Ballast (the balance then was not recorded)'
+    case 'charged_from_plan':
+      return `A plan put ${formatCents(entry.amountCents)} on it`
+    case 'paid_from_plans':
+      return `Paid ${formatCents(entry.amountCents)} for what plans put on it`
   }
 }
 
@@ -165,7 +170,16 @@ export default async function DebtPage({
           <div>
             <dt className="text-xs text-[var(--color-ink-soft)]">Balance</dt>
             <dd className="font-medium tabular">
-              <Money cents={debt.balanceCents} />
+              <Money cents={cardBalanceCents(debt)} />
+              {(debt.onCardFromPlansCents ?? 0) > 0 ? (
+                <span className="block text-xs font-normal text-[var(--color-ink-soft)]">
+                  <Hint
+                    detail={`Plans put ${formatCents(debt.onCardFromPlansCents ?? 0)} on it that is not paid off yet. Their money is already set aside, so the payoff order leaves it out; it comes off when the payment to-do on This week is done.`}
+                  >
+                    {formatCents(debt.onCardFromPlansCents ?? 0)} from plans
+                  </Hint>
+                </span>
+              ) : null}
               {debt.statedBalanceCents !== undefined && debt.statedBalanceCents !== debt.balanceCents ? (
                 <span className="block text-xs font-normal text-[var(--color-ink-soft)]">
                   <Hint

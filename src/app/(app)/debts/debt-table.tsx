@@ -36,8 +36,10 @@ export interface DebtRow {
   /** The lender's page and its site in words ("chase.com"), to open it in a new tab (D60). */
   link: { url: string; site: string } | null
   kind: string
-  /** The likely balance today (D49 (2)-(3)). */
+  /** The likely balance today (D49 (2)-(3)), what the payoff order works on. */
   balanceCents: number
+  /** What plans put on the card that is not paid off yet: on the card, left out of the payoff (paid on credit). */
+  fromPlansCents: number
   /** The balance last stated, when payments made or assumed since make the likely one differ. */
   statedBalanceCents: number | null
   asOf: string
@@ -215,7 +217,16 @@ function Row({
           <span className="-ml-2 mt-1 block @2xl:hidden">{editButton}</span>
         </td>
         <td className={`${td} whitespace-nowrap text-right font-medium tabular`}>
-          {formatCents(row.balanceCents)}
+          {formatCents(row.balanceCents + row.fromPlansCents)}
+          {row.fromPlansCents > 0 ? (
+            <span className="block text-xs font-normal text-[var(--color-ink-soft)]">
+              <Hint
+                detail={`Plans put ${formatCents(row.fromPlansCents)} on it that is not paid off yet. Their money is already set aside, so the payoff order leaves it out.`}
+              >
+                {formatCents(row.fromPlansCents)} from plans
+              </Hint>
+            </span>
+          ) : null}
           {row.statedBalanceCents !== null ? (
             <span className="block text-xs font-normal text-[var(--color-ink-soft)]">
               <Hint

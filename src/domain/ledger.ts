@@ -29,12 +29,19 @@
  * - **A debt payment** counts toward the balance only when it was recorded
  *   after the balance was last stated, compared to the microsecond (the
  *   engine passes both as exact microsecond counts, so nothing is rounded).
+ * - **Paid on credit** (`src/domain/credit.ts`): a spend that names a card
+ *   is a charge. It comes off the account like any spend; a count of the
+ *   account while the charge's money is still in it (not yet moved to the
+ *   bills account, or moved there and not yet paid to the card) leaves it
+ *   counted as spent, because the money is still in the count and is
+ *   already promised to the card.
  *
  * Pure: no database, no clock. `today` is not needed; nothing here depends
  * on it.
  */
 
 import type { CloseOutSnooze } from './closeout'
+import { creditMovedPayload, creditPaidPayload, type CreditCharge } from './credit'
 import type { CivilDate } from './dates'
 import type { DebtHistoryEntry, DebtPaymentMade } from './debt'
 import { debtTermsChanged } from './debt'
@@ -85,6 +92,8 @@ export interface LedgerFacts {
 /** A round event with whether it was taken back, for the plan's "What went out". */
 export interface RoundLogEntry extends RoundEvent {
   undone: boolean
+  /** The card a spend went on (paid on credit); absent for money paid straight from the account. */
+  debtId?: Id
 }
 
 export interface Ledger {
@@ -115,6 +124,13 @@ export interface Ledger {
   debtPaymentsSinceStated: Map<Id, DebtPaymentMade[]>
   /** Per debt, what its page lists: balances stated, payments, changes of terms. */
   debtHistory: Map<Id, DebtHistoryEntry[]>
+  /** Every charge from a plan onto a card still standing (not taken back), oldest first. */
+  creditCharges: CreditCharge[]
+  /**
+   * Per debt, its charges from plans and the payments for them recorded
+   * after its balance was last stated (those before are in the statement).
+   */
+  creditSinceStated: Map<Id, { chargedCents: Cents; paidCents: Cents }>
 }
 
 const ROUND_KINDS = { spend_recorded: 'spend', round_finished: 'finish', round_saved_back_up: 'save_back_up' } as const
@@ -174,6 +190,9 @@ export function ledgerOf(facts: LedgerFacts): Ledger {
   const addSpend = (accountId: Id | undefined, cents: Cents) => {
     if (accountId) spends.set(accountId, (spends.get(accountId) ?? 0) + cents)
   }
+  const charges = new Map<Id, CreditCharge>()
+  // Each credit payment, for its card's history.
+  const creditPaidHistory = new Map<Id, DebtHistoryEntry[]>()
   const accountAt = partAccountHistory(log, accountOfItem)
   // The account the spend came out of: recorded on it, or -- for one recorded
   // before spends carried it -- the account its part was in when it was
@@ -221,6 +240,9 @@ export function ledgerOf(facts: LedgerFacts): Ledger {
         // A count includes everything recorded before it.
         moves.delete(accountId)
         spends.delete(accountId)
+        // ... except money in it already promised to a card (see "Paid on credit").
+        const stillIn = creditStillIn(charges, accountId)
+        if (stillIn > 0) addSpend(accountId, stillIn)
         break
       }
       // A spend from before D53, rolling a repeating part on.
@@ -248,11 +270,64 @@ export function ledgerOf(facts: LedgerFacts): Ledger {
           on: row.on,
           undone: undone.has(row.id),
         }
+        const debtId = row.kind === 'spend_recorded' && typeof p.debt_id === 'string' ? p.debt_id : undefined
+        if (debtId) entry.debtId = debtId
         roundLog.push(entry)
         if (entry.undone) break
-        const { undone: _undone, ...event } = entry
+        const { undone: _undone, debtId: _debtId, ...event } = entry
         roundEvents.push(event)
-        if (row.kind === 'spend_recorded') addSpend(spendAccount(p, row), entry.amountCents)
+        if (row.kind === 'spend_recorded') {
+          const accountId = spendAccount(p, row)
+          addSpend(accountId, entry.amountCents)
+          if (debtId && entry.amountCents > 0) {
+            charges.set(row.id, {
+              chargeId: row.id,
+              lineItemId: entry.lineItemId,
+              roundDue: entry.roundDue,
+              accountId,
+              debtId,
+              amountCents: entry.amountCents,
+              on: row.on,
+              recordedAtMicros: row.recordedAtMicros,
+              moved: null,
+              paidOn: null,
+              paidAtMicros: null,
+            })
+          }
+        }
+        break
+      }
+      case 'credit_moved': {
+        if (undone.has(row.id)) break
+        const parsed = creditMovedPayload.safeParse(p)
+        if (!parsed.success) break
+        for (const chargeId of parsed.data.charge_ids) {
+          const charge = charges.get(chargeId)
+          if (charge && charge.moved === null && charge.paidOn === null) {
+            charge.moved = { on: row.on, toAccountId: parsed.data.to_reserve_account_id }
+          }
+        }
+        break
+      }
+      case 'credit_paid': {
+        if (undone.has(row.id)) break
+        const parsed = creditPaidPayload.safeParse(p)
+        if (!parsed.success) break
+        let paidCents = 0
+        for (const chargeId of parsed.data.charge_ids) {
+          const charge = charges.get(chargeId)
+          if (charge && charge.paidOn === null) {
+            charge.paidOn = row.on
+            charge.paidAtMicros = row.recordedAtMicros
+            paidCents += charge.amountCents
+          }
+        }
+        if (paidCents > 0) {
+          creditPaidHistory.set(parsed.data.debt_id, [
+            ...(creditPaidHistory.get(parsed.data.debt_id) ?? []),
+            { on: row.on, kind: 'paid_from_plans', amountCents: paidCents },
+          ])
+        }
         break
       }
       case 'close_out_snoozed':
@@ -286,7 +361,19 @@ export function ledgerOf(facts: LedgerFacts): Ledger {
     }
   }
 
-  const { sinceStated, history } = debtPayments(log, facts.debts, issuedById, firstConfirmation)
+  const creditCharges = [...charges.values()]
+  // Each charge, then each payment for them; merged with the rest by day.
+  const creditHistory = new Map<Id, DebtHistoryEntry[]>()
+  for (const c of creditCharges) {
+    creditHistory.set(c.debtId, [
+      ...(creditHistory.get(c.debtId) ?? []),
+      { on: c.on, kind: 'charged_from_plan', amountCents: c.amountCents },
+    ])
+  }
+  for (const [debtId, paid] of creditPaidHistory) {
+    creditHistory.set(debtId, [...(creditHistory.get(debtId) ?? []), ...paid])
+  }
+  const { sinceStated, history } = debtPayments(log, facts.debts, issuedById, firstConfirmation, creditHistory)
 
   return {
     issued,
@@ -303,7 +390,38 @@ export function ledgerOf(facts: LedgerFacts): Ledger {
     spendsSinceCount: [...spends].map(([accountId, amountCents]) => ({ accountId, amountCents })),
     debtPaymentsSinceStated: sinceStated,
     debtHistory: history,
+    creditCharges,
+    creditSinceStated: creditSinceStatedOf(creditCharges, facts.debts),
   }
+}
+
+/** Charges whose money is in an account now: not yet paid, and in it (never moved out, or moved into it). */
+function creditStillIn(charges: ReadonlyMap<Id, CreditCharge>, accountId: Id): Cents {
+  let total = 0
+  for (const c of charges.values()) {
+    if (c.paidOn !== null) continue
+    const where = c.moved ? c.moved.toAccountId : c.accountId
+    if (where === accountId) total += c.amountCents
+  }
+  return total
+}
+
+/** Per debt, the charges and their payments recorded after the balance was stated, compared to the microsecond. */
+function creditSinceStatedOf(
+  charges: readonly CreditCharge[],
+  debts: LedgerFacts['debts'],
+): Map<Id, { chargedCents: Cents; paidCents: Cents }> {
+  const statedAt = new Map(debts.map((d) => [d.id, BigInt(d.balanceRecordedAtMicros)]))
+  const out = new Map<Id, { chargedCents: Cents; paidCents: Cents }>()
+  for (const c of charges) {
+    const at = statedAt.get(c.debtId)
+    if (at === undefined) continue
+    const sums = out.get(c.debtId) ?? { chargedCents: 0, paidCents: 0 }
+    if (BigInt(c.recordedAtMicros) > at) sums.chargedCents += c.amountCents
+    if (c.paidAtMicros !== null && BigInt(c.paidAtMicros) > at) sums.paidCents += c.amountCents
+    out.set(c.debtId, sums)
+  }
+  return out
 }
 
 /**
@@ -385,6 +503,7 @@ function debtPayments(
   debts: LedgerFacts['debts'],
   issuedById: ReadonlyMap<Id, IssuedInstruction>,
   firstConfirmation: ReadonlyMap<Id, Id>,
+  credit: ReadonlyMap<Id, DebtHistoryEntry[]>,
 ): { sinceStated: Map<Id, DebtPaymentMade[]>; history: Map<Id, DebtHistoryEntry[]> } {
   const statedAt = new Map(debts.map((d) => [d.id, BigInt(d.balanceRecordedAtMicros)]))
   // Debts whose entry is in the log, and those whose stated balance anything
@@ -459,12 +578,18 @@ function debtPayments(
     }
   }
 
-  // A debt's own events, then its to-do payments, merged by day; within a
-  // day, each list in the order recorded.
+  // A debt's own events, then its to-do payments, then its charges from
+  // plans and their payments, merged by day; within a day, each list in the
+  // order recorded.
   const history = new Map<Id, DebtHistoryEntry[]>()
-  for (const id of new Set([...opening.keys(), ...own.keys(), ...todo.keys()])) {
+  for (const id of new Set([...opening.keys(), ...own.keys(), ...todo.keys(), ...credit.keys()])) {
     const first = opening.get(id)
-    const entries = [...(first ? [first] : []), ...(own.get(id) ?? []), ...(todo.get(id) ?? [])]
+    const entries = [
+      ...(first ? [first] : []),
+      ...(own.get(id) ?? []),
+      ...(todo.get(id) ?? []),
+      ...(credit.get(id) ?? []),
+    ]
     history.set(
       id,
       entries.sort((a, b) => compareDates(a.on, b.on)),

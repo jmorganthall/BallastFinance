@@ -94,6 +94,7 @@ export default async function DebtsPage({
       link: rung.debt.linkUrl ? { url: rung.debt.linkUrl, site: debtLinkSite(rung.debt.linkUrl) } : null,
       kind: KIND[rung.debt.category] ?? rung.debt.category,
       balanceCents: rung.debt.balanceCents,
+      fromPlansCents: rung.debt.onCardFromPlansCents ?? 0,
       statedBalanceCents:
         rung.debt.statedBalanceCents !== undefined && rung.debt.statedBalanceCents !== rung.debt.balanceCents
           ? rung.debt.statedBalanceCents
