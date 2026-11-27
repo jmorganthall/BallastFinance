@@ -158,6 +158,15 @@ export interface Debt {
    */
   statedBalanceCents?: Cents
   /**
+   * What plans spent on this card that has not been paid off yet (paid on
+   * credit, `src/domain/credit.ts`). It is on the card, so the card's balance
+   * shows it (`cardBalanceCents`), but `balanceCents` -- what the payoff
+   * order, the statuses and the share-out work on -- leaves it out: it is
+   * the plans' money, already set aside, on its way to the card. Never
+   * stored: the engine fills it on every read; absent means none.
+   */
+  onCardFromPlansCents?: Cents
+  /**
    * Listed in the PRD's data model, read by nothing. The form no longer asks
    * for it: a set-amount minimum already says the payment never changes, and
    * asking twice looked like two different questions. Stays false.
@@ -170,6 +179,11 @@ export interface Debt {
    * would leave.
    */
   assetId?: Id | null
+}
+
+/** What the card's own statement would say: the balance the payoff works on and what plans put on it, not yet paid. */
+export function cardBalanceCents(debt: Pick<Debt, 'balanceCents' | 'onCardFromPlansCents'>): Cents {
+  return debt.balanceCents + (debt.onCardFromPlansCents ?? 0)
 }
 
 export class DebtDataError extends Error {}
@@ -1106,6 +1120,8 @@ export type DebtHistoryEntry =
   | { on: CivilDate; kind: 'entered' }
   | { on: CivilDate; kind: 'paid' | 'paid_todo'; amountCents: Cents }
   | { on: CivilDate; kind: 'terms'; changed: string[] }
+  /** A plan's spend that went on this card, and the payment that cleared what plans put on it (paid on credit). */
+  | { on: CivilDate; kind: 'charged_from_plan' | 'paid_from_plans'; amountCents: Cents }
 
 const TERM_WORDS: Record<string, string> = {
   name: 'name',

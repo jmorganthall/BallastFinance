@@ -14,6 +14,7 @@ import {
   debtStatusLabel,
   debtStatusLine,
   debtTodoSentence,
+  creditTodoSentence,
   derivedTodoSentence,
   formatCents,
   instructionSentence,
@@ -152,7 +153,9 @@ export async function buildWeeklyDigest(input: DigestInput): Promise<Notificatio
             ? derivedTodoSentence(item.todo)
             : item.from === 'debt'
               ? debtTodoSentence(item.todo)
-              : `${instructionSentence(item.ask, transferWeekday)}${item.ask.note ? ` (${item.ask.note})` : ''}`
+              : item.from === 'credit'
+                ? creditTodoSentence(item.todo)
+                : `${instructionSentence(item.ask, transferWeekday)}${item.ask.note ? ` (${item.ask.note})` : ''}`
         }`,
       )
     }

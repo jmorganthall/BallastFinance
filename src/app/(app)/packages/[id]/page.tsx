@@ -122,6 +122,10 @@ async function PackageDetailPageRead({
   // Every spend, finish and save back up on this plan, newest first, each
   // with an Undo while it stands (D53 (6)).
   const history = isDraft ? [] : await engine.roundHistory(id)
+  // Cards and lines of credit, for "It went on a card" (paid on credit).
+  const debts = isDraft || isDone ? [] : await engine.listDebts()
+  const cards = debts.filter((d) => d.category === 'consumer')
+  const debtName = new Map(debts.map((d) => [d.id, d.name]))
   // A part's open rounds, oldest first (D53): the round still open past its
   // date beside the one saving now, for the spend form's choice.
   const roundsOfPart = (lineItemId: string) =>
@@ -473,6 +477,35 @@ async function PackageDetailPageRead({
                       How much went out
                       <input name="actual_amount" inputMode="decimal" placeholder="0.00" required className={field} />
                     </label>
+                    {cards.length > 0 ? (
+                      <div className="text-sm">
+                        <input
+                          id={`on-card-${item.lineItem.id}`}
+                          type="checkbox"
+                          name="on_card"
+                          value="yes"
+                          className="peer mr-2 align-middle"
+                        />
+                        <label htmlFor={`on-card-${item.lineItem.id}`} className="align-middle font-medium">
+                          It went on a card
+                        </label>
+                        <label className="mt-2 hidden font-medium peer-checked:block">
+                          Which one
+                          <select name="debt_id" defaultValue="" className={field}>
+                            <option value="">Pick the card</option>
+                            {cards.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.name}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+                            This week will ask you to move it into the account you pay bills from, then pay the card,
+                            one move and one payment however many charges.
+                          </span>
+                        </label>
+                      </div>
+                    ) : null}
                     <p className="text-xs text-[var(--color-ink-soft)]">
                       It comes off what this account holds and off what is still needed. Once what went out
                       reaches the total it is finished; more than that comes out of what the account holds for
@@ -616,11 +649,14 @@ async function PackageDetailPageRead({
                       )}{' '}
                       · {entry.label}
                       {entry.recurrence ? ` (${roundSuffix(entry.roundDue, entry.recurrence, today)})` : ''}
+                      {entry.debtId ? ` · on ${debtName.get(entry.debtId) ?? 'a card since removed'}` : ''}
                     </p>
                     <p className="text-xs text-[var(--color-ink-soft)]">{humanDate(entry.on)}</p>
                   </div>
                   {entry.undone ? (
                     <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">Taken back</span>
+                  ) : entry.settled ? (
+                    <span className="shrink-0 text-xs text-[var(--color-ink-soft)]">Moved to pay the card</span>
                   ) : !isDone ? (
                     <form action={undoRoundEventAction}>
                       <input type="hidden" name="event_id" value={entry.eventId} />

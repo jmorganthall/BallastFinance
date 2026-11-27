@@ -7,14 +7,17 @@
  * in one order, each saying whether "All caught up" waits on it. No screen
  * adds a to-do, drops one, counts them or orders them for itself.
  *
- * - **Order**: the position's to-dos, then the debts' that block, then the
- *   asks still open, then the debts' housekeeping. Asks not yet available
+ * - **Order**: the position's to-dos, then what plans put on cards (move
+ *   the money, pay the card), then the debts' that block, then the asks
+ *   still open, then the debts' housekeeping. Asks not yet available
  *   (the second half of the fun money) are listed apart, as coming up.
  * - **An open ask blocks** exactly when the account or debt it concerns is,
  *   on what has been done, not On track: the to-dos for it were worked out
  *   as if the ask is done (D56 (2)), so the run-forward depends on it. One
  *   that lowered nothing -- fun money, a left-over, a move into an account
  *   already fine, a payment toward a debt already on track -- is optional.
+ * - **What plans put on cards** always blocks: the money is promised to a
+ *   card until it is paid (paid on credit, `credit.ts`).
  * - **All caught up** is D35 (6): every account On track on its confirmed
  *   transfer, every deal cleared in time, and nothing that blocks open.
  * - **Needs attention** counts the accounts "All caught up" judges (those
@@ -25,6 +28,7 @@
  */
 
 import { attentionHeadline, householdCaughtUp, type DebtStatuses, type DebtTodo } from './debt-status'
+import { creditTodoKey, type CreditTodo } from './credit'
 import type { OutstandingInstruction } from './instructions'
 import type { DerivedTodo, HouseholdPosition } from './position'
 
@@ -34,6 +38,7 @@ export const ASK_STALE_AFTER_DAYS = 7
 export type HouseholdTodo =
   | { from: 'position'; key: string; blocking: boolean; todo: DerivedTodo }
   | { from: 'debt'; key: string; blocking: boolean; todo: DebtTodo }
+  | { from: 'credit'; key: string; blocking: true; todo: CreditTodo }
   | { from: 'ask'; key: string; blocking: boolean; ask: OutstandingInstruction; stale: boolean }
 
 export interface HouseholdView {
@@ -62,6 +67,8 @@ export function householdView(args: {
   position: HouseholdPosition
   debts: DebtStatuses
   open: readonly OutstandingInstruction[]
+  /** What plans put on cards still calls for; none when absent. */
+  credit?: readonly CreditTodo[]
 }): HouseholdView {
   const { position, debts } = args
   const accountStatus = new Map(position.accounts.map((a) => [a.account.id, a.status]))
@@ -82,6 +89,7 @@ export function householdView(args: {
         todo,
       }),
     ),
+    ...(args.credit ?? []).map((todo): HouseholdTodo => ({ from: 'credit', key: creditTodoKey(todo), blocking: true, todo })),
     ...debts.todos
       .filter((t) => t.blocking)
       .map((todo): HouseholdTodo => ({ from: 'debt', key: `${todo.kind}:${todo.debtId}`, blocking: true, todo })),

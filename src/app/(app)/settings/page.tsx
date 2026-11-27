@@ -15,6 +15,7 @@ import {
   saveNudgeSettingsAction,
   saveTransferRoundingAction,
   saveTransferWeekdayAction,
+  saveBillsAccountAction,
   setSimplifiNamesAction,
   signOutAction,
 } from '@/server/actions'
@@ -48,6 +49,7 @@ export default async function SettingsPage({
       engine.transferWeekday(),
       engine.simplifiTargets(),
     ])
+  const bills = await engine.billsAccount()
   const simplifiNames = new Map(targets.filter((t) => t.kind === 'account').map((t) => [t.id, t.simplifiNames]))
   // Absent means subscribed: both spouses receive everything by default (PRD §8).
   const receives = prefs[viewer.userId] !== false
@@ -106,6 +108,45 @@ export default async function SettingsPage({
             className="w-full rounded-xl bg-[var(--color-accent)] px-4 py-3 font-medium text-[var(--color-on-fill)]"
           >
             Save these rules
+          </button>
+        </form>
+      </Card>
+
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-ink-soft)]">
+        Paying a card for a plan
+      </h2>
+      <Card className="mb-6">
+        <form action={saveBillsAccountAction} className="space-y-4">
+          <label className="block text-sm font-medium">
+            We pay bills from
+            <select
+              name="bills_account_id"
+              defaultValue={bills?.kind === 'reserve_account' ? bills.accountId : ''}
+              className={field}
+            >
+              <option value="">An account Ballast does not hold (name it below)</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-sm font-medium">
+            Its name
+            <input
+              name="bills_account_name"
+              defaultValue={bills?.kind === 'named' ? bills.name : ''}
+              placeholder="Joint checking"
+              className={field}
+            />
+            <span className="mt-1 block text-xs font-normal text-[var(--color-ink-soft)]">
+              When a plan&apos;s spend goes on a card, This week asks you to move the plan&apos;s money here and
+              then pay the card from here.
+            </span>
+          </label>
+          <button type="submit" className="w-full rounded-xl border border-[var(--color-line)] px-4 py-3 font-medium">
+            Save
           </button>
         </form>
       </Card>

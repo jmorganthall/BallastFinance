@@ -463,6 +463,26 @@ principles, and they are non-negotiable.
   This week. Debts lists every debt with an offer under "Transfer offers"
   (an empty 0% card is under Paid off), with "Try a card" at the top. Ballast
   records no transfer: a person makes it at the bank and updates both debts.
+- **A plan's spend can go on a card, and This week asks for one move and one
+  payment** (paid on credit, asked for by the household on Nov 27, 2026;
+  design `docs/superpowers/specs/2026-11-27-paid-on-credit-design.md`; not
+  yet in the PRD). "It went on a card" on a plan's "Money went out" form adds
+  `debt_id` (a `consumer` debt) to the `spend_recorded`: it is still a spend
+  (off the round and off the account at once), and also a charge. The
+  `bills_account` setting (`BillsAccount`, zod-parsed in `credit.ts`: one of
+  Ballast's accounts or a named one; none means "the account you pay bills
+  from") is where the money goes. `creditTodos` derives one "Move $X from
+  <account> into <bills>" per plans' account (every charge not moved, unless
+  the account is the bills account) and, once nothing on a card waits to be
+  moved, one "Pay $X to <card>" per card; both always block and count as
+  money to do (`HouseholdTodo` `from: 'credit'`). "Done" records
+  `credit_moved` / `credit_paid` (migration 0031) naming the charges the
+  to-do listed, at the to-do's amount, refused if what is open changed. The
+  ledger keeps a count from giving back a charge's money still in the
+  account (not moved, or moved in and not paid). A debt's `balanceCents`
+  (payoff order, statuses, share-out) leaves out what plans put on it until
+  paid; `onCardFromPlansCents` holds it and `cardBalanceCents` is what the
+  screens show. A charge cannot be undone once moved or paid.
 - **Account scope restricts writes, never reads.** Both spouses see every
   reserve account and every balance, so a household total is never a partial
   picture. An `individual` account can only be renamed, funded, or

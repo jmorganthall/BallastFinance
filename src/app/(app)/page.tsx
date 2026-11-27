@@ -21,6 +21,8 @@ import {
   awakeCloseOuts,
   roundKey,
   debtTodoSentenceParts,
+  creditTodoSentenceParts,
+  type CreditTodo,
   derivedTodoSentenceParts,
   type DebtTodo,
   latestSnoozeDay,
@@ -39,6 +41,8 @@ import {
 } from '@/domain'
 import {
   confirmBalancesAction,
+  confirmCreditMoveAction,
+  confirmCreditPayoffAction,
   confirmInstructionAction,
   confirmMoveBetweenAction,
   confirmMoveInAction,
@@ -157,6 +161,42 @@ function DerivedTodoCard({ todo, today }: { todo: DerivedTodo; today: CivilDate 
           Optional: leaving it as it is only saves a little more.
         </p>
       ) : null}
+    </Card>
+  )
+}
+
+/**
+ * What plans put on a card still calls for (paid on credit): move the money
+ * to the bills account, then pay the card, each once for every charge it
+ * covers. The amount is the to-do's, so there is no box: "Done" says it was
+ * done as written, for the charges listed.
+ */
+function CreditTodoCard({ todo, today }: { todo: CreditTodo; today: CivilDate }) {
+  const move = todo.kind === 'move_to_bills'
+  return (
+    <Card>
+      <Parts parts={creditTodoSentenceParts(todo)} today={today} />
+      <ul className="mt-2 space-y-1 text-xs text-[var(--color-ink-soft)]">
+        {todo.charges.map((c) => (
+          <li key={c.chargeId}>
+            {c.partLabel}: {formatCents(c.amountCents)}
+            {move ? ` on ${c.debtName}` : ''}, <When date={c.on} today={today} />
+          </li>
+        ))}
+      </ul>
+      <form action={move ? confirmCreditMoveAction : confirmCreditPayoffAction} className="mt-4 flex justify-end">
+        {move ? (
+          <input type="hidden" name="from_account_id" value={todo.fromAccountId} />
+        ) : (
+          <input type="hidden" name="debt_id" value={todo.debtId} />
+        )}
+        {todo.charges.map((c) => (
+          <input key={c.chargeId} type="hidden" name="charge_id" value={c.chargeId} />
+        ))}
+        <button type="submit" className="rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm font-medium">
+          Done
+        </button>
+      </form>
     </Card>
   )
 }
@@ -479,6 +519,8 @@ export default async function ThisWeekPage({
                   <DerivedTodoCard todo={item.todo} today={today} />
                 ) : item.from === 'debt' ? (
                   <DebtTodoCard todo={item.todo} today={today} />
+                ) : item.from === 'credit' ? (
+                  <CreditTodoCard todo={item.todo} today={today} />
                 ) : (
                   <AskCard instruction={item.ask} stale={item.stale} transferWeekday={transferWeekday} today={today} />
                 )}

@@ -326,6 +326,57 @@ export async function confirmMoveInAction(formData: FormData): Promise<void> {
  * (D40): the move out and the move in recorded together, at the amount in
  * the box. A box left as junk changes nothing.
  */
+/**
+ * "Done" on moving what plans put on cards into the bills account, or on
+ * paying the card for it (paid on credit). The amount is the to-do's; the
+ * form only names the to-do and the charges it showed.
+ */
+export async function confirmCreditMoveAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  try {
+    await engine.confirmCreditMove({
+      fromAccountId: String(formData.get('from_account_id') ?? ''),
+      chargeIds: formData.getAll('charge_id').map(String),
+    })
+  } catch (error) {
+    if (!(error instanceof EngineError)) throw error
+    redirect(`/?error=${encodeURIComponent(error.message)}`)
+  }
+  afterWrite()
+}
+
+export async function confirmCreditPayoffAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  try {
+    await engine.confirmCreditPayoff({
+      debtId: String(formData.get('debt_id') ?? ''),
+      chargeIds: formData.getAll('charge_id').map(String),
+    })
+  } catch (error) {
+    if (!(error instanceof EngineError)) throw error
+    redirect(`/?error=${encodeURIComponent(error.message)}`)
+  }
+  afterWrite()
+}
+
+/** Where the household pays bills from (paid on credit): one of Ballast's accounts, or one it does not hold, by name. */
+export async function saveBillsAccountAction(formData: FormData): Promise<void> {
+  const { engine } = await requireEngine()
+  const { EngineError } = await import('@/server/engine')
+  const accountId = String(formData.get('bills_account_id') ?? '').trim()
+  const name = String(formData.get('bills_account_name') ?? '').trim()
+  try {
+    await engine.setBillsAccount(accountId ? { kind: 'reserve_account', accountId } : { kind: 'named', name })
+  } catch (error) {
+    if (!(error instanceof EngineError)) throw error
+    redirect(`/settings?error=${encodeURIComponent(error.message)}`)
+  }
+  afterWrite()
+  redirect('/settings?saved=1')
+}
+
 export async function confirmMoveBetweenAction(formData: FormData): Promise<void> {
   const { engine } = await requireEngine()
   const { parseAmountOrNull } = await import('@/domain')
@@ -482,6 +533,13 @@ export async function recordSpendAction(formData: FormData): Promise<void> {
   const { lineItemId, roundDue, key } = roundOf(formData)
   const raw = String(formData.get('actual_amount') ?? '').trim()
   const back = snoozeBack(formData)
+  // Paid on credit: the box ticked and a card picked. Ticked with no card is
+  // said back, never recorded as paid from the account.
+  const onCard = formData.get('on_card') === 'yes'
+  const debtId = String(formData.get('debt_id') ?? '').trim()
+  if (onCard && debtId === '') {
+    redirect(`${back}?snooze_error=${encodeURIComponent('Pick the card it went on.')}&item=${key}`)
+  }
 
   let amountCents: number | undefined
   if (raw !== '') {
@@ -493,7 +551,7 @@ export async function recordSpendAction(formData: FormData): Promise<void> {
     }
   }
   try {
-    await engine.recordSpend({ lineItemId, roundDue, amountCents })
+    await engine.recordSpend({ lineItemId, roundDue, amountCents, ...(onCard ? { debtId } : {}) })
   } catch (error) {
     if (!(error instanceof EngineError)) throw error
     redirect(`${back}?snooze_error=${encodeURIComponent(error.message)}&item=${key}`)
