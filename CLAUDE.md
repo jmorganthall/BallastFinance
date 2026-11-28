@@ -691,7 +691,7 @@ principles, and they are non-negotiable.
   `lodging_quote_changed` event, migration 0025), then Disney's rate for
   the week, then the month (`lodging_rates`, reference data with no
   household, unique on source + stay + period + start, written only
-  through the engine); the newest wins within a level. `stay` is "all",
+  through the engine); the newest wins within a level. A night Disney has not priced is predicted (level 5, D64 (6), proposed): Disney's rate a year earlier, moved by the year-on-year change the stored rates show (none assumed below `MIN_YEAR_PAIRS` months) and by how our quotes ran against Disney's rate; a quote never becomes a prediction. Every price says how sure it is: Definite (a quote), Disney list price, Predicted or Unknown (`certaintyOf`, `WindowLodging.certainty`), derived, never stored. `stay` is "all",
   "tier:value|moderate|deluxe" or a resort's name (`stayKey`), matched by
   resort through `priceFactsFor` (D64, proposed: two spellings of one
   resort meet; an unknown name still matches only itself), and the

@@ -6,9 +6,25 @@
  *   2 disney_page   Disney's own page, sent with Send this page (reserved)
  *   3 rates_week    Disney's rate for the week the night falls in
  *   4 rates_month   Disney's rate for the month
- *   5 points_fitted DVC points x a $/point worked out from overlap (later)
- *   6 points_own    DVC points x the household's $/point (later)
+ *   5 predicted     worked out from Disney's rate a year earlier (D64 (6))
+ *   6 points_fitted DVC points x a $/point worked out from overlap (later)
+ *   7 points_own    DVC points x the household's $/point (later)
  *   - nothing       no price yet
+ *
+ * Each level says how sure it is, in four words the household reads
+ * (D64 (6), proposed). Definite: a price for these very nights, quoted or
+ * looked up. Disney list price: Disney's published rate for the period,
+ * before any discount. Predicted: no published rate covers the night, so
+ * it is worked out. Unknown: nothing to go on. Only a definite figure is
+ * definite; a prediction is never shown as one.
+ *
+ * A prediction is Disney's rate for the same week or month a year earlier,
+ * times the year-on-year change the stored rates themselves show (the
+ * median over months priced in both years), times how far the household's
+ * own quotes ran from Disney's rate on the nights both covered. A quote
+ * never becomes a prediction; it only moves the next one. With too little
+ * to measure a change, none is applied and the basis says so: no rate of
+ * increase is assumed.
  *
  * Within a level the newest wins: the quote recorded last, the rate
  * captured last. A night takes the winner's figure as it stands; a week or
@@ -33,23 +49,52 @@
  * Nothing here is stored.
  */
 
-import { addDays, compareDates, type CivilDate } from './dates'
+import { addDays, addMonths, compareDates, type CivilDate } from './dates'
 import { formatCents, type Cents } from './money'
 import { TripPlanError } from './trip-plan'
 import type { ShapedWindow, StayChoice } from './trip-shape'
 import { ANY_SOURCE, canonicalStay, type Resort, type ResortAlias } from './resort'
 
-export type CostLevel = 'typed' | 'disney_page' | 'rates_week' | 'rates_month'
+export type CostLevel = 'typed' | 'disney_page' | 'rates_week' | 'rates_month' | 'predicted'
 
 /** Most trusted first. */
-export const COST_LEVELS: readonly CostLevel[] = ['typed', 'disney_page', 'rates_week', 'rates_month']
+export const COST_LEVELS: readonly CostLevel[] = ['typed', 'disney_page', 'rates_week', 'rates_month', 'predicted']
 
 export const COST_LEVEL_WORDS: Record<CostLevel, string> = {
   typed: 'a price we were quoted',
   disney_page: "Disney's own page",
   rates_week: "Disney's rate for the week",
   rates_month: "Disney's rate for the month",
+  predicted: "a prediction from Disney's rate a year earlier",
 }
+
+/** How sure a price is (D64 (6)). Most sure first. */
+export type PriceCertainty = 'definite' | 'list' | 'predicted' | 'unknown'
+
+export const PRICE_CERTAINTIES: readonly PriceCertainty[] = ['definite', 'list', 'predicted', 'unknown']
+
+export const CERTAINTY_WORDS: Record<PriceCertainty, string> = {
+  definite: 'Definite',
+  list: 'Disney list price',
+  predicted: 'Predicted',
+  unknown: 'Unknown',
+}
+
+const CERTAINTY_OF_LEVEL: Record<CostLevel, PriceCertainty> = {
+  typed: 'definite',
+  disney_page: 'definite',
+  rates_week: 'list',
+  rates_month: 'list',
+  predicted: 'predicted',
+}
+
+/** A level's certainty; no level is unknown. */
+export function certaintyOf(level: CostLevel | null): PriceCertainty {
+  return level === null ? 'unknown' : CERTAINTY_OF_LEVEL[level]
+}
+
+/** Below this many months priced in both years, no year-on-year change is measured. */
+export const MIN_YEAR_PAIRS = 3
 
 export const STALE_AFTER_DAYS = 180
 export const DISAGREE_PERCENT = 25
@@ -129,9 +174,11 @@ export function validateLodgingRate(r: LodgingRate): void {
 export interface NightFigure {
   level: CostLevel
   cents: Cents
-  /** The day the figure was true: a quote's recording, a rate's capture. */
+  /** The day the figure was true: a quote's recording, a rate's capture, a prediction's base rate's capture. */
   asOf: CivilDate
   source: string
+  /** How a predicted figure was worked out, in words; null for a figure a source gave as it stands. */
+  basis: string | null
 }
 
 export interface NightCost {
@@ -148,18 +195,132 @@ function covers(rate: LodgingRate, date: CivilDate): boolean {
   return rate.periodStart.slice(0, 7) === date.slice(0, 7)
 }
 
-/** The best figure at each level for one night, most trusted first; levels with nothing are left out. */
-function figuresFor(date: CivilDate, stay: string, rates: readonly LodgingRate[], quotes: readonly LodgingQuote[]): NightFigure[] {
-  const out: NightFigure[] = []
-  const quote = quotes
-    .filter((q) => q.stay === stay && compareDates(q.fromDate, date) <= 0 && compareDates(date, q.toDate) <= 0)
-    .sort((a, b) => compareDates(b.recordedOn, a.recordedOn))[0]
-  if (quote) out.push({ level: 'typed', cents: quote.nightlyCents, asOf: quote.recordedOn, source: quote.note || 'typed' })
+/** Disney's newest rate for a stay covering a night, week before month; null when none does. */
+function listRateFor(date: CivilDate, stay: string, rates: readonly LodgingRate[]): LodgingRate | null {
   for (const period of ['week', 'month'] as const) {
     const rate = rates
       .filter((r) => r.stay === stay && r.period === period && covers(r, date))
       .sort((a, b) => compareDates(b.observedOn, a.observedOn))[0]
-    if (rate) out.push({ level: period === 'week' ? 'rates_week' : 'rates_month', cents: rate.nightlyCents, asOf: rate.observedOn, source: rate.source })
+    if (rate) return rate
+  }
+  return null
+}
+
+function median(values: readonly number[]): number | null {
+  if (values.length === 0) return null
+  const v = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(v.length / 2)
+  return v.length % 2 === 1 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2
+}
+
+/** The same night a year earlier: the same weekday 52 weeks back for a week's rate, the same date for a month's. */
+function yearEarlier(date: CivilDate, period: 'week' | 'month'): CivilDate {
+  return period === 'week' ? addDays(date, -364) : addMonths(date, -12)
+}
+
+/**
+ * How much Disney's rate for a stay moved in a year, as the stored rates
+ * show it: for each month priced in both years, the later over the
+ * earlier, and the median of those. Null below MIN_YEAR_PAIRS months.
+ */
+export function yearOnYearChange(stay: string, rates: readonly LodgingRate[]): { factor: number; months: number } | null {
+  const newest = new Map<CivilDate, LodgingRate>()
+  for (const r of rates) {
+    if (r.stay !== stay || r.period !== 'month') continue
+    const had = newest.get(r.periodStart)
+    if (!had || compareDates(r.observedOn, had.observedOn) > 0) newest.set(r.periodStart, r)
+  }
+  const ratios: number[] = []
+  for (const [start, later] of newest) {
+    const earlier = newest.get(addMonths(start, -12))
+    if (earlier) ratios.push(later.nightlyCents / earlier.nightlyCents)
+  }
+  if (ratios.length < MIN_YEAR_PAIRS) return null
+  return { factor: median(ratios)!, months: ratios.length }
+}
+
+/**
+ * How the household's own quotes for a stay ran against Disney's rate on
+ * the nights both covered: the median of quote over rate, night by night.
+ * Null when no quoted night has a rate beside it.
+ */
+export function quotesAgainstList(stay: string, rates: readonly LodgingRate[], quotes: readonly LodgingQuote[]): { factor: number; nights: number } | null {
+  const ratios: number[] = []
+  for (const q of quotes) {
+    if (q.stay !== stay) continue
+    for (let d = q.fromDate; compareDates(d, q.toDate) <= 0; d = addDays(d, 1)) {
+      const list = listRateFor(d, stay, rates)
+      if (list) ratios.push(q.nightlyCents / list.nightlyCents)
+    }
+  }
+  const m = median(ratios)
+  return m === null ? null : { factor: m, nights: ratios.length }
+}
+
+function percentWords(factor: number): string {
+  const p = Math.round((factor - 1) * 100)
+  return p === 0 ? 'no change' : `${Math.abs(p)}% ${p > 0 ? 'up' : 'down'}`
+}
+
+/**
+ * A night no published rate covers, worked out from Disney's rate a year
+ * earlier (the week's, else the month's), the year-on-year change and the
+ * quotes' lean. Null when there is no rate a year earlier.
+ */
+export function predictNight(
+  date: CivilDate,
+  stay: string,
+  rates: readonly LodgingRate[],
+  adjust: { yearOnYear: { factor: number; months: number } | null; quotes: { factor: number; nights: number } | null },
+): NightFigure | null {
+  let base: LodgingRate | null = null
+  for (const period of ['week', 'month'] as const) {
+    const then = yearEarlier(date, period)
+    base = rates
+      .filter((r) => r.stay === stay && r.period === period && covers(r, then))
+      .sort((a, b) => compareDates(b.observedOn, a.observedOn))[0] ?? null
+    if (base) break
+  }
+  if (!base) return null
+  const growth = adjust.yearOnYear?.factor ?? 1
+  const lean = adjust.quotes?.factor ?? 1
+  const parts = [`Disney's rate for the ${base.period} a year earlier, ${formatCents(base.nightlyCents)} a night`]
+  parts.push(
+    adjust.yearOnYear
+      ? `moved ${percentWords(growth)}, the median change over ${adjust.yearOnYear.months} months priced in both years`
+      : 'with no year-on-year change, since too few months are priced in both years to measure one',
+  )
+  if (adjust.quotes) parts.push(`then ${percentWords(lean)}, where our quotes ran against Disney's rate over ${adjust.quotes.nights} ${adjust.quotes.nights === 1 ? 'night' : 'nights'}`)
+  return { level: 'predicted', cents: Math.round(base.nightlyCents * growth * lean), asOf: base.observedOn, source: base.source, basis: parts.join(', ') }
+}
+
+/** The best figure at each level for one night, most trusted first; levels with nothing are left out. */
+function figuresFor(
+  date: CivilDate,
+  stay: string,
+  rates: readonly LodgingRate[],
+  quotes: readonly LodgingQuote[],
+  adjust: Parameters<typeof predictNight>[3],
+): NightFigure[] {
+  const out: NightFigure[] = []
+  const quote = quotes
+    .filter((q) => q.stay === stay && compareDates(q.fromDate, date) <= 0 && compareDates(date, q.toDate) <= 0)
+    .sort((a, b) => compareDates(b.recordedOn, a.recordedOn))[0]
+  if (quote) out.push({ level: 'typed', cents: quote.nightlyCents, asOf: quote.recordedOn, source: quote.note || 'typed', basis: null })
+  let listed = false
+  for (const period of ['week', 'month'] as const) {
+    const rate = rates
+      .filter((r) => r.stay === stay && r.period === period && covers(r, date))
+      .sort((a, b) => compareDates(b.observedOn, a.observedOn))[0]
+    if (rate) {
+      listed = true
+      out.push({ level: period === 'week' ? 'rates_week' : 'rates_month', cents: rate.nightlyCents, asOf: rate.observedOn, source: rate.source, basis: null })
+    }
+  }
+  // A prediction only where Disney has published nothing for the night.
+  if (!listed) {
+    const predicted = predictNight(date, stay, rates, adjust)
+    if (predicted) out.push(predicted)
   }
   return out
 }
@@ -193,8 +354,9 @@ export function nightCosts(input: {
   quotes: readonly LodgingQuote[]
   today: CivilDate
 }): NightCost[] {
+  const adjust = { yearOnYear: yearOnYearChange(input.stay, input.rates), quotes: quotesAgainstList(input.stay, input.rates, input.quotes) }
   return input.nights.map((date) => {
-    const [winner, next] = figuresFor(date, input.stay, input.rates, input.quotes)
+    const [winner, next] = figuresFor(date, input.stay, input.rates, input.quotes, adjust)
     if (!winner) return { date, winner: null, stale: false, disagrees: null }
     const apart = next ? Math.abs(next.cents - winner.cents) * 100 > DISAGREE_PERCENT * winner.cents : false
     return { date, winner, stale: compareDates(input.today, winner.asOf) > STALE_AFTER_DAYS, disagrees: apart ? next! : null }
@@ -210,6 +372,10 @@ export interface WindowLodging {
   nights: number
   /** The least trusted level any night used. */
   weakest: CostLevel | null
+  /** How sure the window's price is: its weakest night's, or unknown until every night is priced. */
+  certainty: PriceCertainty
+  /** How each predicted night was worked out, each way once. */
+  bases: string[]
   stale: boolean
   disagrees: boolean
   /** The oldest figure used, for "Disney's rates, Sep 2026". */
@@ -228,6 +394,8 @@ export function windowLodging(costs: readonly NightCost[]): WindowLodging {
     nightsKnown: known.length,
     nights: costs.length,
     weakest,
+    certainty: all ? certaintyOf(weakest) : 'unknown',
+    bases: [...new Set(known.map((c) => c.winner!.basis).filter((b): b is string => b !== null))],
     stale: known.some((c) => c.stale),
     disagrees: known.some((c) => c.disagrees !== null),
     oldestAsOf: oldest,
@@ -273,6 +441,7 @@ function monthYear(date: CivilDate): string {
 export function priceWords(price: WindowPrice | null): string {
   if (!price || price.lodging.nightsKnown === 0) return 'no price yet'
   if (price.lodging.perNightCents === null) return `prices for ${price.lodging.nightsKnown} of ${price.lodging.nights} nights`
+  if (price.lodging.certainty === 'predicted') return `about ${formatCents(price.lodging.perNightCents)} a night, predicted`
   return `about ${formatCents(price.lodging.perNightCents)} a night`
 }
 
@@ -281,10 +450,13 @@ export function priceDetail(price: WindowPrice | null): string {
   const weakest = price?.lodging.weakest ?? null
   if (!price || weakest === null) return 'No price for these nights yet: paste the resortings.com page or type a quote under Trips.'
   const l = price.lodging
-  const parts = [`${l.nights} ${l.nights === 1 ? 'night' : 'nights'} at the resort, the least sure from ${COST_LEVEL_WORDS[weakest]}${l.oldestAsOf ? `, ${monthYear(l.oldestAsOf)}` : ''}`]
-  if (weakest === 'rates_week' || weakest === 'rates_month') parts.push('Disney\'s average a night for a midweek stay, before tax')
+  const parts = [
+    `${CERTAINTY_WORDS[l.certainty]}: ${l.nights} ${l.nights === 1 ? 'night' : 'nights'} at the resort, the least sure from ${COST_LEVEL_WORDS[weakest]}${l.oldestAsOf ? `, ${monthYear(l.oldestAsOf)}` : ''}`,
+  ]
+  if (weakest === 'rates_week' || weakest === 'rates_month' || weakest === 'predicted') parts.push('Disney\'s average a night for a midweek stay, before tax')
+  for (const b of l.bases) parts.push(b)
   if (l.stale) parts.push(`a figure is older than ${STALE_AFTER_DAYS} days, so check it`)
-  if (l.disagrees) parts.push(`a quote and Disney's rate differ by more than ${DISAGREE_PERCENT}% on a night`)
+  if (l.disagrees) parts.push(`on a night, a quote and Disney's rate or our prediction differ by more than ${DISAGREE_PERCENT}%`)
   if (price.roadNights > 0) parts.push(`${price.roadNights} ${price.roadNights === 1 ? 'night' : 'nights'} on the way at ${formatCents(price.roadNightCents)}`)
   if (price.cents !== null) parts.push(`${formatCents(price.cents)} in all to sleep`)
   return parts.join('; ') + '.'

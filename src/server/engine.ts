@@ -4683,7 +4683,8 @@ export class Engine {
     const [busyness, drive, rates, quotes] = await Promise.all([
       this.busynessSources({ from: today, to: until }, destination),
       this.driveEstimate({ home, destination }),
-      this.lodgingRates({ from: addDays(today, -40), to: until }),
+      // Two years back: a prediction reads Disney's rate a year before each night, and the year-on-year change reads the year before that (D64 (6)).
+      this.lodgingRates({ from: addMonths(today, -24), to: until }),
       this.lodgingQuotes(),
     ])
     const facts = priceFactsFor(stay, { rates, quotes }, await this.resortCatalogue())
