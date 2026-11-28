@@ -225,6 +225,13 @@
       "when": 1795800000000,
       "tag": "0031_paid_on_credit",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1795889840465,
+      "tag": "0032_resorts_and_raw_pulls",
+      "breakpoints": true
     }
   ]
 }

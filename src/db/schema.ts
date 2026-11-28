@@ -712,6 +712,102 @@ export const schoolYearDays = pgTable(
 )
 
 /**
+ * The raw layer (D64 (1), proposed): each page fetched or text pasted,
+ * exactly as it arrived, before a parser read it. Append-only: migration
+ * 0032 revokes UPDATE and DELETE and adds a trigger, as for events. The
+ * same body from the same source is one row. Reference data shared across
+ * households like the rates read from it; written only through the engine.
+ */
+export const sourcePulls = pgTable(
+  'source_pulls',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    source: text('source').notNull(),
+    url: text('url').notNull(),
+    how: text('how').notNull(),
+    mediaType: text('media_type').notNull(),
+    body: text('body').notNull(),
+    sha256: text('sha256').notNull(),
+    pulledOn: date('pulled_on').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('source_pulls_body_idx').on(t.source, t.sha256),
+    check('source_pulls_how', sql`${t.how} in ('fetched', 'pasted')`),
+    check('source_pulls_media_type', sql`${t.mediaType} in ('text/html', 'text/plain', 'application/json')`),
+    check('source_pulls_sha256', sql`${t.sha256} ~ '^[0-9a-f]{64}$'`),
+  ],
+)
+
+/**
+ * A resort, at Walt Disney World or Universal Orlando (D64 (2), proposed):
+ * what a rate, a quote, a DVC listing and a perk are about. Reference data,
+ * seeded by migration 0032 from the owners' own lists and changed only by
+ * a migration. The tier is on its brand's own ladder (src/domain/resort.ts);
+ * which resort a source's name means is worked out from the name and
+ * resort_aliases, never stored on the rate or listing.
+ */
+export const resorts = pgTable(
+  'resorts',
+  {
+    id: text('id').primaryKey(),
+    destination: text('destination').notNull(),
+    brand: text('brand').notNull(),
+    name: text('name').notNull(),
+    tier: text('tier').notNull(),
+    dvc: boolean('dvc').notNull().default(false),
+  },
+  (t) => [
+    uniqueIndex('resorts_name_idx').on(t.name),
+    check('resorts_destination_brand', sql`(${t.destination} = 'wdw' and ${t.brand} = 'disney') or (${t.destination} = 'uor' and ${t.brand} = 'universal')`),
+    check(
+      'resorts_tier_on_ladder',
+      sql`(${t.brand} = 'disney' and ${t.tier} in ('value', 'moderate', 'deluxe', 'campground')) or (${t.brand} = 'universal' and ${t.tier} in ('value', 'prime_value', 'signature'))`,
+    ),
+    check('resorts_dvc_is_disney', sql`not ${t.dvc} or ${t.brand} = 'disney'`),
+  ],
+)
+
+/**
+ * Another spelling of a resort's name as one source writes it, for names
+ * the normalised match cannot place on its own (src/domain/resort.ts).
+ * `source` is a source's key, or 'any' for every source.
+ */
+export const resortAliases = pgTable(
+  'resort_aliases',
+  {
+    source: text('source').notNull(),
+    alias: text('alias').notNull(),
+    resortId: text('resort_id')
+      .notNull()
+      .references(() => resorts.id),
+  },
+  (t) => [primaryKey({ columns: [t.source, t.alias] })],
+)
+
+/**
+ * A perk a resort's guests get, as a source said it on a date (D64 (2)):
+ * an observation with its source, not a promise.
+ */
+export const resortPerks = pgTable(
+  'resort_perks',
+  {
+    resortId: text('resort_id')
+      .notNull()
+      .references(() => resorts.id),
+    perk: text('perk').notNull(),
+    detail: text('detail').notNull(),
+    source: text('source').notNull(),
+    sourceUrl: text('source_url').notNull(),
+    observedOn: date('observed_on').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.resortId, t.perk, t.source] }),
+    check('resort_perks_perk', sql`${t.perk} in ('express_unlimited')`),
+  ],
+)
+
+/**
  * A DVC room a broker had on a date (D26): resort, room, check-in, nights,
  * points and price, as their public page listed it, with the source and the
  * day it was read. Reference data shared across households like crowd
@@ -731,6 +827,9 @@ export const dvcListings = pgTable(
     priceCents: cents('price_cents'),
     sourceUrl: text('source_url').notNull(),
     seenOn: date('seen_on').notNull(),
+    /** The raw page this row was last read from (D64 (1)). */
+    /** null means: kept before 0032, or read by the reader, which does not hand the page back. */
+    pullId: uuid('pull_id').references(() => sourcePulls.id),
   },
   (t) => [
     uniqueIndex('dvc_listings_key_idx').on(t.source, t.resort, t.room, t.checkIn, t.nights),
@@ -760,6 +859,9 @@ export const lodgingRates = pgTable(
     observedOn: date('observed_on').notNull(),
     fetchedOn: date('fetched_on').notNull(),
     sourceUrl: text('source_url').notNull(),
+    /** The raw page or paste this rate was last read from (D64 (1)). */
+    /** null means: kept before raw pages were kept (migration 0032). */
+    pullId: uuid('pull_id').references(() => sourcePulls.id),
   },
   (t) => [
     uniqueIndex('lodging_rates_key_idx').on(t.source, t.stay, t.period, t.periodStart),

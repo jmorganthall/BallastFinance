@@ -1,0 +1,11 @@
+{
+  "shape-outside-domain": 49,
+  "escape-hatch": 2,
+  "cast-instead-of-parse": 92,
+  "untyped-json-column": 13,
+  "nullable-without-meaning": 19,
+  "runtime-ddl": 1,
+  "defensive-read-in-ui": 265,
+  "db-import-outside-server": 0,
+  "io-in-domain": 1
+}

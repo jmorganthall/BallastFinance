@@ -25,6 +25,10 @@ import {
   lodgingQuotes as lodgingQuotesTable,
   lodgingRates as lodgingRatesTable,
   dvcListings as dvcListingsTable,
+  resortAliases as resortAliasesTable,
+  resortPerks as resortPerksTable,
+  resorts as resortsTable,
+  sourcePulls as sourcePullsTable,
   parkHours as parkHoursTable,
   parkWeather as parkWeatherTable,
   waitObservations as waitObservationsTable,
@@ -45,7 +49,7 @@ import {
   tripVariants as tripVariantsTable,
   trips as tripsTable,
 } from '@/db/schema'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   settleAttempt,
   type AttemptOutcome,
@@ -60,6 +64,15 @@ import {
   validateLodgingQuote,
   validateLodgingRate,
   windowPrice,
+  priceFactsFor,
+  mediaTypeOf,
+  parseResort,
+  parseResortPerk,
+  validateSourcePull,
+  type NewSourcePull,
+  type Resort,
+  type ResortAlias,
+  type ResortPerk,
   staysIn,
   type LodgingQuote,
   type LodgingRate,
@@ -385,6 +398,8 @@ export interface LodgingPull {
   basis: string | null
   rates: LodgingRate[]
   fetchedOn: CivilDate
+  /** The raw paste or page (D64 (1)); absent on a hold made before raw pages were kept. */
+  pullId?: string
 }
 
 export class EngineError extends Error {}
@@ -530,6 +545,8 @@ export interface DvcPull {
   listings: ParsedListings['listings']
   seenOn: CivilDate
   notes: string[]
+  /** The raw page (D64 (1)); absent when the reader read it, or on a hold made before raw pages were kept. */
+  pullId?: string
 }
 
 /** What "Refresh park data" did (D29): how many rows each pull stored, and what each source said. */
@@ -4666,9 +4683,10 @@ export class Engine {
     const [busyness, drive, rates, quotes] = await Promise.all([
       this.busynessSources({ from: today, to: until }, destination),
       this.driveEstimate({ home, destination }),
-      this.lodgingRates({ from: addDays(today, -40), to: until }, stay),
+      this.lodgingRates({ from: addDays(today, -40), to: until }),
       this.lodgingQuotes(),
     ])
+    const facts = priceFactsFor(stay, { rates, quotes }, await this.resortCatalogue())
     const roadNightCents = prices.find((p) => p.key === 'midway_hotel_per_night')?.amountCents ?? 0
     const result = explore({
       today,
@@ -4682,15 +4700,64 @@ export class Engine {
       schoolYearDays,
       blackoutDates,
       weights,
-      priceOf: (w) => windowPrice(w, { stay, rates, quotes, today, roadNightCents }),
+      priceOf: (w) => windowPrice(w, { stay: facts.stay, rates: facts.rates, quotes: facts.quotes, today, roadNightCents }),
     })
     return { ...result, shape, stay }
   }
 
+  // -- resorts and the raw layer (D64, proposed)
+
+  /**
+   * Land a page or paste exactly as it arrived (D64 (1)) and return its id.
+   * The same body from the same source is the pull already kept: the table
+   * is append-only, so nothing is ever replaced. Reference data, so it
+   * records no household event; the facts read from it do.
+   */
+  async landPull(pull: NewSourcePull): Promise<string> {
+    validateSourcePull(pull)
+    const sha256 = createHash('sha256').update(pull.body, 'utf8').digest('hex')
+    const [inserted] = await this.db
+      .insert(sourcePullsTable)
+      .values({ ...pull, sha256 })
+      .onConflictDoNothing({ target: [sourcePullsTable.source, sourcePullsTable.sha256] })
+      .returning({ id: sourcePullsTable.id })
+    if (inserted) return inserted.id
+    const [existing] = await this.db
+      .select({ id: sourcePullsTable.id })
+      .from(sourcePullsTable)
+      .where(and(eq(sourcePullsTable.source, pull.source), eq(sourcePullsTable.sha256, sha256)))
+    if (!existing) throw new EngineError('The page could not be kept.')
+    return existing.id
+  }
+
+  /** A kept pull's body, so a parser can read it again (D64 (1)). Null when there is no such pull. */
+  async sourcePull(id: string): Promise<{ id: string; source: string; url: string; how: string; mediaType: string; body: string; sha256: string; pulledOn: CivilDate } | null> {
+    const [row] = await this.db.select().from(sourcePullsTable).where(eq(sourcePullsTable.id, id))
+    return row ? { id: row.id, source: row.source, url: row.url, how: row.how, mediaType: row.mediaType, body: row.body, sha256: row.sha256, pulledOn: row.pulledOn } : null
+  }
+
+  /** Every resort, the spellings kept for them, and their perks: the list a name is matched against (D64 (2)). */
+  async resortCatalogue(): Promise<{ resorts: Resort[]; aliases: ResortAlias[]; perks: ResortPerk[] }> {
+    const [resortRows, aliasRows, perkRows] = await Promise.all([
+      this.db.select().from(resortsTable).orderBy(resortsTable.destination, resortsTable.name),
+      this.db.select().from(resortAliasesTable).orderBy(resortAliasesTable.source, resortAliasesTable.alias),
+      this.db.select().from(resortPerksTable).orderBy(resortPerksTable.resortId, resortPerksTable.perk, resortPerksTable.source),
+    ])
+    return {
+      resorts: resortRows.map(parseResort),
+      aliases: aliasRows.map((a) => ({ source: a.source, alias: a.alias, resortId: a.resortId })),
+      perks: perkRows.map(parseResortPerk),
+    }
+  }
+
   // -- what a night costs (D55 (5))
 
-  /** Disney's rates for a stay over a stretch of dates, as kept from resortings.com. */
-  async lodgingRates(range: { from: CivilDate; to: CivilDate }, stay?: string): Promise<LodgingRate[]> {
+  /**
+   * Disney's rates over a stretch of dates, as kept from resortings.com.
+   * Every stay: which ones are about the stay a person chose is worked out
+   * through the resort list (priceFactsFor), not by the spelling.
+   */
+  async lodgingRates(range: { from: CivilDate; to: CivilDate }): Promise<LodgingRate[]> {
     const rows = await this.db
       .select()
       .from(lodgingRatesTable)
@@ -4698,7 +4765,6 @@ export class Engine {
         and(
           gte(lodgingRatesTable.periodStart, addDays(range.from, -31)),
           lte(lodgingRatesTable.periodStart, range.to),
-          stay === undefined ? undefined : eq(lodgingRatesTable.stay, stay),
         ),
       )
       .orderBy(lodgingRatesTable.periodStart, lodgingRatesTable.stay, lodgingRatesTable.period, lodgingRatesTable.source)
@@ -4721,22 +4787,22 @@ export class Engine {
   }
 
   /** Keep rates: one row per stay, period and start, the newest capture over an older one. One trip_changed event says what came in. */
-  async recordLodgingRates(rates: readonly LodgingRate[]): Promise<number> {
+  async recordLodgingRates(rates: readonly LodgingRate[], pullId: string | null = null): Promise<number> {
     for (const r of rates) validateLodgingRate(r)
     if (rates.length === 0) return 0
     await this.db.transaction(async (tx) => {
       for (const r of rates) {
         await tx
           .insert(lodgingRatesTable)
-          .values(r)
+          .values({ ...r, pullId })
           .onConflictDoUpdate({
             target: [lodgingRatesTable.source, lodgingRatesTable.stay, lodgingRatesTable.period, lodgingRatesTable.periodStart],
-            set: { nightlyCents: r.nightlyCents, observedOn: r.observedOn, fetchedOn: r.fetchedOn, sourceUrl: r.sourceUrl },
+            set: { nightlyCents: r.nightlyCents, observedOn: r.observedOn, fetchedOn: r.fetchedOn, sourceUrl: r.sourceUrl, pullId },
           })
       }
       const starts = rates.map((r) => r.periodStart).sort()
       await this.recordTripChange(tx, {
-        lodging_rates: { source: rates[0]!.source, count: rates.length, from: starts[0], to: starts[starts.length - 1], observed_on: rates[0]!.observedOn, fetched_on: rates[0]!.fetchedOn },
+        lodging_rates: { source: rates[0]!.source, count: rates.length, from: starts[0], to: starts[starts.length - 1], observed_on: rates[0]!.observedOn, fetched_on: rates[0]!.fetchedOn, pull_id: pullId },
       })
     })
     return rates.length
@@ -4761,7 +4827,10 @@ export class Engine {
     const parsed = parseResortingsPrices(text)
     if (parsed.reason) throw new EngineError(parsed.reason)
     const fetchedOn = this.today()
+    // The paste is kept as it arrived before anything read from it is (D64 (1)).
+    const pullId = await this.landPull({ source: RESORTINGS_SOURCE, url: RESORTINGS_URL, how: 'pasted', mediaType: mediaTypeOf(text), body: text, pulledOn: fetchedOn })
     const pull: LodgingPull = {
+      pullId,
       source: RESORTINGS_SOURCE,
       label: 'resortings.com',
       url: RESORTINGS_URL,
@@ -4777,7 +4846,7 @@ export class Engine {
   async keepLodgingPull(): Promise<number> {
     const pull = await this.pendingLodgingPull()
     if (!pull) throw new EngineError('There is nothing waiting to be kept.')
-    const kept = await this.recordLodgingRates(pull.rates)
+    const kept = await this.recordLodgingRates(pull.rates, pull.pullId ?? null)
     await this.stashLodgingPull(null)
     return kept
   }
@@ -4970,7 +5039,7 @@ export class Engine {
    * pull: which source, how many rooms. Never a trip line: the lodging
    * figure stays what a person typed.
    */
-  async recordDvcListings(listings: ParsedListings['listings'], meta: { source: string; sourceUrl: string; seenOn: CivilDate }): Promise<number> {
+  async recordDvcListings(listings: ParsedListings['listings'], meta: { source: string; sourceUrl: string; seenOn: CivilDate; pullId?: string | null }): Promise<number> {
     for (const l of listings) validateDvcListing(l)
     if (listings.length === 0) return 0
     if (!meta.source.trim() || !/^https?:\/\//.test(meta.sourceUrl)) throw new EngineError('A listing needs to say where it came from.')
@@ -4978,10 +5047,10 @@ export class Engine {
       for (const l of listings) {
         await tx
           .insert(dvcListingsTable)
-          .values({ source: meta.source, resort: l.resort.trim(), room: l.room.trim(), checkIn: l.checkIn, nights: l.nights, points: l.points, priceCents: l.priceCents, sourceUrl: meta.sourceUrl, seenOn: meta.seenOn })
+          .values({ source: meta.source, resort: l.resort.trim(), room: l.room.trim(), checkIn: l.checkIn, nights: l.nights, points: l.points, priceCents: l.priceCents, sourceUrl: meta.sourceUrl, seenOn: meta.seenOn, pullId: meta.pullId ?? null })
           .onConflictDoUpdate({
             target: [dvcListingsTable.source, dvcListingsTable.resort, dvcListingsTable.room, dvcListingsTable.checkIn, dvcListingsTable.nights],
-            set: { points: l.points, priceCents: l.priceCents, sourceUrl: meta.sourceUrl, seenOn: meta.seenOn },
+            set: { points: l.points, priceCents: l.priceCents, sourceUrl: meta.sourceUrl, seenOn: meta.seenOn, pullId: meta.pullId ?? null },
           })
       }
       const dates = listings.map((l) => l.checkIn).sort()
@@ -5005,7 +5074,9 @@ export class Engine {
     const read = options.read ?? readStructured
     const pulled = await pullDvcListings(window, fetchImpl)
     if (pulled.source && pulled.url) {
-      await this.stashDvcPull({ source: pulled.source.key, label: pulled.source.label, url: pulled.url, from: window.from, to: window.to, listings: pulled.listings, seenOn: this.today(), notes: pulled.notes })
+      // The page is kept as it arrived before anything read from it is (D64 (1)).
+      const pullId = pulled.body === null ? undefined : await this.landPull({ source: pulled.source.key, url: pulled.url, how: 'fetched', mediaType: mediaTypeOf(pulled.body), body: pulled.body, pulledOn: this.today() })
+      await this.stashDvcPull({ source: pulled.source.key, label: pulled.source.label, url: pulled.url, from: window.from, to: window.to, listings: pulled.listings, seenOn: this.today(), notes: pulled.notes, pullId })
       return { ok: true, count: pulled.listings.length }
     }
     const notes = [...pulled.notes]
@@ -5055,7 +5126,7 @@ export class Engine {
   async keepDvcPull(): Promise<number> {
     const pull = await this.pendingDvcPull()
     if (!pull) throw new EngineError('There is nothing waiting to be kept.')
-    const kept = await this.recordDvcListings(pull.listings, { source: pull.source, sourceUrl: pull.url, seenOn: pull.seenOn })
+    const kept = await this.recordDvcListings(pull.listings, { source: pull.source, sourceUrl: pull.url, seenOn: pull.seenOn, pullId: pull.pullId ?? null })
     await this.stashDvcPull(null)
     return kept
   }
