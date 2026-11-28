@@ -71,7 +71,20 @@ export interface TripCar {
   seats: number
 }
 
-export type TripDestination = 'wdw'
+/**
+ * Every destination Ballast knows a resort at (D64). Universal is its own
+ * phase for trips (D45 (1)): its resorts can be named, priced and compared
+ * before a trip can go there, so a trip's destination is the narrower
+ * TripDestination until Universal's park data is wired.
+ */
+export type Destination = 'wdw' | 'uor'
+
+export const DESTINATION_LABELS: Record<Destination, string> = {
+  wdw: 'Walt Disney World',
+  uor: 'Universal Orlando Resort',
+}
+
+export type TripDestination = Extract<Destination, 'wdw'>
 
 /** Where each destination is, and the clock its parks keep (D28: park hours are that clock's, never converted). */
 export const DESTINATIONS: Record<TripDestination, LocatedHome & { timezone: string }> = {

@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import {
   nightCosts,
   parseResortingsPrices,
+  priceFactsFor,
   priceDetail,
   priceWords,
   stayFromKey,
@@ -200,5 +201,35 @@ describe("a window's price", () => {
     expect(stayFromKey('all')).toEqual({ kind: 'all' })
     expect(stayFromKey('tier:value')).toEqual({ kind: 'tier', tier: 'value' })
     expect(stayFromKey('Pop Century Resort')).toEqual({ kind: 'resort', name: 'Pop Century Resort' })
+  })
+})
+
+describe('a stay matched through the resort list (D64)', () => {
+  const catalogue = {
+    resorts: [
+      { id: 'wdw-pop-century', destination: 'wdw' as const, brand: 'disney' as const, name: "Disney's Pop Century Resort", tier: 'value' as const, dvc: false },
+      { id: 'wdw-art-of-animation', destination: 'wdw' as const, brand: 'disney' as const, name: "Disney's Art of Animation Resort", tier: 'value' as const, dvc: false },
+    ],
+    aliases: [],
+  }
+  const rates = [rate('Pop Century Resort', 'month', '2027-04-01', 210), rate('Art of Animation Resort', 'month', '2027-04-01', 290), rate('tier:value', 'month', '2027-04-01', 218)]
+
+  it('meets a quote typed one way and a rate spelled another on the same nights', () => {
+    const facts = priceFactsFor('Pop Century', { rates, quotes: [quote('2027-04-02', '2027-04-03', 199, TODAY, "Disney's Pop Century Resort")] }, catalogue)
+    expect(facts.stay).toBe('resort:wdw-pop-century')
+    expect(facts.rates.map((r) => r.nightlyCents)).toEqual([210_00])
+    const costs = nightCosts({ nights: ['2027-04-02', '2027-04-05'], ...facts, today: TODAY })
+    expect(costs.map((c) => c.winner?.level)).toEqual(['typed', 'rates_month'])
+    expect(costs[0]!.winner?.cents).toBe(199_00)
+  })
+
+  it('leaves a tier and an unplaced name matching only themselves', () => {
+    expect(priceFactsFor('tier:value', { rates, quotes: [] }, catalogue).rates.map((r) => r.nightlyCents)).toEqual([218_00])
+    expect(priceFactsFor('Somewhere New', { rates, quotes: [] }, catalogue).rates).toEqual([])
+  })
+
+  it('reads the facts without changing them', () => {
+    priceFactsFor('Pop Century', { rates, quotes: [] }, catalogue)
+    expect(rates[0]!.stay).toBe('Pop Century Resort')
   })
 })

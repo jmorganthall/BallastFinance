@@ -1,0 +1,140 @@
+{
+  "baselineFile": ".archguard-baseline.json",
+  "rules": [
+    {
+      "id": "shape-outside-domain",
+      "title": "An object shape declared outside the domain model",
+      "pattern": "^\\s*(export\\s+)?(type|interface)\\s+(?!\\w*Props\\b)\\w+(<[^>]*>)?\\s*(=\\s*\\{|\\{)|z\\.(strictObject|object)\\(",
+      "include": [
+        "src/**/*.ts",
+        "src/**/*.tsx"
+      ],
+      "exclude": [
+        "src/domain/**",
+        "src/db/**",
+        "**/*.test.ts",
+        "**/__tests__/**",
+        "src/**/*.generated.ts"
+      ],
+      "fix": "Declare the entity, value object or view in src/domain (or derive it there from the schema with drizzle-zod) and import it. A screen-only shape belongs in src/domain/views."
+    },
+    {
+      "id": "escape-hatch",
+      "title": "any, as unknown as, or a suppressed type error",
+      "pattern": "\\bas any\\b|:\\s*any\\b|<any>|as unknown as|@ts-ignore|@ts-expect-error",
+      "include": [
+        "src/**/*.ts",
+        "src/**/*.tsx"
+      ],
+      "exclude": [
+        "**/*.test.ts",
+        "**/__tests__/**"
+      ],
+      "fix": "Give the value its domain type. If it comes from outside (a request, a JSON column, an API), parse it with the domain's zod schema instead of asserting."
+    },
+    {
+      "id": "cast-instead-of-parse",
+      "title": "A type assertion to a named type (trusting a shape instead of parsing it)",
+      "pattern": "[\\w)\\]]\\s+as\\s+(?!const\\b|HTML|Element|Node|Event|Record\\b|keyof\\b)[A-Z]\\w*",
+      "include": [
+        "src/**/*.ts",
+        "src/**/*.tsx"
+      ],
+      "exclude": [
+        "**/*.test.ts",
+        "**/__tests__/**",
+        "src/domain/**"
+      ],
+      "fix": "Parse at the boundary with the domain schema (Schema.parse(x)) so a wrong shape fails loudly where it enters, not three layers later.",
+      "skipLines": "^\\s*(import|export)\\s*(type\\s*)?\\{|^\\s*import\\s"
+    },
+    {
+      "id": "untyped-json-column",
+      "title": "A json/jsonb column with no declared shape",
+      "pattern": "\\bjsonb?\\(",
+      "include": [
+        "src/db/**/*.ts"
+      ],
+      "exclude": [],
+      "unlessNextLines": {
+        "lines": 2,
+        "pattern": "\\$type<"
+      },
+      "fix": "Give the column .$type<DomainShape>() and a matching zod schema in src/domain, or make the shape its own table if anything filters, joins or sums on it."
+    },
+    {
+      "id": "nullable-without-meaning",
+      "title": "A nullable column whose null has no written meaning",
+      "pattern": "^\\s*\\w+:\\s*(?!cents\\b)\\w+\\(['\"]",
+      "include": [
+        "src/db/schema.ts",
+        "src/db/schema/**/*.ts"
+      ],
+      "exclude": [],
+      "unlessNextLines": {
+        "lines": 3,
+        "pattern": "notNull\\(|primaryKey\\("
+      },
+      "unlessPrevLines": {
+        "lines": 3,
+        "pattern": "null (=|means|is)"
+      },
+      "fix": "Either add .notNull(), or write what null means in a comment just above the column, e.g. /** null means: not answered yet */. One meaning, decided once, so no screen can pick its own."
+    },
+    {
+      "id": "runtime-ddl",
+      "title": "Schema changed from application code instead of a migration",
+      "pattern": "\\b(ALTER|CREATE|DROP)\\s+(TABLE|COLUMN|TYPE|INDEX)\\b",
+      "include": [
+        "src/**/*.ts",
+        "src/**/*.tsx",
+        "scripts/**/*.ts"
+      ],
+      "exclude": [
+        "drizzle/**",
+        "**/*.test.ts",
+        "**/__tests__/**"
+      ],
+      "fix": "Change src/db/schema.ts, run npm run db:generate, and commit the migration with a decision record (docs/decisions)."
+    },
+    {
+      "id": "defensive-read-in-ui",
+      "title": "Optional chaining or ?? in a screen or component",
+      "pattern": "\\?\\.|\\?\\?",
+      "include": [
+        "src/app/**/*.tsx",
+        "src/components/**/*.tsx"
+      ],
+      "exclude": [],
+      "fix": "A screen receives a parsed domain view whose fields are present or explicitly optional. If a field can be missing, make that a state in the view type (e.g. status: 'unanswered'), not a silent fallback."
+    },
+    {
+      "id": "db-import-outside-server",
+      "title": "A screen or the domain imports the database",
+      "pattern": "from\\s+['\"](@/db|\\.\\.?/(\\.\\./)*db)(?!/schema['\"])(/|['\"])",
+      "include": [
+        "src/app/**/*.ts",
+        "src/app/**/*.tsx",
+        "src/components/**/*.tsx",
+        "src/components/**/*.ts",
+        "src/domain/**/*.ts"
+      ],
+      "exclude": [],
+      "skipLines": "^\\s*import\\s+type\\s",
+      "fix": "Screens get data from src/server (the one read path); the domain receives plain values. src/domain may import src/db/schema (declarations only, to derive its zod shapes), never the client or queries."
+    },
+    {
+      "id": "io-in-domain",
+      "title": "I/O, time or randomness inside the pure domain",
+      "pattern": "from\\s+['\"](node:|fs|path|postgres|drizzle-orm(?!/[a-z-]*zod)|next/)|\\bfetch\\(|new Date\\(\\)|Date\\.now\\(|Math\\.random\\(",
+      "include": [
+        "src/domain/**/*.ts"
+      ],
+      "exclude": [
+        "**/*.test.ts",
+        "**/__tests__/**"
+      ],
+      "fix": "Pass today, ids and fetched data in as parameters. The domain is pure so every rule has exactly one testable definition."
+    }
+  ]
+}

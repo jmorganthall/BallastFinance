@@ -37,6 +37,7 @@ import { addDays, compareDates, type CivilDate } from './dates'
 import { formatCents, type Cents } from './money'
 import { TripPlanError } from './trip-plan'
 import type { ShapedWindow, StayChoice } from './trip-shape'
+import { ANY_SOURCE, canonicalStay, type Resort, type ResortAlias } from './resort'
 
 export type CostLevel = 'typed' | 'disney_page' | 'rates_week' | 'rates_month'
 
@@ -161,6 +162,27 @@ function figuresFor(date: CivilDate, stay: string, rates: readonly LodgingRate[]
     if (rate) out.push({ level: period === 'week' ? 'rates_week' : 'rates_month', cents: rate.nightlyCents, asOf: rate.observedOn, source: rate.source })
   }
   return out
+}
+
+/**
+ * The rates and quotes that are about one stay, each re-keyed to the
+ * stay's canonical key (D64): a resort's name in any spelling the resort
+ * list can place becomes "resort:<id>", so a quote typed "Pop Century"
+ * and Disney's rate for "Pop Century Resort" price the same nights. A name
+ * the list cannot place still matches only itself, as before. The facts
+ * are not changed: this is a reading of them.
+ */
+export function priceFactsFor(
+  stay: string,
+  facts: { rates: readonly LodgingRate[]; quotes: readonly LodgingQuote[] },
+  catalogue: { resorts: readonly Resort[]; aliases: readonly ResortAlias[] },
+): { stay: string; rates: LodgingRate[]; quotes: LodgingQuote[] } {
+  const wanted = canonicalStay(stay, ANY_SOURCE, catalogue)
+  return {
+    stay: wanted,
+    rates: facts.rates.filter((r) => canonicalStay(r.stay, r.source, catalogue) === wanted).map((r) => ({ ...r, stay: wanted })),
+    quotes: facts.quotes.filter((q) => canonicalStay(q.stay, ANY_SOURCE, catalogue) === wanted).map((q) => ({ ...q, stay: wanted })),
+  }
 }
 
 /** Each night's figure by the ladder at the top of this file. */

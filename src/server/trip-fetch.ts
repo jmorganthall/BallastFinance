@@ -279,6 +279,8 @@ export async function fetchSchoolCalendarIcal(url: string, fetchImpl: typeof fet
 export interface ListingFetch extends ParsedListings {
   source: ListingSource
   url: string
+  /** The page exactly as it arrived. */
+  body: string
 }
 
 /** One broker source, one window of dates: the page read by that source's own parser. */
@@ -289,8 +291,9 @@ export async function fetchDvcListings(source: ListingSource, args: ListingSourc
     headers: { accept: 'text/html, application/json', 'user-agent': userAgent() },
   })
   if (!response.ok) throw new Error(`${source.label} answered ${response.status}`)
-  const parsed = source.parse(await response.text())
-  return { source, url, ...parsed }
+  const body = await response.text()
+  const parsed = source.parse(body)
+  return { source, url, body, ...parsed }
 }
 
 export interface ListingPullResult {
@@ -298,6 +301,8 @@ export interface ListingPullResult {
   source: ListingSource | null
   url: string | null
   listings: ParsedListings['listings']
+  /** The winning page exactly as it arrived, to be kept raw (D64 (1)); null when no source gave anything. */
+  body: string | null
   /** What each source said, in order tried, for the screen. */
   notes: string[]
 }
@@ -324,10 +329,10 @@ export async function pullDvcListings(
         continue
       }
       notes.push(`${source.label}: ${listings.length} rooms read.`)
-      return { source, url: got.url, listings, notes }
+      return { source, url: got.url, listings, body: got.body, notes }
     } catch (error) {
       notes.push(`${source.label}: ${(error as Error).message}`)
     }
   }
-  return { source: null, url: null, listings: [], notes }
+  return { source: null, url: null, listings: [], body: null, notes }
 }
