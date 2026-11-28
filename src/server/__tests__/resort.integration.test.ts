@@ -95,4 +95,19 @@ describeDb('resorts and raw pulls', () => {
     await engine.setBlackoutDates([])
     await engine.setTripShape(DEFAULT_TRIP_SHAPE)
   })
+
+  it('predicts a week Disney has not priced from its rate a year earlier, and says it is predicted (D64 (6))', async () => {
+    // Pop Century's November a year back; Disney has published nothing for November 2026 in this database.
+    await engine.recordLodgingRates([
+      { source: 'resortings', stay: 'Pop Century Resort', period: 'month', periodStart: '2025-11-01', nightlyCents: 170_00, observedOn: '2025-09-01', fetchedOn: '2025-09-15', sourceUrl: 'https://resortings.com/' },
+    ])
+    await engine.setTripShape({ ...DEFAULT_TRIP_SHAPE, parkDaysMin: 3, parkDaysMax: 3, stay: { kind: 'resort', name: "Disney's Pop Century" } })
+    await engine.setBlackoutDates([{ from: '2026-12-01', to: '2027-12-31', label: 'Not then' }])
+    const r = await engine.explore()
+    const lodging = r.top[0]!.price!.lodging
+    expect(lodging).toMatchObject({ certainty: 'predicted', weakest: 'predicted', perNightCents: 170_00 })
+    expect(lodging.bases[0]).toMatch(/Disney's rate for the month a year earlier, \$170\.00 a night/)
+    await engine.setBlackoutDates([])
+    await engine.setTripShape(DEFAULT_TRIP_SHAPE)
+  })
 })

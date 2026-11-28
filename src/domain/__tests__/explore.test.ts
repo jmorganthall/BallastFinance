@@ -17,7 +17,7 @@ const level = (date: string, l: number): CrowdLevel => ({ destination: 'wdw', da
 /** A known price, for the ranking only. */
 const cost = (cents: number): WindowPrice => ({
   cents,
-  lodging: { totalCents: cents, perNightCents: cents, nightsKnown: 1, nights: 1, weakest: 'typed', stale: false, disagrees: false, oldestAsOf: TODAY },
+  lodging: { totalCents: cents, perNightCents: cents, nightsKnown: 1, nights: 1, weakest: 'typed', certainty: 'definite', bases: [], stale: false, disagrees: false, oldestAsOf: TODAY },
   roadNights: 0,
   roadNightCents: 0,
 })

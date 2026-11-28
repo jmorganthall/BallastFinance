@@ -172,11 +172,11 @@ export function ExploreSection({
       <p className="mt-2 text-xs leading-snug text-[var(--color-ink-soft)]">
         From {shortDate(result.horizonFrom)} to {shortDate(result.horizonTo)}, {result.horizonTo.slice(0, 4)}: {result.considered} ways to go looked at.{' '}
         {judged} Cheap is what it costs to sleep at {stayWords(result.stay)}, night by night from the surest price we have;
-        a week with no price yet is neither cheap nor dear. The strip above shades each day by how good a trip leaving it is, and the numbers on the month
+        a price marked predicted is worked out from Disney's rate a year earlier, and a week with no price yet is neither cheap nor dear. The strip above shades each day by how good a trip leaving it is, and the numbers on the month
         are this list.
         {result.excludedByBlackout > 0 ? ` ${result.excludedByBlackout} left out for days we cannot go.` : ''}
         {result.daysOffKnown ? '' : ' No school calendar yet, so every weekday counts as school; add one below.'}
-        {result.top.some((w) => w.price?.lodging.weakest === 'rates_week' || w.price?.lodging.weakest === 'rates_month') ? (
+        {result.top.some((w) => w.price?.lodging.certainty === 'list' || w.price?.lodging.certainty === 'predicted') ? (
           <>
             {' '}
             <a href={RESORTINGS_CREDIT.url} className="underline">

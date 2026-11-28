@@ -8,7 +8,10 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  certaintyOf,
   nightCosts,
+  quotesAgainstList,
+  yearOnYearChange,
   parseResortingsPrices,
   priceFactsFor,
   priceDetail,
@@ -188,7 +191,7 @@ describe("a window's price", () => {
     expect(p.cents).toBe(3 * 363_00 + 150_00)
     expect(priceWords(p)).toBe('about $363.00 a night')
     expect(priceDetail(p)).toBe(
-      "3 nights at the resort, the least sure from Disney's rate for the month, Sep 2026; Disney's average a night for a midweek stay, before tax; 1 night on the way at $150.00; $1,239.00 in all to sleep.",
+      "Disney list price: 3 nights at the resort, the least sure from Disney's rate for the month, Sep 2026; Disney's average a night for a midweek stay, before tax; 1 night on the way at $150.00; $1,239.00 in all to sleep.",
     )
     const part = windowPrice({ resortNights: ['2027-03-31', '2027-04-01'], roadNights: 0 }, args)
     expect(part.cents).toBeNull()
@@ -231,5 +234,81 @@ describe('a stay matched through the resort list (D64)', () => {
   it('reads the facts without changing them', () => {
     priceFactsFor('Pop Century', { rates, quotes: [] }, catalogue)
     expect(rates[0]!.stay).toBe('Pop Century Resort')
+  })
+})
+
+describe('how sure a price is (D64 (6))', () => {
+  const stay = 'tier:moderate'
+  // Three months priced in both years, each 10% up: the rates themselves show the change.
+  const twoYears = [
+    rate(stay, 'month', '2026-03-01', 300, '2025-09-01'),
+    rate(stay, 'month', '2026-04-01', 300, '2025-09-01'),
+    rate(stay, 'month', '2026-05-01', 300, '2025-09-01'),
+    rate(stay, 'month', '2027-03-01', 330),
+    rate(stay, 'month', '2027-04-01', 330),
+    rate(stay, 'month', '2027-05-01', 330),
+  ]
+
+  it('names each level in four words, and only a quote is definite', () => {
+    expect(['typed', 'disney_page', 'rates_week', 'rates_month', 'predicted', null].map((l) => certaintyOf(l as never))).toEqual([
+      'definite',
+      'definite',
+      'list',
+      'list',
+      'predicted',
+      'unknown',
+    ])
+  })
+
+  it('predicts a night Disney has not priced from its rate a year earlier, and assumes no rise it cannot measure', () => {
+    const [night] = nightCosts({ nights: ['2028-03-10'], stay, rates: [rate(stay, 'month', '2027-03-01', 330)], quotes: [], today: TODAY })
+    expect(night!.winner).toMatchObject({ level: 'predicted', cents: 330_00, asOf: '2026-09-01' })
+    expect(night!.winner!.basis).toMatch(/no year-on-year change/)
+  })
+
+  it('moves a prediction by the median year-on-year change once three months are priced in both years', () => {
+    expect(yearOnYearChange(stay, twoYears)).toEqual({ factor: 1.1, months: 3 })
+    expect(yearOnYearChange(stay, twoYears.slice(1, 5))).toBeNull()
+    const [night] = nightCosts({ nights: ['2028-03-10'], stay, rates: twoYears, quotes: [], today: TODAY })
+    expect(night!.winner).toMatchObject({ level: 'predicted', cents: 363_00 })
+    expect(night!.winner!.basis).toMatch(/10% up, the median change over 3 months/)
+  })
+
+  it('leans a prediction by how our quotes ran against Disney\'s rate, without the quote becoming one', () => {
+    const quotes = [quote('2027-03-03', '2027-03-04', 297)]
+    expect(quotesAgainstList(stay, twoYears, quotes)).toEqual({ factor: 0.9, nights: 2 })
+    const [quoted, predicted] = nightCosts({ nights: ['2027-03-03', '2028-03-10'], stay, rates: twoYears, quotes, today: TODAY })
+    expect(quoted!.winner).toMatchObject({ level: 'typed', cents: 297_00 })
+    expect(predicted!.winner).toMatchObject({ level: 'predicted', cents: 326_70 })
+    expect(predicted!.winner!.basis).toMatch(/then 10% down, where our quotes ran against Disney's rate over 2 nights/)
+  })
+
+  it('never predicts a night Disney has priced, and prefers the week a year earlier to the month', () => {
+    const rates = [rate(stay, 'month', '2027-03-01', 330), rate(stay, 'week', '2027-03-08', 350), rate(stay, 'month', '2028-03-01', 340)]
+    expect(nightCosts({ nights: ['2028-03-10'], stay, rates, quotes: [], today: TODAY })[0]!.winner).toMatchObject({ level: 'rates_month', cents: 340_00 })
+    const [night] = nightCosts({ nights: ['2028-03-08'], stay, rates: rates.slice(0, 2), quotes: [], today: TODAY })
+    // 52 weeks before Wed Mar 8 2028 is Wed Mar 10 2027, inside the week that starts Mar 8.
+    expect(night!.winner).toMatchObject({ level: 'predicted', cents: 350_00 })
+  })
+
+  it('shows a quote against the prediction when Disney has published nothing for the night', () => {
+    const [night] = nightCosts({ nights: ['2028-03-10'], stay, rates: [rate(stay, 'month', '2027-03-01', 330)], quotes: [quote('2028-03-10', '2028-03-10', 200)], today: TODAY })
+    expect(night!.winner!.level).toBe('typed')
+    expect(night!.disagrees).toMatchObject({ level: 'predicted', cents: 330_00 })
+  })
+
+  it('gives a window the certainty of its least sure night, and unknown until every night is priced', () => {
+    const rates = [rate(stay, 'month', '2027-03-01', 330)]
+    const sure = (nights: string[], quotes = [] as LodgingQuote[]) => windowLodging(nightCosts({ nights, stay, rates, quotes, today: TODAY })).certainty
+    expect(sure(['2027-03-03'], [quote('2027-03-03', '2027-03-03', 300)])).toBe('definite')
+    expect(sure(['2027-03-03', '2027-03-04'], [quote('2027-03-03', '2027-03-03', 300)])).toBe('list')
+    expect(sure(['2027-03-31', '2028-03-01'])).toBe('predicted')
+    expect(sure(['2027-03-31', '2027-04-01'])).toBe('unknown')
+  })
+
+  it('says a predicted price is predicted, wherever it shows', () => {
+    const price = windowPrice({ resortNights: ['2028-03-10', '2028-03-11'], roadNights: 0 }, { stay, rates: [rate(stay, 'month', '2027-03-01', 330)], quotes: [], today: TODAY, roadNightCents: 0 })
+    expect(priceWords(price)).toBe('about $330.00 a night, predicted')
+    expect(priceDetail(price)).toMatch(/^Predicted: 2 nights at the resort, the least sure from a prediction from Disney's rate a year earlier, Sep 2026; .*Disney's rate for the month a year earlier, \$330\.00 a night/)
   })
 })
